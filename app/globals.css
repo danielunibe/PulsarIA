@@ -1,0 +1,207 @@
+@import "tailwindcss";
+
+@theme inline {
+  --animate-aurora: aurora 18s ease-in-out infinite alternate;
+  --animate-bounce-slow: bounce-slow 2s ease-in-out infinite;
+}
+
+@keyframes bounce-slow {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes aurora {
+  0% {
+    background-position: 0% 50%, 100% 50%, 50% 0%, 0% 100%, 100% 100%;
+  }
+
+  50% {
+    background-position: 100% 0%, 0% 100%, 50% 50%, 100% 50%, 0% 0%;
+  }
+
+  100% {
+    background-position: 50% 100%, 50% 0%, 0% 50%, 50% 50%, 100% 0%;
+  }
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — Pulsar Eventide
+   Fuente única de verdad para tokens de diseño.
+   ================================================================ */
+:root {
+  /* ── Superficies (Premium Dark + Glassmorphism) ──────────── */
+  --surface-deep: rgba(0, 0, 0, 0);
+  --surface-base: rgba(0, 0, 0, 0);
+  --surface-raised: rgba(24, 25, 31, 0.4);
+  --surface-float: rgba(24, 25, 31, 0.65);
+  --surface-sidebar: rgba(0, 0, 0, 0);
+  --surface-border: rgba(38, 40, 51, 0.4);
+  --surface-card: linear-gradient(145deg, rgba(28, 29, 36, 0.45), rgba(20, 21, 26, 0.35));
+  --surface-input: rgba(30, 32, 41, 0.5);
+
+  /* ── Acento de Marca TikTok ──────────────────────────────── */
+  --accent-primary: #fe2c55;
+  --accent-cyan: #25f4ee;
+  --accent-success: #10b981;
+  --accent-primary-8: rgba(254, 44, 85, 0.08);
+  --accent-primary-12: rgba(254, 44, 85, 0.12);
+  --accent-primary-20: rgba(254, 44, 85, 0.20);
+
+  /* ── Escala Tipográfica ────────────────────────────────────── */
+  --text-micro: 10px;
+  --text-sm: 11px;
+  --text-base: 13px;
+  --text-md: 15px;
+  --text-lg: 17px;
+
+  /* ── Opacidades Semánticas ───────────────────────────────── */
+  --text-ghost: rgba(255, 255, 255, 0.20);
+  --text-muted: rgba(255, 255, 255, 0.45);
+  --text-default: rgba(255, 255, 255, 0.80);
+  --text-strong: rgba(255, 255, 255, 0.95);
+
+  /* ── Border Radius ─────────────────────────────────────────── */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  /* ── Espaciado (escala multiplicativa de 4) ──────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* ── Sistema de Sombras Unificado ────────────────────────── */
+  --shadow-nm-inset: inset 2px 2px 5px rgba(0, 0, 0, 0.8), inset -1px -1px 2px rgba(255, 255, 255, 0.02);
+  --shadow-nm-raised: 3px 3px 8px rgba(0, 0, 0, 0.6), -2px -2px 5px rgba(255, 255, 255, 0.02), inset 1px 1px 1px rgba(255, 255, 255, 0.06);
+  --shadow-nm-hover: 3px 3px 8px rgba(0, 0, 0, 0.6), -2px -2px 5px rgba(255, 255, 255, 0.02), 0 0 15px rgba(254, 44, 85, 0.3);
+  --shadow-card: 0 20px 50px rgba(0, 0, 0, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.03);
+  --shadow-glow-pink: 0 0 16px rgba(254, 44, 85, 0.35);
+  --shadow-glow-cyan: 0 0 16px rgba(37, 244, 238, 0.25);
+
+  /* Borde de luz rebotada para dar volumen en fondos oscuros */
+  --border-rim: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  --border-default: 1px solid var(--surface-border);
+  --border-subtle: 1px solid rgba(255, 255, 255, 0.04);
+  --border-accent: 1px solid rgba(254, 44, 85, 0.35);
+}
+
+/* El body responde al tema activo */
+body {
+  background-color: transparent;
+  /* Changed to transparent so Aurora can be seen underneath */
+  color: var(--text-default);
+  transition: background-color 0.35s ease, color 0.35s ease;
+  overflow: auto;
+}
+
+/* ================================================================
+   Scrollbar — ultra thin, auto-fade
+   ================================================================ */
+::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Queue section scrollbar — invisible but functional */
+.queue-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.queue-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ================================================================
+   Selection & Caret
+   ================================================================ */
+::selection {
+  background: rgba(249, 42, 78, 0.3);
+  color: white;
+}
+
+input,
+textarea {
+  caret-color: #f92a4e;
+}
+
+/* ================================================================
+   Glitch Effects for Video Slots
+   ================================================================ */
+.group:hover .glitch-text {
+  color: #ffffff;
+  text-shadow: 2px 0px 0px #fe2c55, -2px 0px 0px #25f4ee;
+}
+
+.group:hover .glitch-svg {
+  filter: drop-shadow(2px 0px 0px #fe2c55) drop-shadow(-2px 0px 0px #25f4ee);
+}
+
+/* ================================================================
+   Texture Utilities
+   ================================================================ */
+
+/* Paper / Opaque Plastic Texture (used by Sidebar) */
+.texture-paper {
+  position: relative;
+}
+
+.texture-paper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.25;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  border-radius: inherit;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* Global noise film grain */
+.noise-overlay::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.018;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ================================================================
+   UI Mate Translucido — Video Grid Dynamics
+   ================================================================ */
+
+:root {
+  --tt-cyan-30: rgba(37, 244, 238, 0.15);
+  --tt-pink-30: rgba(254, 44, 85, 0.15);
+  --paper-texture-matte: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+}
+
+/* Suavizado de enfoque en grupo removido por problemas de visibilidad en cards activas */
