@@ -1,0 +1,5 @@
+faster-whisper
+ctranslate2
+torch
+yt-dlp
+ffmpeg-python

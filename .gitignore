@@ -1,0 +1,59 @@
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Node / Next
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Rust / Tauri
+target/
+target-*/
+src-tauri/target/
+src-tauri/target-*/
+src-tauri/target_cli/
+src-tauri/target_iso/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Logs
+*.log
+engine_boot*.log
+engine_direct*.log
+tauri_log*.txt
+server_log.txt
+lint_output.txt
+
+# Temporary / cache
+.cache/
+.tmp/
+tmp/
+*.tmp
+
+# Generated reports
+battery_report.html
+sysinfo.json
+
+# Migration staging
+_migration_staging_pulsar/
+
+# Backups
+types_backup_*/
+
+# Large generated data
+data/*.hnsw
+src-tauri/data/*.hnsw
+
+# Do not version copied binaries/models from rescue source
+bin/
+models/

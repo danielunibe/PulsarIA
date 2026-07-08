@@ -1,0 +1,53 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "API Backend Latency (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(pipeline_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95 Latency" }]
+    },
+    {
+      "title": "Queue Depth",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "queue_depth", "legendFormat": "Depth" }]
+    },
+    {
+      "title": "Vector Shard Query Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "rate(vector_shard_query_latency_seconds_sum[1m]) / rate(vector_shard_query_latency_seconds_count[1m])", "legendFormat": "Avg Latency" }]
+    },
+    {
+      "title": "Semantic Cache Hit Ratio",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "targets": [{
+        "expr": "sum(rate(semantic_cache_hits_total[5m])) / (sum(rate(semantic_cache_hits_total[5m])) + sum(rate(semantic_cache_misses_total[5m])))",
+        "legendFormat": "Hit Ratio"
+      }]
+    },
+    {
+       "title": "Circuit Breaker State",
+       "type": "stat",
+       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+       "targets": [{ "expr": "circuit_breaker_activations_total", "legendFormat": "Circuit Trips" }]
+    },
+    {
+      "title": "Worker Utilization",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "targets": [{ "expr": "worker_utilization", "legendFormat": "Threads Active %" }]
+    }
+  ],
+  "title": "Pulsar Eventide Production Semantic Engine",
+  "uid": "pulsar_aaa_dashboard_v1",
+  "version": 1
+}

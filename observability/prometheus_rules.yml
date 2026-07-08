@@ -1,0 +1,154 @@
+groups:
+  - name: pulsar.critical
+    interval: 30s
+    rules:
+      # ─── API Latencia ──────────────────────────────────────────────────
+      - alert: APIHighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job="pulsar-engine"}[5m])
+          ) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "p95 latencia > 500ms"
+          description: "p95={{ $value | humanizeDuration }}. Revisar queue_depth y circuit_breaker_state."
+          runbook: "https://github.com/your-org/pulsar/blob/main/docs/runbook.md#apihighlatency"
+
+      - alert: APIHighLatencyP95Warning
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job="pulsar-engine"}[5m])
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latencia > 200ms (warning)"
+          description: "p95={{ $value | humanizeDuration }}. Monitorear si sigue subiendo."
+
+      # ─── Error Rate ────────────────────────────────────────────────────
+      - alert: HighErrorRate
+        expr: |
+          rate(http_requests_total{job="pulsar-engine", status=~"5.."}[5m])
+          / rate(http_requests_total{job="pulsar-engine"}[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate > 1%"
+          description: "Error rate={{ $value | humanizePercentage }} en los últimos 5m."
+
+      # ─── Queue Saturation ──────────────────────────────────────────────
+      - alert: QueueNearSaturation
+        expr: queue_depth_gauge / queue_high_watermark_gauge > 0.85
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Queue depth > 85% del high watermark"
+          description: "depth={{ $value | humanize }}. Riesgo de backpressure inminente."
+
+      - alert: BackpressureActive
+        expr: queue_backpressure_enabled > 0
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backpressure activo — ingest pausado"
+          description: "El sistema está rechazando nuevos trabajos por saturación."
+
+      # ─── Circuit Breaker ───────────────────────────────────────────────
+      - alert: CircuitBreakerOpen
+        expr: circuit_breaker_state == 2
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit Breaker ABIERTO en Whisper worker"
+          description: "Transcripción degradada. Revisar Python worker logs."
+
+      # ─── Memory ───────────────────────────────────────────────────────
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job="pulsar-engine"} > 4e9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Uso de memoria > 4GB"
+          description: "RSS={{ $value | humanize1024 }}. Considerar PQ compression o escalar."
+
+  - name: pulsar.quality
+    interval: 60s
+    rules:
+      - alert: RecallBelowThreshold
+        expr: retrieval_recall_at_10 < 0.75
+        for: 10m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "recall@10 < 0.75 — calidad degradada"
+          description: "recall@10={{ $value }}. Revisar embeddings y configuración del reranker."
+
+      - alert: CacheThrashRateHigh
+        expr: cache_thrash_rate > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cache thrash rate alto > 30%"
+          description: "Posible cache poisoning o queries degeneradas."
+
+      - alert: ShardImbalanceCritical
+        expr: shard_skew_ratio > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          team: infra
+        annotations:
+          summary: "Shard skew ratio > 50%"
+          description: "Un shard recibe demasiada carga. Ejecutar rebalanceo."
+
+  - name: pulsar.slos
+    interval: 60s
+    rules:
+      - alert: SLOErrorBudgetBurning
+        expr: |
+          (
+            1 - (
+              rate(http_requests_total{job="pulsar-engine", status!~"5.."}[1h])
+              / rate(http_requests_total{job="pulsar-engine"}[1h])
+            )
+          ) / (1 - 0.995) > 14.4
+        for: 5m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "SLO error budget consumiéndose 14x más rápido"
+          description: "Al ritmo actual, el error budget mensual se agotará en < 2 días."
+          runbook: "https://github.com/your-org/pulsar/blob/main/docs/runbook.md"
+
+  - name: pulsar.distributed
+    interval: 30s
+    rules:
+      - alert: DistributedNodeDown
+        expr: distributed_nodes_active < distributed_nodes_total
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Nodo distribuido caído"
+          description: "active={{ $value }} de total."
+
+      - alert: FullFallbackTriggered
+        expr: rate(distributed_full_fallback_total[5m]) > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fallback completo al executor local activado"
+          description: "Todos los nodos remotos fallaron. Modo degradado activo."
