@@ -4,6 +4,8 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+    // Static export para empaquetado Tauri (tauri.conf.json -> frontendDist: ../out)
+    output: 'export',
     reactStrictMode: true,
     eslint: {
         ignoreDuringBuilds: true,
@@ -12,6 +14,8 @@ const nextConfig: NextConfig = {
         ignoreBuildErrors: false,
     },
     images: {
+        // Requerido por output: 'export' (deshabilita el optimizador de imagenes en servidor)
+        unoptimized: true,
         remotePatterns: [
             {
                 protocol: 'https',

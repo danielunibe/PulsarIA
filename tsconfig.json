@@ -36,6 +36,14 @@
         ".next/types/**/*.ts"
     ],
     "exclude": [
-        "node_modules"
+        "node_modules",
+        "_migration_staging_pulsar",
+        "types_backup_2026-07-07",
+        "out",
+        ".next",
+        "sdk",
+        "src-tauri",
+        "scripts",
+        "python-workers"
     ]
 }
