@@ -1,7 +1,18 @@
+# Local editor
+.vscode/
+
+# Runtime data
+data/
+_runtime_backups/
+
+# Local generated project status
+UNOVA_PROJECT_STATUS.md
+
 # Environment / secrets
 .env
 .env.local
 .env.*.local
+src-tauri/.env
 
 # Node / Next
 node_modules/
