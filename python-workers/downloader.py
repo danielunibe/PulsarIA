@@ -1,6 +1,8 @@
 import os
+import sys
 import shutil
 import subprocess
+import importlib.util
 from pathlib import Path
 
 # ========================================================================
@@ -61,16 +63,34 @@ def resolve_yt_dlp_path() -> str:
     )
 
 
+def build_yt_dlp_base_cmd() -> list:
+    """
+    Construye el prefijo de comando para invocar yt-dlp de la forma más robusta.
+
+    Preferencia:
+    1. Invocación como módulo con el intérprete actual: `python -m yt_dlp`.
+       Es la forma más fiable en Windows cuando la ruta del proyecto contiene
+       espacios, porque evita el launcher .exe generado por pip (que puede
+       fallar silenciosamente al resolver el shebang embebido).
+    2. Fallback: ejecutable yt-dlp resuelto por ruta (resolve_yt_dlp_path()).
+
+    Devuelve una lista de tokens lista para anteponer a los argumentos.
+    """
+    # 1. Si el módulo yt_dlp es importable con el intérprete actual, usarlo.
+    if importlib.util.find_spec("yt_dlp") is not None:
+        return [sys.executable, "-m", "yt_dlp"]
+
+    # 2. Fallback al ejecutable resuelto por ruta.
+    return [resolve_yt_dlp_path()]
+
+
 def download_video(url: str, job_id: int, base_dir: Path) -> str:
     """Extrae metadatos y descarga el mejor MP4. Retorna la ruta."""
     
     output_path = base_dir / str(job_id) / "video.mp4"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    yt_dlp_exe = resolve_yt_dlp_path()
-
-    cmd = [
-        str(yt_dlp_exe),
+    cmd = build_yt_dlp_base_cmd() + [
         "--quiet",
         "--no-warnings",
         "-S", "ext:mp4:m4a",
