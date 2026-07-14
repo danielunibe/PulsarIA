@@ -1,1 +1,1 @@
-{}
+{"main":{"identifier":"main","description":"Pulsar Eventide — Capabilities principales para la app de escritorio","local":true,"windows":["main"],"permissions":["core:default","core:event:allow-listen","core:event:allow-unlisten","core:event:allow-emit","core:window:allow-start-dragging","shell:allow-open"]}}
