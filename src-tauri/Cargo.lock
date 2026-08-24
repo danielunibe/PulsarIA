@@ -449,8 +449,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -3318,6 +3320,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulsar-eventide"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "bincode",
+ "chrono",
+ "dotenvy",
+ "hnsw",
+ "jsonwebtoken",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "ndarray 0.15.6",
+ "num_cpus",
+ "ort",
+ "rand 0.10.0",
+ "rand_core 0.6.4",
+ "rand_pcg 0.3.1",
+ "redis",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde-big-array",
+ "serde_json",
+ "sha2",
+ "smallvec",
+ "space",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-shell",
+ "tokenizers",
+ "tokio",
+ "tokio-cron-scheduler",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "quanta"
 version = "0.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4945,44 +4986,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "tiktok-processor"
-version = "0.0.0"
-dependencies = [
- "axum",
- "bincode",
- "dotenvy",
- "hnsw",
- "jsonwebtoken",
- "metrics",
- "metrics-exporter-prometheus",
- "ndarray 0.15.6",
- "num_cpus",
- "ort",
- "rand 0.10.0",
- "rand_core 0.6.4",
- "rand_pcg 0.3.1",
- "redis",
- "reqwest",
- "rusqlite",
- "serde",
- "serde-big-array",
- "serde_json",
- "sha2",
- "smallvec",
- "space",
- "tauri",
- "tauri-build",
- "tauri-plugin-shell",
- "tokenizers",
- "tokio",
- "tokio-cron-scheduler",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

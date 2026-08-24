@@ -1,4 +1,4 @@
-use axum::{
+﻿use axum::{
     extract::{State, Json},
     http::{StatusCode, HeaderValue, Method},
     routing::{get, post},
@@ -122,6 +122,49 @@ async fn health_handler() -> Json<HealthResponse> {
     })
 }
 
+async fn get_julia_pending_handler(
+    State(state): State<ApiState>,
+) -> Result<Json<Vec<crate::domain::models::JobRecord>>, (StatusCode, String)> {
+    let conn = state.job_repo.get_connection()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let conn = conn.lock().unwrap();
+    let db_jobs = crate::db::get_julia_ready_jobs(&conn)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut jobs = Vec::new();
+    for j in db_jobs {
+        jobs.push(crate::domain::models::JobRecord {
+            id: j.id,
+            url: j.url,
+            status: j.status,
+            progress: j.progress,
+            created_at: j.created_at,
+            title: j.title,
+            author: j.author,
+            thumbnail: j.thumbnail,
+            duration: j.duration,
+            video_path: j.video_path,
+        });
+    }
+    Ok(Json(jobs))
+}
+
+#[derive(Deserialize)]
+pub struct JuliaAckRequest {
+    pub job_id: i64,
+}
+
+async fn julia_ack_handler(
+    State(state): State<ApiState>,
+    Json(payload): Json<JuliaAckRequest>,
+) -> Result<Json<()>, (StatusCode, String)> {
+    let conn = state.job_repo.get_connection()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let conn = conn.lock().unwrap();
+    crate::db::mark_julia_exported(&conn, payload.job_id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(()))
+}
+
 pub async fn start_api_server(port: u16, state: ApiState) {
     // Configurar CORS para permitir requests desde el frontend Next.js (localhost:3000)
     let cors = CorsLayer::new()
@@ -143,7 +186,9 @@ pub async fn start_api_server(port: u16, state: ApiState) {
         .layer(middleware::from_fn_with_state(state.security.clone(), crate::api::middleware::security::jwt_rate_limit_middleware))
         // Unauthenticated bypass
         .route("/api/v1/health", get(health_handler))
-        // CORS layer — permite al frontend (3000) hablar con el backend (8080)
+        .route("/api/v1/julia/pending", get(get_julia_pending_handler))
+        .route("/api/v1/julia/ack", post(julia_ack_handler))
+        // CORS layer - permite al frontend (3000) hablar con el backend (8080)
         .layer(cors)
         .with_state(state);
 

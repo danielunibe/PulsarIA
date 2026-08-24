@@ -1,24 +1,53 @@
 import json
 import sys
+from typing import Optional, Dict, Any, List
 
 # ========================================================================
-# EVENTS IPC: Canal de comunicación con el puente Rust (PythonRunner)
+# EVENTS IPC: Canal de comunicación con el puente Rust
 # Imprime un JSON-Line al STDOUT forzando un flush inmediato para evitar 
 # el buffering pasivo del OS. 
+# Compatible tanto con queue.rs (ProgressEvent) como con python_runner.rs (WorkerEvent).
 # ========================================================================
 
-def emit_event(name: str, message: str = None) -> None:
+def emit_event(
+    name: str, 
+    job_id: Optional[int] = None,
+    step: Optional[str] = None,
+    progress: int = 0,
+    metadata: Optional[Dict[str, Any]] = None,
+    message: Optional[str] = None,
+    text: Optional[str] = None,
+    segments: Optional[List[Dict[str, Any]]] = None
+) -> None:
     """Emite un evento estandarizado asimilable por Rust vía STDOUT."""
-    payload = {"event": name}
-    if message:
+    payload: Dict[str, Any] = {
+        "event": name,
+        "step": step or name,
+        "progress": progress
+    }
+    
+    if job_id is not None:
+        payload["job"] = job_id
+        payload["job_id"] = job_id
+    if metadata is not None:
+        payload["metadata"] = metadata
+    if message is not None:
         payload["message"] = str(message)
+    if text is not None:
+        payload["text"] = text
+    if segments is not None:
+        payload["segments"] = segments
     
     print(json.dumps(payload), flush=True)
 
 
-def emit_error(msg: str) -> None:
+def emit_error(msg: str, job_id: Optional[int] = None) -> None:
     """Emite un evento de error crítico obligando al Runner a reportar DLQ/Retry."""
-    emit_event("error", message=msg)
-    # También forzamos el log al stderr pasivo por si se requiere debugging avanzado
+    emit_event(
+        name="error", 
+        job_id=job_id, 
+        step="error", 
+        progress=0, 
+        message=msg
+    )
     print(f"CRITICAL ERROR: {msg}", file=sys.stderr, flush=True)
-

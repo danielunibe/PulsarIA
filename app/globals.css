@@ -38,12 +38,12 @@
    ================================================================ */
 :root {
   /* ── Superficies (Premium Dark + Glassmorphism) ──────────── */
-  --surface-deep: rgba(0, 0, 0, 0);
-  --surface-base: rgba(0, 0, 0, 0);
-  --surface-raised: rgba(24, 25, 31, 0.4);
-  --surface-float: rgba(24, 25, 31, 0.65);
-  --surface-sidebar: rgba(0, 0, 0, 0);
-  --surface-border: rgba(38, 40, 51, 0.4);
+  --surface-deep: #07080b;
+  --surface-base: #0a0b0f;
+  --surface-raised: rgba(24, 25, 31, 0.7);
+  --surface-float: rgba(24, 25, 31, 0.85);
+  --surface-sidebar: #0e1017;
+  --surface-border: rgba(255, 255, 255, 0.12);
   --surface-card: linear-gradient(145deg, rgba(28, 29, 36, 0.45), rgba(20, 21, 26, 0.35));
   --surface-input: rgba(30, 32, 41, 0.5);
 

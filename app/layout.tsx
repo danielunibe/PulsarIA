@@ -7,21 +7,23 @@ import { Toaster } from 'sonner';
 const inter = Inter({
     subsets: ['latin'],
     variable: '--font-sans',
+    display: 'swap',
 });
 
 const spaceGrotesk = Space_Grotesk({
     subsets: ['latin'],
     variable: '--font-display',
+    display: 'swap',
 });
 
 export const metadata: Metadata = {
-    title: 'Pulsar TikTok Downloader',
-    description: 'Download and manage TikTok videos.',
+    title: 'Pulsar Eventide - Video AI Engine',
+    description: 'Motor de análisis y consulta semántica audiovisual.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
-        <html lang="en" className={`${inter.variable} ${spaceGrotesk.variable}`}>
+        <html lang="es" className={`${inter.variable} ${spaceGrotesk.variable}`}>
             <body className="font-sans antialiased" suppressHydrationWarning>
                 <SettingsProvider>
                     {children}

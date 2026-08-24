@@ -1,4 +1,4 @@
-use crate::domain::ports::JobRepository;
+﻿use crate::domain::ports::JobRepository;
 use crate::domain::models::JobRecord;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
@@ -53,7 +53,11 @@ impl JobRepository for SqliteRepo {
     fn update_media(&self, job_id: i64, title: &str, uploader: &str, duration: i32) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         crate::db::insert_or_update_media_metadata(
-            &conn, job_id, title, uploader, "", duration, "", "", "", ""
+            &conn, job_id, title, uploader, "", duration, "", "", "", "", ""
         ).map_err(|e| e.to_string())
+    }
+
+    fn get_connection(&self) -> Result<std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>, String> {
+        Ok(self.conn.clone())
     }
 }

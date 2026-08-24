@@ -7,9 +7,12 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 // formatos habilitados y directorio de salida.
 // ============================================================
 
+export type AppTheme = 'carbon' | 'chromatic' | 'aurora' | 'oled' | 'cyberpunk';
+
 export interface SystemSettings {
     formats: string[];
     folder: string;
+    theme: AppTheme;
 }
 
 interface SettingsContextValue {
@@ -19,6 +22,7 @@ interface SettingsContextValue {
 
 const defaultSettings: SystemSettings = {
     formats: ['mp4', 'mp3', 'txt'],
+    theme: 'carbon',
     folder: typeof window !== 'undefined' && navigator.platform.includes('Win')
         ? `C:\\Users\\${(navigator as any)?.userAgentData?.platform || 'User'}\\Downloads\\Pulsar`
         : '~/Downloads/Pulsar',

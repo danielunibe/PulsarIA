@@ -1,8 +1,8 @@
-use super::models::JobRecord;
+﻿use super::models::JobRecord;
 
 // ========================================================================
-// DOMAIN PORTS: Interfaces para Inversión de Control
-// Definen QUÉ necesita el sistema sin acoplar CÓMO se hace.
+// DOMAIN PORTS: Interfaces para Inversion de Control
+// Definen QUE necesita el sistema sin acoplar COMO se hace.
 // ========================================================================
 
 pub trait JobRepository: Send + Sync {
@@ -10,8 +10,9 @@ pub trait JobRepository: Send + Sync {
     fn get_all_jobs(&self) -> Result<Vec<JobRecord>, String>;
     fn update_status(&self, id: i64, status: &str, progress: i32) -> Result<(), String>;
     
-    // Simplificado para la demostración
+    // Simplificado para la demostracion
     fn update_media(&self, job_id: i64, title: &str, uploader: &str, duration: i32) -> Result<(), String>;
+    fn get_connection(&self) -> Result<std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>, String>;
 }
 
 pub trait EmbeddingEngine: Send + Sync {

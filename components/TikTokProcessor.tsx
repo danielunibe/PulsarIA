@@ -23,12 +23,19 @@ const MILESTONES = [
     }
 ];
 
+const PHASES = [
+    { key: 'downloading', label: 'Descarga', color: '#25f4ee' },
+    { key: 'extracting_audio', label: 'Audio', color: '#f59e0b' },
+    { key: 'transcribing', label: 'Transcripción', color: '#8a5cff' },
+    { key: 'complete', label: 'Indexado', color: '#10b981' },
+];
+
 export interface TikTokProcessorProps {
     title?: string;
     author?: string;
     duration?: string;
     thumbnailUrl?: string;
-    currentStepId?: 'MP4' | 'MP3' | 'TXT';
+    currentStepId?: 'MP4' | 'MP3' | 'TXT' | 'complete';
     stepProgress?: number;
     className?: string;
 }
@@ -48,18 +55,19 @@ export const TikTokProcessor = React.memo(function TikTokProcessor({
 
     return (
         <motion.div
-            className={`w-full relative rounded-[24px] group font-sans ${className}`}
+            className={`w-full relative rounded-[20px] group font-sans ${className}`}
             style={{
-                border: '5px solid rgba(255, 255, 255, 0.1)',
-                boxShadow: `inset 0 1px 1px rgba(255,255,255,0.15), 0 8px 32px 0 rgba(0, 0, 0, 0.3)`,
-                backgroundColor: 'rgba(6, 8, 15, 0.5)'
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                boxShadow: `inset 0 1px 1px rgba(255,255,255,0.1), 0 8px 24px 0 rgba(0, 0, 0, 0.4)`,
+                backgroundColor: 'rgba(10, 12, 18, 0.65)',
+                backdropFilter: 'blur(16px)',
             }}
-            whileHover={{ scale: 1.015, y: -2 }}
+            whileHover={{ scale: 1.01, y: -1 }}
             whileTap={{ scale: 0.98 }}
             transition={{ type: 'spring', stiffness: 400, damping: 25 }}
         >
 
-            <div className="absolute inset-0 z-0 pointer-events-none rounded-[24px] overflow-hidden">
+            <div className="absolute inset-0 z-0 pointer-events-none rounded-[20px] overflow-hidden">
                 {thumbnailUrl && (
                     <Image
                         src={thumbnailUrl}
@@ -128,6 +136,38 @@ export const TikTokProcessor = React.memo(function TikTokProcessor({
                             />
                         </div>
 
+                        {/* Indicador de fases del pipeline */}
+                        <div className="relative z-10 flex items-center justify-center gap-1 px-3 pb-2">
+                            {PHASES.map((phase, idx) => {
+                                const stepMap: Record<string, number> = { 'MP4': 0, 'MP3': 1, 'TXT': 2, 'complete': 3 };
+                                const currentPhaseIndex = stepMap[currentStepId] ?? 0;
+                                const isPast = idx < currentPhaseIndex;
+                                const isActive = idx === currentPhaseIndex;
+                                const isFuture = idx > currentPhaseIndex;
+                                
+                                return (
+                                    <div key={phase.key} className="flex items-center">
+                                        <div
+                                            className={`w-[10px] h-[10px] rounded-full ${isActive ? 'phase-active-ping' : ''}`}
+                                            style={{
+                                                backgroundColor: isPast || isActive ? phase.color : 'rgba(255,255,255,0.15)',
+                                                boxShadow: isActive ? `0 0 8px ${phase.color}` : 'none',
+                                            }}
+                                            title={phase.label}
+                                        />
+                                        {idx < PHASES.length - 1 && (
+                                            <div
+                                                className="w-[12px] h-[2px] mx-0.5"
+                                                style={{
+                                                    backgroundColor: isPast ? phase.color : 'rgba(255,255,255,0.15)',
+                                                }}
+                                            />
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+
                         {/* Secuencia de Iconos */}
                         <div className="relative z-10 flex justify-between items-center px-3.5 pb-3 mt-auto">
                             {MILESTONES.map((m, idx) => {
@@ -152,7 +192,15 @@ export const TikTokProcessor = React.memo(function TikTokProcessor({
                 </div>
 
             </div>
+            <style jsx>{`
+                @keyframes phasePing {
+                    0%, 100% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.3); opacity: 0.7; }
+                }
+                .phase-active-ping {
+                    animation: phasePing 1.5s ease-in-out infinite;
+                }
+            `}</style>
         </motion.div>
     );
 });
-

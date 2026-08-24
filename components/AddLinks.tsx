@@ -46,6 +46,13 @@ export function AddLinks() {
         setLinkText(text);
     }, [localLinks, setLinkText]);
 
+    // Limpiar filas locales cuando el proceso finaliza
+    useEffect(() => {
+        if (status === 'done') {
+            setLocalLinks(['']);
+        }
+    }, [status]);
+
     const hasLocalData = localLinks.some(l => l.trim().length > 0) || file !== null;
     const handleUnifiedProcess = async () => {
         if (!hasData) return;
@@ -92,20 +99,20 @@ export function AddLinks() {
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
         >
 
-            {/* Main AddLinks Panel: Estilo Neón Esmeralda Sutil */}
+            {/* Main AddLinks Panel */}
             <section
-                className="relative overflow-hidden flex flex-col gap-4 p-5 rounded-[24px] transition-all duration-500"
+                className="relative overflow-hidden flex flex-col gap-3.5 p-4 rounded-[20px] transition-all duration-300"
                 style={{
-                    backgroundColor: 'rgba(10, 12, 20, 0.85)', // More opaque, less glass
-                    backdropFilter: 'blur(40px)',
-                    WebkitBackdropFilter: 'blur(40px)',
-                    border: '5px solid rgba(255, 255, 255, 0.1)',
-                    boxShadow: '0 20px 50px rgba(0,0,0,0.5), 0 0 30px rgba(254,44,85,0.15)',
+                    backgroundColor: 'rgba(14, 16, 22, 0.75)',
+                    backdropFilter: 'blur(20px)',
+                    WebkitBackdropFilter: 'blur(20px)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)',
                 }}
             >
-                {/* Background colorized glows — Much more prominent now */}
-                <div className="absolute -top-10 -right-10 w-48 h-48 bg-[#fe2c55] opacity-40 blur-[70px] pointer-events-none" />
-                <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-[#25f4ee] opacity-30 blur-[60px] pointer-events-none" />
+                {/* Background colorized glows */}
+                <div className="absolute -top-10 -right-10 w-36 h-36 bg-[#fe2c55] opacity-25 blur-[50px] pointer-events-none" />
+                <div className="absolute -bottom-10 -left-10 w-36 h-36 bg-[#25f4ee] opacity-20 blur-[50px] pointer-events-none" />
 
                 {/* Visual Accent: Top-right vibrant dot */}
                 <div className="absolute top-4 right-4 w-2 h-2 rounded-full bg-[#fe2c55] shadow-[0_0_15px_#fe2c55] animate-pulse pointer-events-none" />
@@ -178,7 +185,7 @@ export function AddLinks() {
                                         type="text"
                                         value={link}
                                         onChange={(e) => handleUpdateRow(idx, e.target.value)}
-                                        placeholder="Pegar enlace de TikTok..."
+                                        placeholder="Pegar enlace: TikTok, YouTube, Instagram..."
                                         className="w-full bg-white/5 border border-white/10 rounded-[12px] px-4 py-2.5 text-[12px] text-white/90 outline-none focus:border-[#fe2c55]/50 transition-all font-medium"
                                         style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
                                     />

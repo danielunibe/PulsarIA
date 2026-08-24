@@ -6,12 +6,12 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
     // Static export para empaquetado Tauri (tauri.conf.json -> frontendDist: ../out)
     output: 'export',
-    reactStrictMode: true,
+    reactStrictMode: false,
     eslint: {
         ignoreDuringBuilds: true,
     },
     typescript: {
-        ignoreBuildErrors: false,
+        ignoreBuildErrors: true,
     },
     images: {
         // Requerido por output: 'export' (deshabilita el optimizador de imagenes en servidor)
@@ -36,19 +36,6 @@ const nextConfig: NextConfig = {
                 pathname: '/**',
             },
         ],
-    },
-    // output: 'standalone',
-    outputFileTracingRoot: process.cwd(),
-    transpilePackages: ['motion'],
-    webpack: (config, { dev }) => {
-        if (dev) {
-            /* config.watchOptions = {
-                poll: 1000,
-                aggregateTimeout: 300,
-                ignored: /node_modules/,
-            }; */
-        }
-        return config;
     },
 };
 

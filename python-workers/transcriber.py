@@ -1,63 +1,77 @@
 from pathlib import Path
-from faster_whisper import WhisperModel
 import os
 import json
 
 # ========================================================================
-# TRANSCRIBER: STT nativo
-# Adicional: Emite JSON localmente para nutrir `transcription_complete` 
+# TRANSCRIBER: STT nativo (Whisper / Faster-Whisper)
+# Carga diferida (lazy import) para resiliencia en tiempo de importación
 # ========================================================================
 
 _whisper_model = None
 
-def get_model(path: Path) -> WhisperModel:
+def get_model(path: Path):
     global _whisper_model
     if _whisper_model is None:
         try:
+            from faster_whisper import WhisperModel
             _whisper_model = WhisperModel(
                 model_size_or_path="tiny",
                 device="cpu",
                 compute_type="int8",
-                download_root=os.path.join(path.parents[2], "assets", "models")
+                download_root=os.path.join(path.parents[2] if len(path.parents) > 2 else path.parent, "assets", "models")
             )
         except Exception as e:
             raise RuntimeError(f"Fallo al cargar el motor Whisper: {e}")
     return _whisper_model
 
-def transcribe_audio(audio_path: str) -> str:
-    path = Path(audio_path)
+def transcribe_audio(audio_path: str) -> dict:
+    """Transcribe audio y retorna texto completo + segmentos con timestamps."""
+    path = Path(audio_path).resolve()
     if not path.exists():
         raise FileNotFoundError(f"Archivo de audio no encontrado: {audio_path}")
 
     model = get_model(path)
 
     try:
-        segments, info = model.transcribe(str(path), beam_size=5)
+        segments_gen, info = model.transcribe(
+            str(path), 
+            beam_size=5,
+            word_timestamps=False
+        )
+        segments_list = list(segments_gen)
     except Exception as e:
         raise RuntimeError(f"Fallo en inferencia Whisper: {e}")
 
-    full_text = []
-    for segment in segments:
-        full_text.append(segment.text.strip())
+    full_text_parts = []
+    segments_data = []
+    for seg in segments_list:
+        text = seg.text.strip()
+        full_text_parts.append(text)
+        segments_data.append({
+            "start": round(seg.start, 3),
+            "end": round(seg.end, 3),
+            "text": text
+        })
 
-    final_text = " ".join(full_text).strip()
+    final_text = " ".join(full_text_parts).strip()
     
     if not final_text:
-        raise ValueError("Transcripción resultante vacía")
+        raise ValueError("Transcripcion resultante vacia")
 
-    # Backup local filesystem persistente 
     transcript_path = path.parent / "transcript.txt"
     try:
         with open(transcript_path, "w", encoding="utf-8") as f:
             f.write(final_text)
     except IOError:
-        pass 
+        pass
 
-    # Emitir evento semántico directo para IPC hacia Rust
     payload = {
         "event": "transcription_complete",
-        "text": final_text
+        "text": final_text,
+        "segments": segments_data,
+        "language": info.language if info else "unknown",
+        "duration": round(info.duration, 2) if info else 0
     }
     print(json.dumps(payload), flush=True)
 
-    return final_text
+    return {"text": final_text, "segments": segments_data}

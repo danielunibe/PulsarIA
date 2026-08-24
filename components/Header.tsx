@@ -4,13 +4,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { TT_PINK, TT_CYAN, TIKTOK_LOGO_PATH } from '@/types';
 import { FaMagnifyingGlass, FaXmark, FaListUl, FaGear, FaClock, FaCalendarDay, FaArrowDownAZ, FaStopwatch, FaFolder, FaBox } from 'react-icons/fa6';
+import { toast } from 'sonner';
 
-// ============================================================
-// Header — Barra Superior del Dashboard
-// Iconos: todos filled (no outline)
-// ============================================================
-
-// Icono TikTok oficial con efecto cromático
 const TikTokIcon = ({ size = 28, className = "" }: { size?: number, className?: string }) => (
     <svg
         width={size}
@@ -26,7 +21,6 @@ const TikTokIcon = ({ size = 28, className = "" }: { size?: number, className?: 
     </svg>
 );
 
-// ── Iconos Filled (reemplazando Lucide y Heroicons outline) ──
 const SearchIcon = () => <FaMagnifyingGlass size={15} />;
 const XIcon = () => <FaXmark size={13} />;
 const SortIcon = () => <FaListUl size={15} />;
@@ -39,12 +33,10 @@ const FolderFillIcon = () => <FaFolder size={14} />;
 const BoxFillIcon = () => <FaBox size={14} />;
 
 const SORT_OPTIONS = [
-    { id: 'newest', label: 'Más Recientes', Icon: ClockFillIcon },
-    { id: 'oldest', label: 'Más Antiguos', Icon: CalendarFillIcon },
-    { id: 'name', label: 'Por Nombre', Icon: SortAlphaIcon },
+    { id: 'date_desc', label: 'Más Recientes', Icon: ClockFillIcon },
+    { id: 'date_asc', label: 'Más Antiguos', Icon: CalendarFillIcon },
+    { id: 'title', label: 'Por Nombre', Icon: SortAlphaIcon },
     { id: 'duration', label: 'Por Duración', Icon: TimerFillIcon },
-    { id: 'format', label: 'Por Formato', Icon: FolderFillIcon },
-    { id: 'size', label: 'Por Tamaño', Icon: BoxFillIcon },
 ];
 
 const btnBase: React.CSSProperties = {
@@ -67,12 +59,14 @@ interface HeaderProps {
     activeCount?: number;
     onSearchSubmit?: (query: string) => void;
     onSearchClear?: () => void;
+    onSortChange?: (key: string) => void;
+    sortKey?: string;
 }
 
-export function Header({ onOpenSettings, activeCount = 0, onSearchSubmit, onSearchClear }: HeaderProps) {
+export function Header({ onOpenSettings, activeCount = 0, onSearchSubmit, onSearchClear, onSortChange, sortKey }: HeaderProps) {
     const [searchOpen, setSearchOpen] = useState(false);
     const [sortOpen, setSortOpen] = useState(false);
-    const [activeSort, setActiveSort] = useState('newest');
+    const activeSort = sortKey || 'date_desc';
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const sortRef = useRef<HTMLDivElement>(null);
@@ -97,11 +91,49 @@ export function Header({ onOpenSettings, activeCount = 0, onSearchSubmit, onSear
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
+    // -- Debounced semantic search: fire automatically 800ms after the user
+    // stops typing a 3+ character query. Clearing the field resets the search.
+    const onSearchSubmitRef = useRef(onSearchSubmit);
+    const onSearchClearRef = useRef(onSearchClear);
+    useEffect(() => {
+        onSearchSubmitRef.current = onSearchSubmit;
+        onSearchClearRef.current = onSearchClear;
+    }, [onSearchSubmit, onSearchClear]);
+
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        const trimmed = query.trim();
+        if (trimmed.length === 0) {
+            onSearchClearRef.current?.();
+            return;
+        }
+        if (trimmed.length < 3) return;
+        debounceRef.current = setTimeout(() => {
+            onSearchSubmitRef.current?.(query);
+        }, 800);
+        return () => {
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+        };
+    }, [query]);
+
     return (
         <div className="w-full px-8 pt-5 pb-3 flex items-center justify-between sticky top-0 z-40 self-start pointer-events-none">
-            {/* Left: Item count pill — Reestilizado TikTok BrandBoard */}
             <div
-                className="h-10 flex items-center gap-2.5 px-4 pointer-events-auto relative overflow-hidden group shadow-lg drop-shadow-[0_0_15px_rgba(254,44,85,0.4)]"
+                onClick={() => {
+                    if (activeCount === 0) {
+                        toast.info("No hay videos completados", {
+                            description: "Pega un enlace en el panel izquierdo para comenzar a descargar y procesar.",
+                            duration: 4000
+                        });
+                    } else {
+                        toast.success("Biblioteca de TikTok", {
+                            description: `${activeCount} videos completados y listos en la biblioteca.`,
+                            duration: 3500
+                        });
+                    }
+                }}
+                className="h-10 flex items-center gap-2.5 px-4 pointer-events-auto relative overflow-hidden group shadow-lg drop-shadow-[0_0_15px_rgba(254,44,85,0.4)] cursor-pointer"
                 style={{
                     ...btnBase,
                     background: 'linear-gradient(135deg, rgba(254,44,85,0.2) 0%, rgba(37,244,238,0.2) 100%)',
@@ -109,11 +141,9 @@ export function Header({ onOpenSettings, activeCount = 0, onSearchSubmit, onSear
                     boxShadow: 'inset 0 4px 15px rgba(0,0,0,0.5), inset 0 0 20px rgba(254,44,85,0.1)',
                 }}
             >
-                {/* Brillo interno animado estilo TikTok */}
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] duration-1000 transition-all pointer-events-none" />
                 <div className="absolute top-0 bottom-0 left-0 w-[2px] bg-[#fe2c55] shadow-[0_0_10px_#fe2c55]" />
                 <div className="absolute top-0 bottom-0 right-0 w-[2px] bg-[#25f4ee] shadow-[0_0_10px_#25f4ee]" />
-
                 <div className="flex items-center justify-center relative scale-[1.05]">
                     <TikTokIcon size={20} className="relative z-10" />
                 </div>
@@ -122,78 +152,51 @@ export function Header({ onOpenSettings, activeCount = 0, onSearchSubmit, onSear
                 </span>
             </div>
 
-            {/* Right: Search, Sort, Settings */}
-            <div className="flex items-center gap-2.5 pointer-events-auto">
-
-                {/* Search — con color magenta cuando está activo */}
-                <motion.div
-                    className="overflow-hidden active:scale-[0.97] group"
-                    animate={{ width: searchOpen ? 220 : 40 }}
-                    transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+            <div className="flex items-center gap-3 pointer-events-auto">
+                {/* Simplified Intelligent AI Search Bar */}
+                <div 
+                    className="relative flex items-center h-10 px-3.5 rounded-[14px] transition-all duration-300 w-60 sm:w-80 md:w-96 focus-within:w-72 sm:focus-within:w-96 md:focus-within:w-[420px] focus-within:border-[#8a5cff]/50 focus-within:shadow-[0_0_20px_rgba(138,92,255,0.2)]"
                     style={{
                         ...btnBase,
-                        justifyContent: searchOpen ? 'flex-start' : 'center',
-                        padding: searchOpen ? '0 14px' : '0',
-                        gap: searchOpen ? '8px' : '0',
-                        boxShadow: searchOpen ? '0 8px 16px rgba(0,0,0,0.5), inset 0 2px 5px rgba(255,255,255,0.2)' : '0 8px 16px rgba(0,0,0,0.5)',
-                        border: 'none',
-                        background: searchOpen ? '#fe2c55' : 'rgba(0,0,0,0.4)', // Fucsia sólido al abrir, glass cerrado.
-                        backdropFilter: searchOpen ? 'none' : 'blur(30px)',
-                        height: 40,
-                        borderRadius: 14,
+                        justifyContent: 'flex-start',
+                        gap: '10px',
+                        cursor: 'text'
                     }}
-                    onClick={() => { if (!searchOpen) setSearchOpen(true); }}
+                    onClick={() => inputRef.current?.focus()}
                 >
-                    <span
-                        className="flex-shrink-0 flex items-center"
-                        style={{
-                            color: searchOpen ? '#ffffff' : 'rgba(255,255,255,0.5)', // Ícono blanco sobre el rosa
-                            filter: 'none',
-                            transition: 'color 0.3s ease, filter 0.3s ease',
-                        }}
-                    >
+                    <span className="flex-shrink-0 flex items-center text-[#8a5cff] drop-shadow-[0_0_8px_rgba(138,92,255,0.4)]">
                         <SearchIcon />
                     </span>
-                    <AnimatePresence>
-                        {searchOpen && (
-                            <motion.div
-                                className="flex items-center gap-1.5 flex-1 min-w-0"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                transition={{ duration: 0.15 }}
-                            >
-                                <input
-                                    ref={inputRef}
-                                    type="text"
-                                    value={query}
-                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
-                                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                                        if (e.key === 'Enter' && onSearchSubmit) {
-                                            onSearchSubmit(query);
-                                        }
-                                    }}
-                                    placeholder="Buscar videos..."
-                                    className="flex-1 bg-transparent outline-none font-bold min-w-0 text-white placeholder-white/50"
-                                    style={{ fontSize: '12px' }}
-                                />
-                                <button
-                                    onClick={(e: React.MouseEvent) => {
-                                        e.stopPropagation();
-                                        setQuery('');
-                                        setSearchOpen(false);
-                                        if (onSearchClear) onSearchClear();
-                                    }}
-                                    className="text-white/60 hover:text-white transition-colors cursor-pointer bg-transparent border-none p-0 flex-shrink-0"
-                                >
-                                    <XIcon />
-                                </button>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </motion.div>
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        value={query}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                            if (e.key === 'Enter' && onSearchSubmit) {
+                                onSearchSubmit(query);
+                            }
+                        }}
+                        placeholder="Búsqueda inteligente con IA (temas, conceptos, transcripciones)..."
+                        className="flex-1 bg-transparent outline-none font-medium text-xs text-white placeholder-white/40 min-w-0"
+                    />
+                    {query.trim().length > 0 && (
+                        <button
+                            onClick={(e: React.MouseEvent) => {
+                                e.stopPropagation();
+                                setQuery('');
+                                if (onSearchClear) onSearchClear();
+                            }}
+                            className="text-white/40 hover:text-white transition-colors cursor-pointer bg-transparent border-none p-1 flex-shrink-0"
+                        >
+                            <XIcon />
+                        </button>
+                    )}
+                    <span className="hidden sm:inline-block text-[8px] font-mono font-bold uppercase tracking-wider text-[#8a5cff] bg-[#8a5cff]/10 px-1.5 py-0.5 rounded border border-[#8a5cff]/20">
+                        IA RAG
+                    </span>
+                </div>
 
-                {/* Sort */}
                 <div ref={sortRef} className="relative">
                     <motion.button
                         onClick={() => setSortOpen(o => !o)}
@@ -243,7 +246,10 @@ export function Header({ onOpenSettings, activeCount = 0, onSearchSubmit, onSear
                                 {SORT_OPTIONS.map((opt, idx) => (
                                     <motion.button
                                         key={opt.id}
-                                        onClick={() => { setActiveSort(opt.id); setSortOpen(false); }}
+                                        onClick={() => {
+                                            onSortChange?.(opt.id);
+                                            setSortOpen(false);
+                                        }}
                                         className="w-full flex items-center gap-3 px-4 py-2.5 text-left"
                                         initial={{ opacity: 0, x: -6 }}
                                         animate={{ opacity: 1, x: 0 }}
@@ -279,22 +285,40 @@ export function Header({ onOpenSettings, activeCount = 0, onSearchSubmit, onSear
                     </AnimatePresence>
                 </div>
 
-                {/* Settings */}
                 <motion.button
                     onClick={onOpenSettings}
-                    style={{ ...btnBase, width: '40px' }}
-                    whileHover={{ scale: 1.05, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.4), 0 8px 24px rgba(0,0,0,0.6)' }}
-                    whileTap={{ scale: 0.95 }}
+                    title="Configuración y Ajustes"
+                    style={{
+                        ...btnBase,
+                        height: '40px',
+                        padding: '0 14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.03) 100%)',
+                        border: '1px solid rgba(255,255,255,0.22)',
+                        boxShadow: '0 6px 20px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.25)',
+                    }}
+                    whileHover={{
+                        scale: 1.04,
+                        borderColor: 'rgba(37,244,238,0.6)',
+                        boxShadow: '0 0 20px rgba(37,244,238,0.3), inset 0 1px 2px rgba(255,255,255,0.4)',
+                    }}
+                    whileTap={{ scale: 0.96 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                    className="group"
+                    className="group cursor-pointer"
                 >
                     <motion.span
-                        style={{ color: 'rgba(255,255,255,0.5)', display: 'flex' }}
-                        whileHover={{ color: 'rgba(255,255,255,0.9)', rotate: 60 }}
+                        style={{ color: '#ffffff', display: 'flex' }}
+                        whileHover={{ rotate: 90, color: '#25f4ee' }}
                         transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+                        className="drop-shadow-[0_0_8px_rgba(255,255,255,0.6)]"
                     >
                         <SettingsIcon />
                     </motion.span>
+                    <span className="hidden md:inline text-xs font-bold text-white tracking-wider uppercase drop-shadow-sm">
+                        Configuración
+                    </span>
                 </motion.button>
             </div>
         </div>

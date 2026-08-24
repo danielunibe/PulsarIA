@@ -1,7 +1,9 @@
 // ============================================================
-// Tipos Globales Centralizados — Pulsar Eventide
-// Importar desde aquí en lugar de redefinir en cada componente
+// Tipos Globales Centralizados - Pulsar Eventide
+// Importar desde aqui en lugar de redefinir en cada componente
 // ============================================================
+
+import React from 'react';
 
 // --- Tipos de Video y Queue ---
 
@@ -40,6 +42,7 @@ export interface VideoCardProps {
     duration?: string;
     tags?: string[];
     thumb?: string;
+    id?: number;
     videoSrc?: string;
     isFullPlaying?: boolean;
     onPlayStart?: () => void;
@@ -70,7 +73,11 @@ export interface TikTokProcessorProps {
     className?: string;
 }
 
-// --- Constantes de Diseño del Proyecto ---
+// --- Tipos de Filtrado ---
+
+export type Platform = 'tiktok' | 'youtube' | 'instagram' | 'all';
+
+// --- Constantes de Diseno del Proyecto ---
 
 export const TT_PINK = '#fe2c55';
 export const TT_CYAN = '#25f4ee';

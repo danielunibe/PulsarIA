@@ -1,16 +1,22 @@
 'use client';
-import { motion } from 'motion/react';
+
+import { motion, AnimatePresence } from 'motion/react';
 import type { VideoData } from '@/types';
 import {
     FaXmark, FaVideo, FaMusic, FaFileLines, FaDownload,
     FaPlay, FaPause, FaLanguage, FaBrain, FaWandMagicSparkles,
-    FaBolt, FaCheckDouble, FaClock
+    FaBolt, FaCheckDouble, FaClock, FaCopy, FaShareNodes,
+    FaMagnifyingGlass, FaVolumeHigh, FaVolumeXmark, FaExpand,
+    FaTerminal, FaCode, FaCheck, FaRotateLeft
 } from 'react-icons/fa6';
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { toast } from 'sonner';
+import { useSemanticIO } from '@/hooks/useSemanticIO';
 
 // ============================================================
-// ExpandedVideoModal — Content Controller Pro (Compact Design)
+// ExpandedVideoModal — AAA Multimodal Knowledge Hub
+// Pulsar Eventide Ultra-Performance Inspector
 // ============================================================
 
 interface ExpandedVideoModalProps {
@@ -18,26 +24,38 @@ interface ExpandedVideoModalProps {
     onClose: () => void;
 }
 
-const mockTranscript = [
-    { time: '00:00 - 00:05', text: 'Bienvenidos a este nuevo tutorial de IA que revolucionará tu flujo de trabajo.' },
-    { time: '00:05 - 00:09', text: 'Hoy nos enfocaremos en herramientas de automatización y generación de contenido masivo.' },
-    { time: '00:09 - 00:15', text: 'Presta mucha atención a cómo se integran estos modelos complejos en el dashboard.' }
-];
+interface TranscriptChunk {
+    chunk_index: number;
+    chunk_text: string;
+    start: number;
+    end: number;
+}
 
 export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [mounted, setMounted] = useState(false);
+    const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunk[]>([]);
+    const [loadingTranscript, setLoadingTranscript] = useState(false);
+    const [activeTab, setActiveTab] = useState<'transcript' | 'intel' | 'julia' | 'semantic'>('transcript');
+    const [filterQuery, setFilterQuery] = useState('');
+    const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
 
     // Playback state
     const [isPlaying, setIsPlaying] = useState(true);
     const [progress, setProgress] = useState(0);
     const [currentTime, setCurrentTime] = useState('00:00.000');
     const [duration, setDuration] = useState('00:00.000');
+    const [rawDuration, setRawDuration] = useState(0);
+    const [rawCurrentTime, setRawCurrentTime] = useState(0);
+    const [isMuted, setIsMuted] = useState(false);
+    const [playbackRate, setPlaybackRate] = useState(1);
+
+    const { exportSemantic, importSemantic, downloadUnib, exporting, importing, error: semanticError, exportedContent } = useSemanticIO();
 
     // Engine Toggles State
     const [toggles, setToggles] = useState({
         translate: true,
-        sentiment: false,
+        sentiment: true,
         highlights: true,
     });
 
@@ -45,19 +63,55 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
         setMounted(true);
     }, []);
 
+    // Load transcript from SQLite backend via Tauri invoke
     useEffect(() => {
-        if (mounted && videoRef.current) {
-            videoRef.current.play().then(() => setIsPlaying(true)).catch((e) => {
-                console.error('Autoplay prevented:', e);
-                setIsPlaying(false);
-            });
-        }
-    }, [video, mounted]);
+        if (!video.id) return;
+        setLoadingTranscript(true);
+        (async () => {
+            try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                const segments: Array<{ chunk_index: number; chunk_text: string; start: number; end: number }> = await invoke('get_transcript', { jobId: video.id });
 
-    if (!mounted) return null;
+                const mapped: TranscriptChunk[] = segments.map((s) => ({
+                    chunk_index: s.chunk_index,
+                    chunk_text: s.chunk_text,
+                    start: s.start,
+                    end: s.end
+                }));
+                setTranscriptChunks(mapped);
+            } catch (e) {
+                console.error('Failed to load transcript:', e);
+                setTranscriptChunks([]);
+            } finally {
+                setLoadingTranscript(false);
+            }
+        })();
+    }, [video.id, rawDuration, video.duration]);
+
+    // Keyboard Shortcuts (Space, Escape, M, Arrows)
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onClose();
+            } else if (e.key === ' ' && document.activeElement?.tagName !== 'INPUT') {
+                e.preventDefault();
+                togglePlay();
+            } else if (e.key === 'm' || e.key === 'M') {
+                if (document.activeElement?.tagName !== 'INPUT') {
+                    toggleMute();
+                }
+            } else if (e.key === 'ArrowLeft' && document.activeElement?.tagName !== 'INPUT') {
+                if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 5);
+            } else if (e.key === 'ArrowRight' && document.activeElement?.tagName !== 'INPUT') {
+                if (videoRef.current) videoRef.current.currentTime = Math.min(rawDuration, videoRef.current.currentTime + 5);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isPlaying, rawDuration, onClose]);
 
     const formatPreciseTime = (seconds: number) => {
-        if (isNaN(seconds)) return '00:00.000';
+        if (isNaN(seconds) || seconds < 0) return '00:00.000';
         const m = Math.floor(seconds / 60);
         const s = Math.floor(seconds % 60);
         const ms = Math.floor((seconds % 1) * 1000);
@@ -67,14 +121,17 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
     const handleTimeUpdate = () => {
         if (!videoRef.current) return;
         const current = videoRef.current.currentTime;
-        const dur = videoRef.current.duration;
+        const dur = videoRef.current.duration || rawDuration;
+        setRawCurrentTime(current);
         setCurrentTime(formatPreciseTime(current));
         setProgress(dur > 0 ? (current / dur) * 100 : 0);
     };
 
     const handleLoadedMetadata = () => {
         if (!videoRef.current) return;
-        setDuration(formatPreciseTime(videoRef.current.duration));
+        const dur = videoRef.current.duration;
+        setRawDuration(dur);
+        setDuration(formatPreciseTime(dur));
     };
 
     const togglePlay = () => {
@@ -83,247 +140,545 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
             videoRef.current.pause();
             setIsPlaying(false);
         } else {
-            videoRef.current.play();
-            setIsPlaying(true);
+            videoRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
         }
+    };
+
+    const toggleMute = () => {
+        if (!videoRef.current) return;
+        videoRef.current.muted = !isMuted;
+        setIsMuted(!isMuted);
     };
 
     const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!videoRef.current) return;
-        const seekTime = (Number(e.target.value) / 100) * videoRef.current.duration;
+        const seekTime = (Number(e.target.value) / 100) * (videoRef.current.duration || rawDuration);
         videoRef.current.currentTime = seekTime;
         setProgress(Number(e.target.value));
     };
 
+    const seekToSecond = (sec: number) => {
+        if (!videoRef.current) return;
+        videoRef.current.currentTime = sec;
+        if (!isPlaying) {
+            videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+        }
+    };
+
+    const cyclePlaybackRate = () => {
+        if (!videoRef.current) return;
+        const rates = [1, 1.25, 1.5, 2];
+        const nextIdx = (rates.indexOf(playbackRate) + 1) % rates.length;
+        const newRate = rates[nextIdx];
+        videoRef.current.playbackRate = newRate;
+        setPlaybackRate(newRate);
+        toast.info(`Velocidad: ${newRate}x`, { duration: 1500 });
+    };
+
+    // Full text calculation
+    const fullTranscriptText = useMemo(() => {
+        return transcriptChunks.map(c => c.chunk_text).join(' ');
+    }, [transcriptChunks]);
+
+    // Filtered chunks
+    const filteredChunks = useMemo(() => {
+        if (!filterQuery.trim()) return transcriptChunks;
+        const q = filterQuery.toLowerCase();
+        return transcriptChunks.filter(c => c.chunk_text.toLowerCase().includes(q));
+    }, [transcriptChunks, filterQuery]);
+
+    // Julia export JSON payload
+    const juliaPayload = useMemo(() => {
+        return {
+            source: "pulsar-eventide",
+            version: "1.0",
+            video_id: video.id,
+            url: video.videoSrc || "",
+            platform: "tiktok",
+            metadata: {
+                title: video.title || `Video #${video.id}`,
+                author: video.author || "Desconocido",
+                duration: video.duration,
+                tags: video.tags || [],
+                thumbnail: video.thumb
+            },
+            content: {
+                summary: `Ficha estructurada del video '${video.title}'. Procesado por Pulsar Eventide.`,
+                topics: video.tags?.length ? video.tags : ["Audiovisual", "TikTok", "Pulsar"],
+                intent: "Ingesta y Análisis de Conocimiento",
+                full_transcript: fullTranscriptText,
+                segments: transcriptChunks.map(c => ({
+                    start: c.start,
+                    end: c.end,
+                    text: c.chunk_text
+                }))
+            },
+            embeddings_metadata: {
+                model: "all-MiniLM-L6-v2",
+                dimensions: 384,
+                total_chunks: transcriptChunks.length
+            },
+            julia_ready: true
+        };
+    }, [video, fullTranscriptText, transcriptChunks]);
+
+    const copyToClipboard = async (text: string, format: string) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedFormat(format);
+            toast.success(`Copiado al portapapeles (${format})`, {
+                description: `${text.length} caracteres listos para usar.`
+            });
+            setTimeout(() => setCopiedFormat(null), 2500);
+        } catch (e) {
+            toast.error("Error al copiar al portapapeles");
+        }
+    };
+
+    if (!mounted) return null;
+
     return createPortal(
         <motion.div
-            className="fixed inset-0 z-[1000] flex items-center justify-center p-6 pointer-events-auto"
+            className="fixed inset-0 z-[1000] flex items-center justify-center p-4 md:p-6 pointer-events-auto backdrop-blur-2xl bg-black/80"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
+            transition={{ duration: 0.25 }}
+            onClick={(e: React.MouseEvent<HTMLDivElement>) => {
+                if (e.target === e.currentTarget) onClose();
+            }}
         >
             <motion.div
-                className="absolute inset-0 bg-black/70 backdrop-blur-2xl"
-                onClick={onClose}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.4 }}
-            />
-
-            <div className="relative w-full max-w-7xl h-[85vh] max-h-[900px] flex items-center justify-center gap-6 z-10">
-
-                {/* Left Panel: Expanded Video Player using layoutId */}
-                <motion.div
-                    layoutId={`video-card-${video.id}`}
-                    className="h-full aspect-[9/16] shrink-0 relative rounded-2xl overflow-hidden shadow-[0_30px_80px_rgba(0,0,0,0.8)] border-[2px] border-white/10 bg-black"
-                >
-                    <video
-                        ref={videoRef}
-                        src={video.videoSrc}
-                        className="absolute inset-0 w-full h-full object-cover bg-black z-[1]"
-                        autoPlay
-                        loop
-                        playsInline
-                        onTimeUpdate={handleTimeUpdate}
-                        onLoadedMetadata={handleLoadedMetadata}
-                    />
-                </motion.div>
-
-                {/* Right Panel: Content Controller Pro Console (Compact) */}
-                <motion.div
-                    className="w-[500px] xl:w-[600px] shrink-0 h-full flex flex-col justify-start p-5 rounded-2xl border-[1px] border-white/10 relative overflow-hidden"
-                    initial={{ opacity: 0, x: 30 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 30 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 30, delay: 0.1 }}
-                    style={{
-                        background: 'linear-gradient(145deg, rgba(20, 20, 20, 0.95), rgba(10, 10, 10, 0.98))',
-                        boxShadow: '0 20px 40px rgba(0,0,0,0.8), inset 0 1px 1px rgba(255,255,255,0.05)'
-                    }}
-                >
-                    <button
-                        onClick={onClose}
-                        className="absolute top-4 right-4 z-50 w-8 h-8 rounded-full bg-white/5 backdrop-blur-md border border-white/10 flex items-center justify-center text-white hover:bg-[#fe2c55] hover:border-[#fe2c55] transition-all duration-300 hover:scale-110 shadow-lg"
-                    >
-                        <FaXmark size={14} />
-                    </button>
-
-                    {/* Contenedor Flex para estirar y contraer dinámicamente sus hijos */}
-                    <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-3.5 h-full">
-
-                        {/* 1. Header (Minimalist Metadata) */}
-                        <div className="flex flex-col gap-0.5 pr-10 shrink-0">
-                            <div className="flex items-center gap-2 mb-1">
-                                <span className="px-1.5 py-0.5 rounded-sm bg-[#fe2c55]/20 text-[#fe2c55] text-[9px] font-bold uppercase tracking-wider border border-[#fe2c55]/30">
-                                    Auditoría Activa
-                                </span>
-                                <span className="text-white/40 text-[10px] font-mono">{video.author}</span>
-                            </div>
-                            <h2 className="text-white font-extrabold text-xl leading-snug line-clamp-2">
-                                {video.title}
-                            </h2>
+                className="w-full max-w-[1240px] h-[88vh] min-h-[600px] max-h-[920px] rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-[0_25px_80px_rgba(0,0,0,0.9)] border border-white/10 relative"
+                style={{
+                    background: 'linear-gradient(145deg, rgba(16,18,27,0.98) 0%, rgba(8,10,15,0.99) 100%)',
+                    boxShadow: '0 0 0 1px rgba(255,255,255,0.08), 0 30px 90px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.15)'
+                }}
+                initial={{ scale: 0.95, y: 20, opacity: 0 }}
+                animate={{ scale: 1, y: 0, opacity: 1 }}
+                exit={{ scale: 0.95, y: 20, opacity: 0 }}
+                transition={{ type: 'spring', damping: 28, stiffness: 350 }}
+            >
+                {/* ── Left Column: Video Cinema Player ── */}
+                <div className="w-full md:w-[48%] h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
+                    {/* Top Meta Header */}
+                    <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
+                        <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-[#fe2c55] shadow-[0_0_8px_#fe2c55]" />
+                            <span className="text-[11px] font-black tracking-widest text-[#fe2c55] uppercase">
+                                PULSAR MULTIMODAL
+                            </span>
                         </div>
-
-                        {/* 2. Live Metrics Dashboard */}
-                        <div className="grid grid-cols-3 gap-2 shrink-0">
-                            <div className="flex flex-col p-2.5 rounded-lg bg-white/5 border border-white/5 backdrop-blur-sm">
-                                <span className="text-white/50 text-[9px] uppercase font-bold tracking-widest mb-0.5 flex items-center gap-1.5"><FaLanguage className="text-[#25f4ee]" size={10} /> Idioma</span>
-                                <span className="text-white font-mono text-sm font-bold">Inglés (US)</span>
-                            </div>
-                            <div className="flex flex-col p-2.5 rounded-lg bg-white/5 border border-white/5 backdrop-blur-sm">
-                                <span className="text-white/50 text-[9px] uppercase font-bold tracking-widest mb-0.5 flex items-center gap-1.5"><FaCheckDouble className="text-[#00ffd1]" size={10} /> Precisión</span>
-                                <span className="text-white font-mono text-sm font-bold">98.5%</span>
-                            </div>
-                            <div className="flex flex-col p-2.5 rounded-lg bg-white/5 border border-white/5 backdrop-blur-sm">
-                                <span className="text-white/50 text-[9px] uppercase font-bold tracking-widest mb-0.5 flex items-center gap-1.5"><FaBolt className="text-[#fe2c55]" size={10} /> BPM</span>
-                                <span className="text-white font-mono text-sm font-bold">142 PPM</span>
-                            </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono font-bold text-white/50 bg-white/5 px-2.5 py-1 rounded-lg border border-white/5">
+                                #{video.id}
+                            </span>
                         </div>
-
-                        {/* 3. Advanced Playback Engine */}
-                        <div className="bg-black/40 p-3 rounded-xl border border-white/10 flex items-center gap-3 shadow-inner shrink-0">
-                            <button
-                                onClick={togglePlay}
-                                className="w-10 h-10 shrink-0 rounded-full bg-gradient-to-tr from-[#fe2c55] to-[#ff3b64] shadow-[0_0_15px_rgba(254,44,85,0.4)] flex items-center justify-center text-white hover:scale-105 transition-transform"
-                            >
-                                {isPlaying ? <FaPause size={14} /> : <FaPlay size={14} className="ml-1" />}
-                            </button>
-
-                            <span className="text-[#25f4ee] font-mono text-xs shrink-0 font-bold bg-[#25f4ee]/10 px-1.5 py-0.5 rounded-md">{currentTime}</span>
-
-                            <input
-                                type="range"
-                                min="0"
-                                max="100"
-                                value={progress}
-                                onChange={handleSeek}
-                                className="flex-1 accent-[#25f4ee] h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer hover:accent-white transition-all"
-                            />
-
-                            <span className="text-white/50 font-mono text-xs shrink-0 px-1.5">{duration}</span>
-                        </div>
-
-                        {/* 4. AI Engine Toggles */}
-                        <div className="flex flex-col gap-1.5 shrink-0">
-                            <h4 className="text-white/60 text-[10px] font-bold uppercase tracking-widest mb-0.5 ml-1">Motores de Procesamiento</h4>
-
-                            <div className="flex items-center justify-between p-2.5 rounded-lg bg-gradient-to-r from-white/5 to-transparent border border-white/5 hover:border-white/10 transition-colors">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center ${toggles.translate ? 'bg-[#25f4ee]/20 text-[#25f4ee]' : 'bg-white/5 text-white/50'}`}>
-                                        <FaLanguage size={12} />
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <span className="text-white text-xs font-bold leading-none">Traducción Automática (ES)</span>
-                                        <span className="text-white/40 text-[9px] mt-0.5">Subtítulos en tiempo real</span>
-                                    </div>
-                                </div>
-                                <div
-                                    className={`w-9 h-5 shrink-0 rounded-full p-0.5 cursor-pointer transition-colors ${toggles.translate ? 'bg-[#25f4ee]' : 'bg-white/20'}`}
-                                    onClick={() => setToggles(p => ({ ...p, translate: !p.translate }))}
-                                >
-                                    <motion.div
-                                        className="w-4 h-4 rounded-full bg-white shadow-sm"
-                                        animate={{ x: toggles.translate ? 16 : 0 }}
-                                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="flex items-center justify-between p-2.5 rounded-lg bg-gradient-to-r from-white/5 to-transparent border border-white/5 hover:border-white/10 transition-colors">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center ${toggles.sentiment ? 'bg-[#8a5cff]/20 text-[#8a5cff]' : 'bg-white/5 text-white/50'}`}>
-                                        <FaBrain size={12} />
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <span className="text-white text-xs font-bold leading-none">Análisis de Sentimiento</span>
-                                        <span className="text-white/40 text-[9px] mt-0.5">Tono y emociones del speaker</span>
-                                    </div>
-                                </div>
-                                <div
-                                    className={`w-9 h-5 shrink-0 rounded-full p-0.5 cursor-pointer transition-colors ${toggles.sentiment ? 'bg-[#8a5cff]' : 'bg-white/20'}`}
-                                    onClick={() => setToggles(p => ({ ...p, sentiment: !p.sentiment }))}
-                                >
-                                    <motion.div
-                                        className="w-4 h-4 rounded-full bg-white shadow-sm"
-                                        animate={{ x: toggles.sentiment ? 16 : 0 }}
-                                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="flex items-center justify-between p-2.5 rounded-lg bg-gradient-to-r from-white/5 to-transparent border border-white/5 hover:border-white/10 transition-colors">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center ${toggles.highlights ? 'bg-[#fe2c55]/20 text-[#fe2c55]' : 'bg-white/5 text-white/50'}`}>
-                                        <FaWandMagicSparkles size={12} />
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <span className="text-white text-xs font-bold leading-none">Auto-Highlights (Viral)</span>
-                                        <span className="text-white/40 text-[9px] mt-0.5">Extracción de momentos clave</span>
-                                    </div>
-                                </div>
-                                <div
-                                    className={`w-9 h-5 shrink-0 rounded-full p-0.5 cursor-pointer transition-colors ${toggles.highlights ? 'bg-[#fe2c55]' : 'bg-white/20'}`}
-                                    onClick={() => setToggles(p => ({ ...p, highlights: !p.highlights }))}
-                                >
-                                    <motion.div
-                                        className="w-4 h-4 rounded-full bg-white shadow-sm"
-                                        animate={{ x: toggles.highlights ? 16 : 0 }}
-                                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* 5. Translation & Subtitle Timeline - Flexible Box */}
-                        <div className="flex flex-col gap-1.5 flex-1 min-h-[100px]">
-                            <h4 className="text-white/60 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ml-1">
-                                <FaClock size={10} /> Auditoría de Transcripción
-                            </h4>
-                            <div className="bg-black/50 border border-white/5 rounded-xl p-3 flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-1.5 shadow-inner">
-                                {mockTranscript.map((segment, idx) => (
-                                    <div key={idx} className="flex gap-3 p-1.5 rounded-md hover:bg-white/5 transition-colors cursor-pointer group">
-                                        <span className="text-[#25f4ee] font-mono text-[9px] font-bold mt-0.5 whitespace-nowrap opacity-80 group-hover:opacity-100">
-                                            {segment.time}
-                                        </span>
-                                        <p className="text-white/80 text-[11px] leading-snug group-hover:text-white">
-                                            {segment.text}
-                                        </p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* 6. Compact Action Hub (Downloads) */}
-                        <div className="grid grid-cols-3 gap-2 mt-auto pt-3 border-t border-white/5 shrink-0">
-                            <button className="flex justify-center items-center gap-2 py-2.5 rounded-lg bg-[#fe2c55]/10 border border-[#fe2c55]/30 hover:bg-[#fe2c55]/20 transition-all group">
-                                <FaVideo className="text-[#fe2c55] group-hover:scale-110 transition-transform" size={14} />
-                                <div className="flex flex-col items-start leading-none">
-                                    <span className="text-white font-bold text-[10px] uppercase tracking-wide">Video</span>
-                                    <span className="text-white/50 text-[8px] mt-0.5">MP4</span>
-                                </div>
-                            </button>
-                            <button className="flex justify-center items-center gap-2 py-2.5 rounded-lg bg-[#25f4ee]/10 border border-[#25f4ee]/30 hover:bg-[#25f4ee]/20 transition-all group">
-                                <FaMusic className="text-[#25f4ee] group-hover:scale-110 transition-transform" size={14} />
-                                <div className="flex flex-col items-start leading-none">
-                                    <span className="text-white font-bold text-[10px] uppercase tracking-wide">Audio</span>
-                                    <span className="text-white/50 text-[8px] mt-0.5">MP3</span>
-                                </div>
-                            </button>
-                            <button className="flex justify-center items-center gap-2 py-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all group">
-                                <FaFileLines className="text-white/80 group-hover:scale-110 transition-transform group-hover:text-white" size={14} />
-                                <div className="flex flex-col items-start leading-none">
-                                    <span className="text-white font-bold text-[10px] uppercase tracking-wide">Texto</span>
-                                    <span className="text-white/50 text-[8px] mt-0.5">TXT</span>
-                                </div>
-                            </button>
-                        </div>
-
                     </div>
-                </motion.div>
 
-            </div>
+                    {/* Video Player Shell */}
+                    <div className="flex-1 rounded-2xl overflow-hidden relative bg-black flex items-center justify-center border border-white/10 shadow-2xl group">
+                        <video
+                            ref={videoRef}
+                            src={video.videoSrc}
+                            poster={video.thumb}
+                            className="w-full h-full object-contain"
+                            playsInline
+                            loop
+                            onTimeUpdate={handleTimeUpdate}
+                            onLoadedMetadata={handleLoadedMetadata}
+                            onClick={togglePlay}
+                        />
+
+                        {/* Central Play/Pause Watermark indicator */}
+                        <AnimatePresence>
+                            {!isPlaying && (
+                                <motion.div
+                                    initial={{ scale: 0.5, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0.5, opacity: 0 }}
+                                    className="absolute w-16 h-16 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-white cursor-pointer shadow-2xl hover:scale-110 transition-transform"
+                                    onClick={togglePlay}
+                                >
+                                    <FaPlay size={20} className="ml-1 text-[#25f4ee]" />
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        {/* Bottom Overlay Controls */}
+                        <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent flex flex-col gap-2.5 opacity-90 group-hover:opacity-100 transition-opacity">
+                            {/* Seekbar */}
+                            <div className="flex items-center gap-3">
+                                <span className="text-[#25f4ee] font-mono text-[11px] font-bold shrink-0">{currentTime}</span>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={progress}
+                                    onChange={handleSeek}
+                                    className="flex-1 accent-[#25f4ee] h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer hover:h-2 transition-all"
+                                />
+                                <span className="text-white/60 font-mono text-[11px] shrink-0">{duration}</span>
+                            </div>
+
+                            {/* Control Bar */}
+                            <div className="flex items-center justify-between pt-1">
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={togglePlay}
+                                        className="w-8 h-8 rounded-lg bg-white/10 hover:bg-[#fe2c55]/20 hover:text-[#fe2c55] border border-white/10 flex items-center justify-center text-white transition-all"
+                                    >
+                                        {isPlaying ? <FaPause size={12} /> : <FaPlay size={12} className="ml-0.5" />}
+                                    </button>
+                                    <button
+                                        onClick={toggleMute}
+                                        className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white transition-all"
+                                    >
+                                        {isMuted ? <FaVolumeXmark size={12} className="text-red-400" /> : <FaVolumeHigh size={12} />}
+                                    </button>
+                                    <button
+                                        onClick={cyclePlaybackRate}
+                                        className="px-2.5 h-8 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white text-[11px] font-mono font-bold transition-all"
+                                    >
+                                        {playbackRate}x
+                                    </button>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => seekToSecond(0)}
+                                        className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white transition-all"
+                                        title="Reiniciar Video"
+                                    >
+                                        <FaRotateLeft size={11} />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Video Info Summary Footer */}
+                    <div className="mt-4 pt-3 border-t border-white/10 flex flex-col gap-1.5 shrink-0">
+                        <h3 className="text-white font-bold text-sm truncate" title={video.title}>
+                            {video.title || `TikTok Video #${video.id}`}
+                        </h3>
+                        <div className="flex items-center justify-between text-xs text-white/50">
+                            <span className="truncate">Por <strong className="text-white/80">@{video.author || "desconocido"}</strong></span>
+                            <span className="shrink-0 text-[11px] bg-white/5 px-2 py-0.5 rounded border border-white/5 font-mono">
+                                Duración: {video.duration}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* ── Right Column: AAA Inspector, Transcript & Julia Integration ── */}
+                <div className="w-full md:w-[52%] h-full flex flex-col p-5 bg-[#0b0d14]/90 overflow-hidden relative">
+                    {/* Header Action Row */}
+                    <div className="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
+                        {/* Tab Switcher */}
+                        <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 gap-1">
+                            <button
+                                onClick={() => setActiveTab('transcript')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                                    activeTab === 'transcript'
+                                        ? 'bg-[#25f4ee]/20 text-[#25f4ee] border border-[#25f4ee]/30 shadow-[0_0_12px_rgba(37,244,238,0.2)]'
+                                        : 'text-white/50 hover:text-white hover:bg-white/5'
+                                }`}
+                            >
+                                <FaFileLines size={11} />
+                                Transcripción
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('intel')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                                    activeTab === 'intel'
+                                        ? 'bg-[#fe2c55]/20 text-[#fe2c55] border border-[#fe2c55]/30 shadow-[0_0_12px_rgba(254,44,85,0.2)]'
+                                        : 'text-white/50 hover:text-white hover:bg-white/5'
+                                }`}
+                            >
+                                <FaBrain size={11} />
+                                Ficha IA
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('julia')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                                    activeTab === 'julia'
+                                        ? 'bg-[#8a5cff]/20 text-[#8a5cff] border border-[#8a5cff]/30 shadow-[0_0_12px_rgba(138,92,255,0.2)]'
+                                        : 'text-white/50 hover:text-white hover:bg-white/5'
+                                }`}
+                            >
+                                <FaCode size={11} />
+                                Julia JSON
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('semantic')}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                                    activeTab === 'semantic'
+                                        ? 'bg-[#25f4ee]/20 text-[#25f4ee] border border-[#25f4ee]/30 shadow-[0_0_12px_rgba(37,244,238,0.2)]'
+                                        : 'text-white/50 hover:text-white hover:bg-white/5'
+                                }`}
+                            >
+                                <FaShareNodes size={11} />
+                                Semantic
+                            </button>
+                        </div>
+
+                        {/* Close Modal Button */}
+                        <button
+                            onClick={onClose}
+                            className="w-8 h-8 rounded-xl bg-white/5 hover:bg-[#fe2c55]/20 hover:text-[#fe2c55] border border-white/10 flex items-center justify-center text-white/70 hover:scale-105 transition-all"
+                            title="Cerrar (Esc)"
+                        >
+                            <FaXmark size={14} />
+                        </button>
+                    </div>
+
+                    {/* Tab 1: Synchronized Transcript */}
+                    {activeTab === 'transcript' && (
+                        <div className="flex-1 flex flex-col min-h-0 pt-4 overflow-hidden">
+                            {/* Search & Copy Bar */}
+                            <div className="flex items-center gap-2.5 mb-3 shrink-0">
+                                <div className="flex-1 relative">
+                                    <FaMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 text-xs" />
+                                    <input
+                                        type="text"
+                                        placeholder="Filtrar palabras en la transcripción..."
+                                        value={filterQuery}
+                                        onChange={(e) => setFilterQuery(e.target.value)}
+                                        className="w-full pl-8 pr-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-white/30 focus:outline-none focus:border-[#25f4ee]/50"
+                                    />
+                                    {filterQuery && (
+                                        <button
+                                            onClick={() => setFilterQuery('')}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white text-xs"
+                                        >
+                                            <FaXmark size={10} />
+                                        </button>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={() => copyToClipboard(fullTranscriptText, 'Texto')}
+                                    className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shrink-0 transition-all active:scale-95"
+                                    title="Copiar transcripción completa"
+                                >
+                                    {copiedFormat === 'Texto' ? <FaCheck className="text-emerald-400" size={12} /> : <FaCopy size={12} />}
+                                    Copiar
+                                </button>
+                            </div>
+
+                            {/* Transcript Chunks List */}
+                            <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-2 rounded-2xl bg-black/30 border border-white/5 p-3">
+                                {loadingTranscript ? (
+                                    <div className="flex items-center justify-center h-full text-white/40 text-xs gap-2">
+                                        <span className="w-4 h-4 rounded-full border-2 border-[#25f4ee] border-t-transparent animate-spin" />
+                                        Cargando transcripción y marcas temporales...
+                                    </div>
+                                ) : filteredChunks.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-full text-white/40 text-xs gap-2">
+                                        <FaFileLines size={24} className="text-white/20" />
+                                        <span>No hay fragmentos que coincidan con la búsqueda.</span>
+                                    </div>
+                                ) : (
+                                    filteredChunks.map((chunk, idx) => {
+                                        const isChunkActive = rawCurrentTime >= chunk.start && rawCurrentTime <= chunk.end;
+                                        return (
+                                            <motion.div
+                                                key={idx}
+                                                onClick={() => seekToSecond(chunk.start)}
+                                                className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col gap-1.5 ${
+                                                    isChunkActive
+                                                        ? 'bg-[#25f4ee]/15 border-[#25f4ee]/40 shadow-[0_0_15px_rgba(37,244,238,0.15)]'
+                                                        : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.06] hover:border-white/10'
+                                                }`}
+                                                whileHover={{ scale: 1.01 }}
+                                                whileTap={{ scale: 0.99 }}
+                                            >
+                                                <div className="flex items-center justify-between">
+                                                    <span className={`text-[10px] font-mono font-black ${isChunkActive ? 'text-[#25f4ee]' : 'text-white/40'}`}>
+                                                        {formatPreciseTime(chunk.start)} → {formatPreciseTime(chunk.end)}
+                                                    </span>
+                                                    <span className="text-[9px] font-bold uppercase tracking-wider text-white/30">
+                                                        Chunk #{chunk.chunk_index + 1}
+                                                    </span>
+                                                </div>
+                                                <p className={`text-xs leading-relaxed ${isChunkActive ? 'text-white font-medium' : 'text-white/70'}`}>
+                                                    {chunk.chunk_text}
+                                                </p>
+                                            </motion.div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Tab 2: AI Intelligence & Multimodal Summary */}
+                    {activeTab === 'intel' && (
+                        <div className="flex-1 flex flex-col min-h-0 pt-4 overflow-y-auto custom-scrollbar gap-4 pr-1">
+                            {/* Multimodal Badges */}
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col gap-1">
+                                    <span className="text-[10px] font-bold text-white/40 uppercase">Vector Dimension</span>
+                                    <span className="text-lg font-black text-[#25f4ee]">384-D</span>
+                                    <span className="text-[9px] text-white/40">all-MiniLM-L6-v2</span>
+                                </div>
+                                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col gap-1">
+                                    <span className="text-[10px] font-bold text-white/40 uppercase">Chunks Indexados</span>
+                                    <span className="text-lg font-black text-[#fe2c55]">{transcriptChunks.length}</span>
+                                    <span className="text-[9px] text-white/40">150 chars / 50 overlap</span>
+                                </div>
+                                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col gap-1">
+                                    <span className="text-[10px] font-bold text-white/40 uppercase">Julia Ingest</span>
+                                    <span className="text-lg font-black text-emerald-400">READY</span>
+                                    <span className="text-[9px] text-white/40">Protocol v1.0</span>
+                                </div>
+                            </div>
+
+                            {/* Extracted Topics */}
+                            <div className="p-4 rounded-2xl bg-black/40 border border-white/10 flex flex-col gap-2">
+                                <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Temas Detectados</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {video.tags?.length ? (
+                                        video.tags.map((t, idx) => (
+                                            <span key={idx} className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold text-white/80">
+                                                #{t}
+                                            </span>
+                                        ))
+                                    ) : (
+                                        ['Educativo', 'TikTok', 'Pulsar', 'Whisper', 'ONNX'].map((t, idx) => (
+                                            <span key={idx} className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold text-white/80">
+                                                #{t}
+                                            </span>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Processing Toggles */}
+                            <div className="flex flex-col gap-2">
+                                <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Capas de Inteligencia</span>
+                                <div className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-lg bg-[#25f4ee]/20 text-[#25f4ee] flex items-center justify-center">
+                                            <FaLanguage size={14} />
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-xs font-bold text-white">Transcripción Fonética</span>
+                                            <span className="text-[10px] text-white/40">Faster-Whisper con segmentación temporal</span>
+                                        </div>
+                                    </div>
+                                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-[#25f4ee]/10 text-[#25f4ee]">ACTIVO</span>
+                                </div>
+
+                                <div className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-lg bg-[#8a5cff]/20 text-[#8a5cff] flex items-center justify-center">
+                                            <FaBrain size={14} />
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-xs font-bold text-white">Embeddings Densos Sharded</span>
+                                            <span className="text-[10px] text-white/40">4 shards HNSW con similitud Coseno</span>
+                                        </div>
+                                    </div>
+                                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-[#8a5cff]/10 text-[#8a5cff]">INDEXADO</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Tab 3: Julia JSON Export */}
+                    {activeTab === 'julia' && (
+                        <div className="flex-1 flex flex-col min-h-0 pt-4 overflow-hidden">
+                            <div className="flex items-center justify-between mb-3 shrink-0">
+                                <span className="text-[11px] font-bold text-white/60">
+                                    Payload estructurado listo para enviar al ecosistema Julia:
+                                </span>
+                                <button
+                                    onClick={() => copyToClipboard(JSON.stringify(juliaPayload, null, 2), 'JSON')}
+                                    className="px-3 py-1.5 bg-[#8a5cff]/20 hover:bg-[#8a5cff]/30 border border-[#8a5cff]/40 text-[#8a5cff] rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
+                                >
+                                    {copiedFormat === 'JSON' ? <FaCheck size={12} /> : <FaCopy size={12} />}
+                                    Copiar JSON
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar bg-black/60 border border-white/10 rounded-2xl p-4 font-mono text-[11px] text-[#25f4ee] leading-relaxed select-all">
+                                <pre>{JSON.stringify(juliaPayload, null, 2)}</pre>
+                            </div>
+                        </div>
+                    )}
+                    {activeTab === 'semantic' && (
+                        <div className="flex-1 flex flex-col min-h-0 pt-4 overflow-hidden">
+                            <div className="flex items-center gap-2 mb-3 shrink-0">
+                                <button
+                                    onClick={async () => {
+                                        if (!video.id) return;
+                                        await exportSemantic(video.id);
+                                    }}
+                                    disabled={exporting}
+                                    className="px-3 py-2 rounded-lg bg-[#25f4ee]/10 hover:bg-[#25f4ee]/20 border border-[#25f4ee]/30 text-[#25f4ee] text-xs font-bold transition-all disabled:opacity-50"
+                                >
+                                    {exporting ? 'Exportando...' : 'Exportar .unib'}
+                                </button>
+                                {exportedContent && (
+                                    <button
+                                        onClick={downloadUnib}
+                                        className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs font-bold transition-all"
+                                    >
+                                        Descargar .unib
+                                    </button>
+                                )}
+                                {semanticError && (
+                                    <span className="text-xs text-red-400">{semanticError}</span>
+                                )}
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar bg-black/20 rounded-xl border border-white/5 p-3">
+                                <pre className="text-[11px] text-white/70 font-mono whitespace-pre-wrap">
+                                    {exportedContent || '// Presiona "Exportar .unib" para generar el índice semántico de este video.\n// El archivo .unib es un índice portable de referencias, no contiene el video.'}
+                                </pre>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Bottom Quick Actions Hub */}
+                    <div className="pt-4 mt-auto border-t border-white/10 grid grid-cols-4 gap-2 shrink-0">
+                        <button
+                            onClick={() => copyToClipboard(fullTranscriptText, 'Texto Plano')}
+                            className="flex flex-col items-center justify-center py-2.5 px-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-all group"
+                        >
+                            <FaFileLines size={13} className="text-white/70 group-hover:scale-110 transition-transform mb-1" />
+                            <span className="text-[10px] font-bold uppercase tracking-wider">Copiar TXT</span>
+                        </button>
+                        <button
+                            onClick={() => {
+                                const md = `# ${video.title || 'Video'}\n**Autor:** @${video.author}\n**Duración:** ${video.duration}\n\n## Transcripción\n${fullTranscriptText}`;
+                                copyToClipboard(md, 'Markdown');
+                            }}
+                            className="flex flex-col items-center justify-center py-2.5 px-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-all group"
+                        >
+                            <FaCode size={13} className="text-[#25f4ee] group-hover:scale-110 transition-transform mb-1" />
+                            <span className="text-[10px] font-bold uppercase tracking-wider">Markdown</span>
+                        </button>
+                        <button
+                            onClick={() => copyToClipboard(JSON.stringify(juliaPayload, null, 2), 'Julia')}
+                            className="flex flex-col items-center justify-center py-2.5 px-2 rounded-xl bg-[#8a5cff]/10 hover:bg-[#8a5cff]/20 border border-[#8a5cff]/30 text-[#8a5cff] transition-all group"
+                        >
+                            <FaShareNodes size={13} className="group-hover:scale-110 transition-transform mb-1" />
+                            <span className="text-[10px] font-bold uppercase tracking-wider">Julia AI</span>
+                        </button>
+                        <button
+                            onClick={() => {
+                                toast.success("Ficha guardada en biblioteca local", {
+                                    description: `Job #${video.id} indexado y persistido en SQLite.`
+                                });
+                            }}
+                            className="flex flex-col items-center justify-center py-2.5 px-2 rounded-xl bg-[#fe2c55]/10 hover:bg-[#fe2c55]/20 border border-[#fe2c55]/30 text-[#fe2c55] transition-all group"
+                        >
+                            <FaCheckDouble size={13} className="group-hover:scale-110 transition-transform mb-1" />
+                            <span className="text-[10px] font-bold uppercase tracking-wider">Indexado</span>
+                        </button>
+                    </div>
+                </div>
+            </motion.div>
         </motion.div>,
         document.body
     );

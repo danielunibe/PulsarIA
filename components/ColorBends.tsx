@@ -1,6 +1,7 @@
 'use client';
 import React, { useEffect, useRef } from 'react';
-import * as THREE from 'three';
+import * as _THREE from 'three';
+const THREE = _THREE as any;
 
 const MAX_COLORS = 8;
 
@@ -128,14 +129,14 @@ export function ColorBends({
     noise = 0.1
 }: ColorBendsProps) {
     const containerRef = useRef<HTMLDivElement | null>(null);
-    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+    const rendererRef = useRef<any>(null);
     const rafRef = useRef<number | null>(null);
-    const materialRef = useRef<THREE.ShaderMaterial | null>(null);
+    const materialRef = useRef<any>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
     const rotationRef = useRef<number>(rotation);
     const autoRotateRef = useRef<number>(autoRotate);
-    const pointerTargetRef = useRef<THREE.Vector2>(new THREE.Vector2(0, 0));
-    const pointerCurrentRef = useRef<THREE.Vector2>(new THREE.Vector2(0, 0));
+    const pointerTargetRef = useRef<any>(new THREE.Vector2(0, 0));
+    const pointerCurrentRef = useRef<any>(new THREE.Vector2(0, 0));
     const pointerSmoothRef = useRef<number>(8);
 
     useEffect(() => {
@@ -275,7 +276,7 @@ export function ColorBends({
 
         const arr = (colors || []).filter(Boolean).slice(0, MAX_COLORS).map(toVec3);
         for (let i = 0; i < MAX_COLORS; i++) {
-            const vec = (material.uniforms.uColors.value as THREE.Vector3[])[i];
+            const vec = (material.uniforms.uColors.value as any[])[i];
             if (i < arr.length) vec.copy(arr[i]);
             else vec.set(0, 0, 0);
         }
@@ -316,3 +317,4 @@ export function ColorBends({
 
     return <div ref={containerRef} className={`relative w-full h-full overflow-hidden ${className}`} style={style} />;
 }
+

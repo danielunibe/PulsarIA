@@ -6,63 +6,68 @@ import SearchParametersCard from '@/components/config/SearchParametersCard';
 import PerformanceMetricsCard from '@/components/config/PerformanceMetricsCard';
 import PipelineDebugPanel from '@/components/config/PipelineDebugPanel';
 import SystemLogsCard from '@/components/config/SystemLogsCard';
+import { FaServer, FaRotate, FaTriangleExclamation } from 'react-icons/fa6';
 
 export default function SemanticConfigPanel() {
   const config = useSemanticConfig();
 
   if (config.isLoading) {
     return (
-      <div className="w-full h-full flex items-center justify-center p-8 bg-[#0B0C10]">
-        <div className="animate-pulse flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
-          <p className="text-gray-400 font-mono text-sm">INITIALIZING RUST BACKEND...</p>
+      <div className="w-full h-full flex items-center justify-center p-8">
+        <div className="flex flex-col items-center gap-4 p-8 rounded-3xl bg-black/60 backdrop-blur-2xl border border-white/10 shadow-2xl">
+          <div className="w-10 h-10 border-3 border-[#25f4ee]/30 border-t-[#25f4ee] rounded-full animate-spin" />
+          <p className="text-white/60 font-mono text-xs uppercase tracking-widest">Sincronizando Core Nativo Rust...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full bg-[#0B0C10] min-h-screen text-gray-200 p-6 md:p-8 overflow-y-auto custom-scrollbar">
+    <div className="w-full min-h-screen text-white/90 p-6 md:p-8 overflow-y-auto custom-scrollbar">
       
       {/* Header Area */}
       <div className="flex flex-col mb-8 gap-2">
-        <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
-          <span className="bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-cyan-400">
-            Semantic Search Operator
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="h-7 w-1.5 rounded-full bg-gradient-to-b from-[#fe2c55] to-[#25f4ee]" />
+          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white flex items-center gap-3">
+            <span>Operador de Inteligencia</span>
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#fe2c55] via-[#8a5cff] to-[#25f4ee]">
+              Semantica ONNX
+            </span>
+          </h1>
           {config.modelStatus?.loaded ? (
-            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-mono font-medium border border-emerald-500/20">
-              ● ONLINE
+            <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-mono font-bold border border-emerald-500/30 flex items-center gap-1.5 shadow-[0_0_12px_rgba(16,185,129,0.2)]">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              ONLINE
             </span>
           ) : (
-            <span className="px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-400 text-xs font-mono font-medium border border-red-500/20">
-              ● OFFLINE
+            <span className="px-3 py-1 rounded-full bg-red-500/10 text-red-400 text-xs font-mono font-bold border border-red-500/30 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-red-400" />
+              OFFLINE
             </span>
           )}
-        </h1>
-        <p className="text-gray-400 text-sm max-w-2xl">
-          System control interface for the native Rust-accelerated Semantic Pipeline. 
-          Powered by ONNX Runtime (`ort`) and SQLite.
+        </div>
+        <p className="text-white/50 text-xs md:text-sm max-w-2xl pl-4">
+          Panel de control y telemetria para el pipeline neuronal de embeddings acelerado por ONNX Runtime (<code className="text-[#25f4ee] font-mono">ort</code>) y persistencia SQLite vectorizada.
         </p>
       </div>
 
       {/* Failure Banner */}
       {!config.modelStatus?.loaded && (
-        <div className="mb-8 p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-between shadow-lg shadow-red-500/5">
-          <div className="flex items-start gap-4">
-            <svg className="w-6 h-6 text-red-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
+        <div className="mb-8 p-4 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-between shadow-2xl backdrop-blur-xl">
+          <div className="flex items-start gap-3">
+            <FaTriangleExclamation className="text-red-400 mt-1 shrink-0" size={18} />
             <div>
-              <h3 className="text-red-400 font-semibold mb-1">Embedding model not loaded.</h3>
-              <p className="text-red-400/80 text-sm">Semantic search is currently disabled. Verify that the ONNX assets exist in `/assets/models/all-MiniLM-L6-v2`.</p>
+              <h3 className="text-red-400 font-bold text-sm">Modelo de embeddings no cargado en memoria</h3>
+              <p className="text-red-400/80 text-xs mt-0.5">La busqueda semantica se encuentra inactiva. Verifica la presencia de model.onnx en assets/models/all-MiniLM-L6-v2.</p>
             </div>
           </div>
           <button 
             onClick={config.actions.reloadModel}
-            className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg transition-colors border border-red-500/30 text-sm font-medium whitespace-nowrap"
+            className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-xl transition-all border border-red-500/30 text-xs font-bold flex items-center gap-2"
           >
-            Retry Loading
+            <FaRotate size={12} />
+            Reintentar Carga
           </button>
         </div>
       )}

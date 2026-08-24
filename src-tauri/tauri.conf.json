@@ -1,8 +1,8 @@
 {
     "$schema": "https://schema.tauri.app/config/2",
-    "productName": "tiktok-processor",
+    "productName": "pulsar-eventide",
     "version": "0.1.0",
-    "identifier": "com.tiktok-processor.dev",
+    "identifier": "com.pulsar-eventide.app",
     "build": {
         "beforeDevCommand": "npm run dev",
         "devUrl": "http://localhost:3000",
@@ -12,7 +12,7 @@
     "app": {
         "windows": [
             {
-                "title": "TikTok Processor",
+                "title": "Pulsar Eventide",
                 "width": 1280,
                 "height": 800,
                 "minWidth": 1000,

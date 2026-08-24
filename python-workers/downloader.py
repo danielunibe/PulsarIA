@@ -108,3 +108,58 @@ def download_video(url: str, job_id: int, base_dir: Path) -> str:
     except subprocess.CalledProcessError as e:
         error_msg = e.stderr.strip() if e.stderr else str(e)
         raise RuntimeError(f"Fallo descargando video: {error_msg}")
+
+def extract_metadata(url: str) -> dict:
+    """Extrae metadatos del video sin descargarlo (solo JSON dump)."""
+    cmd = build_yt_dlp_base_cmd() + [
+        "--quiet",
+        "--no-warnings", 
+        "--dump-json",
+        "--no-download",
+        url
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+        import json
+        info = json.loads(result.stdout)
+        return {
+            "title": info.get("title", ""),
+            "author": info.get("uploader") or info.get("channel") or info.get("creator", ""),
+            "thumbnail": info.get("thumbnail", ""),
+            "duration": info.get("duration", 0),
+            "upload_date": info.get("upload_date", ""),
+            "description": info.get("description", "")[:500],
+            "hashtags": info.get("tags", [])[:10],
+            "platform": info.get("extractor_key", "unknown").lower(),
+            "view_count": info.get("view_count", 0),
+            "like_count": info.get("like_count", 0),
+        }
+    except Exception as e:
+        return {"title": "", "author": "", "thumbnail": "", "duration": 0, "upload_date": "", "description": "", "hashtags": [], "platform": "unknown"}
+
+
+def extract_playlist_videos(url: str) -> list[str]:
+    """Extrae URLs individuales de una playlist de TikTok."""
+    cmd = build_yt_dlp_base_cmd() + [
+        "--quiet",
+        "--no-warnings",
+        "--flat-playlist",
+        "--dump-json",
+        "--no-download",
+        url
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60)
+        import json
+        videos = []
+        for line in result.stdout.strip().split('\n'):
+            if line.strip():
+                info = json.loads(line)
+                if 'url' in info:
+                    videos.append(info['url'])
+                elif 'webpage_url' in info:
+                    videos.append(info['webpage_url'])
+        return videos
+    except Exception as e:
+        print(f"Error extracting playlist: {e}", flush=True)
+        return []

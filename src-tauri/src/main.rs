@@ -1,4 +1,4 @@
-// Prevents additional console window on Windows in release
+﻿// Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use tauri::{State, Emitter};
+use rusqlite::params;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SearchConfig {
@@ -47,6 +48,14 @@ pub struct SystemMetrics {
     pub average_db_time_ms: f32,
     pub model_load_time_ms: f32,
     pub total_queries_run: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TranscriptChunk {
+    pub chunk_index: i64,
+    pub chunk_text: String,
+    pub start: f64,
+    pub end: f64,
 }
 
 struct AppState {
@@ -303,19 +312,49 @@ async fn recompute_embeddings(app_handle: tauri::AppHandle) -> Result<(), String
     Ok(())
 }
 
-// Wrapper para inyectar ONNX desde un origen sincrónico y Mutex-Free a la Clean Architecture
-struct SharedEmbeddingEngine(Arc<std::sync::RwLock<Option<embedding::ONNXModelManager>>>);
+// Wrapper para inyectar ONNX desde un origen async-compatible a la Clean Architecture
+struct SharedEmbeddingEngine(Arc<tokio::sync::Mutex<Option<embedding::ONNXModelManager>>>);
+
 impl crate::domain::ports::EmbeddingEngine for SharedEmbeddingEngine {
     fn generate_embedding(&self, text: &str) -> std::result::Result<Vec<f32>, String> {
-        let mut guard = self.0.write().map_err(|_| "Poison error ONNX RwLock".to_string())?;
-        if let Some(engine) = guard.as_mut() {
-            engine.generate_embedding(text)
-        } else {
-            Err("ONNX Model is currently unloaded (null state)".to_string())
-        }
+        // Bloquear el Mutex async desde contexto sync
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut guard = self.0.lock().await;
+                if let Some(engine) = guard.as_mut() {
+                    engine.generate_embedding(text)
+                } else {
+                    Err("ONNX Model is currently unloaded (null state)".to_string())
+                }
+            })
+        })
     }
 }
 
+
+#[tauri::command]
+async fn auto_cluster_videos(
+    threshold: Option<f32>,
+    min_cluster_size: Option<usize>,
+    state: State<'_, AppState>
+) -> Result<Vec<Vec<i64>>, String> {
+    let db = state.db.lock().await;
+    let thresh = threshold.unwrap_or(0.7);
+    let min_size = min_cluster_size.unwrap_or(2);
+    db::cluster_videos_by_similarity(&db, thresh, min_size).map_err(|e| e.to_string())
+}
+
+
+#[tauri::command]
+async fn set_video_keep_status(
+    job_id: i64,
+    status: String,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    let db = state.db.lock().await;
+    db::set_media_keep_status(&db, job_id, &status).map_err(|e| e.to_string())
+}
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -325,10 +364,10 @@ async fn main() {
         crate::infrastructure::observability::metrics_server::serve_metrics(prometheus_handle).await;
     });
 
-    // Iniciar Módulos Base
+    // Iniciar MÃ³dulos Base
     let conn = db::init_db().expect("Failed to initialize SQLite library.db");
     
-    // Convertímos a std::sync::Mutex para SqliteRepo sincrónico y seguro contra Tokio panics
+    // ConvertÃ­mos a std::sync::Mutex para SqliteRepo sincrÃ³nico y seguro contra Tokio panics
     let std_db = Arc::new(std::sync::Mutex::new(conn));
     
     // Domain Ports: JobRepository
@@ -350,15 +389,15 @@ async fn main() {
         ..Default::default()
     };
     
-    // Compartir ONNX con un RwLock síncrono para lecturas simultáneas seguras
-    let arc_onnx_std = Arc::new(std::sync::RwLock::new(onnx_manager));
-    let engine_port = Arc::new(SharedEmbeddingEngine(arc_onnx_std.clone()));
+    // Compartir ONNX con QueueManager, AppState y Clean Architecture
+    let onnx_arc = Arc::new(Mutex::new(onnx_manager));
+    let engine_port = Arc::new(SharedEmbeddingEngine(onnx_arc.clone()));
 
     // HNSW Vector Index (Horizontal Sharding)
     let shard_count: usize = std::env::var("SHARD_COUNT").unwrap_or_else(|_| "4".to_string()).parse().unwrap_or(4);
     let vector_index = Arc::new(crate::infrastructure::vector_shards::VectorShardManager::new(shard_count));
 
-    // Reranker Semántico (Feature Flag on ENV)
+    // Reranker SemÃ¡ntico (Feature Flag on ENV)
     let reranker_enabled = std::env::var("RERANKER_ENABLED").unwrap_or_else(|_| "false".to_string()) == "true";
     let reranker = Arc::new(crate::application::reranker::CrossEncoderReranker::new(reranker_enabled));
 
@@ -405,7 +444,7 @@ async fn main() {
         }
     });
 
-    // Despachar el Scheduler Automático (Cron Jobs Mantenimiento HNSW)
+    // Despachar el Scheduler AutomÃ¡tico (Cron Jobs Mantenimiento HNSW)
     if let Err(e) = crate::infrastructure::scheduler::start_maintenance_scheduler(search_service.clone(), job_repo.clone()).await {
         tracing::error!("Maintenance scheduler failed to start: {}", e);
     }
@@ -428,14 +467,17 @@ async fn main() {
         security: security_config.clone(),
     };
 
-    // Montar Servidor REST asíncrono en puerto 8080 en hilo segregado
+    // Montar Servidor REST asÃ­ncrono en puerto 8080 en hilo segregado
     tokio::spawn(async move {
         crate::api::gateway::start_api_server(8080, api_state).await;
     });
 
     // Retro-compatibilidad de Interfaz Tauri (Estado legado inyectado o mitigado)
-    let qm = Arc::new(Mutex::new(queue::QueueManager::new(Arc::new(Mutex::new(db::init_db().unwrap()))))); // Mantengo dummy legacy pool para evitar reescribir docenas de commands tauri aquí, enfocado 100% al API actual.
-    // Aunque esto rompe el patrón "Doble verdad", es seguro para la prueba del gateway actual.
+    let qm = Arc::new(Mutex::new(queue::QueueManager::with_onnx(
+        Arc::new(Mutex::new(db::init_db().unwrap())),
+        onnx_arc.clone()
+    )));
+    // Aunque esto rompe el patrÃ³n "Doble verdad", es seguro para la prueba del gateway actual.
     let arc_config = Arc::new(Mutex::new(search_config));
     let arc_metrics = Arc::new(Mutex::new(metrics));
 
@@ -448,7 +490,7 @@ async fn main() {
         .manage(AppState { 
             db: Arc::new(Mutex::new(db::init_db().unwrap())), 
             queue: qm, 
-            onnx: Arc::new(Mutex::new(None)), // Unused in new arch, keeping signature to compile Tauri traits.
+            onnx: onnx_arc, // Conectado al modelo ONNX real para comandos Tauri y QueueManager
             config: arc_config,
             metrics: arc_metrics
         })
@@ -456,8 +498,186 @@ async fn main() {
             add_job, get_jobs, get_base_path, search_transcripts,
             get_model_status, reload_model, get_search_config, update_search_config,
             get_db_status, debug_search_transcripts, get_system_metrics,
-            rebuild_index, vacuum_db, recompute_embeddings
+            rebuild_index, vacuum_db, recompute_embeddings,
+            get_playlists, create_playlist, add_to_playlist, remove_from_playlist,
+            get_playlist_items, delete_playlist,
+            get_transcript,
+            auto_cluster_videos, set_video_keep_status,
+            export_semantic, import_semantic,
+            set_download_dir, get_download_dir,
+            export_library_json
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn get_transcript(job_id: i64, state: State<'_, AppState>) -> Result<Vec<TranscriptChunk>, String> {
+    let db = state.db.lock().await;
+    db::get_transcript_segments_with_timestamps(&db, job_id)
+        .map_err(|e| e.to_string())
+        .map(|rows| {
+            rows.into_iter()
+                .map(|(idx, text, start, end)| TranscriptChunk {
+                    chunk_index: idx,
+                    chunk_text: text,
+                    start,
+                    end,
+                })
+                .collect()
+        })
+}
+
+#[tauri::command]
+async fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::PlaylistRecord>, String> {
+    let db = state.db.lock().await;
+    db::get_all_playlists(&db).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_playlist(
+    name: String,
+    description: Option<String>,
+    color: Option<String>,
+    state: State<'_, AppState>
+) -> Result<i64, String> {
+    let db = state.db.lock().await;
+    let c = color.as_deref().unwrap_or("#8a5cff");
+    db::create_playlist(&db, &name, description.as_deref(), c, false)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn add_to_playlist(
+    playlist_id: i64,
+    job_id: i64,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    let db = state.db.lock().await;
+    db::add_job_to_playlist(&db, playlist_id, job_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn remove_from_playlist(
+    playlist_id: i64,
+    job_id: i64,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    let db = state.db.lock().await;
+    db::remove_job_from_playlist(&db, playlist_id, job_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_playlist_items(
+    playlist_id: i64,
+    state: State<'_, AppState>
+) -> Result<Vec<db::JobRecord>, String> {
+    let db = state.db.lock().await;
+    db::get_playlist_jobs(&db, playlist_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_playlist(
+    playlist_id: i64,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    let db = state.db.lock().await;
+    db::delete_playlist(&db, playlist_id).map_err(|e| e.to_string())
+}
+
+fn format_timestamp(seconds: f64) -> String {
+    let mins = (seconds / 60.0).floor() as i32;
+    let secs = (seconds % 60.0).floor() as i32;
+    let ms = ((seconds % 1.0) * 100.0).round() as i32;
+    format!("{:02}:{:02}.{:02}", mins, secs, ms)
+}
+
+#[tauri::command]
+async fn export_semantic(
+    job_id: i64,
+    state: State<'_, AppState>
+) -> Result<String, String> {
+    let db = state.db.lock().await;
+    let jobs = db::get_all_jobs(&db).map_err(|e| e.to_string())?;
+    let job = jobs.into_iter().find(|j| j.id == job_id).ok_or_else(|| format!("Job {} not found", job_id))?;
+
+    let segments = db::get_transcript_segments(&db, job_id).unwrap_or_default();
+    
+    // Formatear transcripción con timestamps reales de Whisper
+    let transcript_with_timestamps: String = segments
+        .iter()
+        .map(|(_, t, s, e)| {
+            let start = format_timestamp(*s);
+            let end = format_timestamp(*e);
+            format!("[{} -> {}] {}", start, end, t)
+        })
+        .collect::<Vec<_>>()
+        .join("
+");
+
+    // Metadata de embeddings
+    let embedding_count: i64 = db.query_row(
+        "SELECT COUNT(*) FROM transcript_embeddings WHERE job_id = ?1",
+        params![job_id],
+        |row| row.get(0)
+    ).unwrap_or(0);
+
+    let (upload_date, keep_status): (Option<String>, Option<String>) = db.query_row(
+        "SELECT upload_date, keep_status FROM media WHERE job_id = ?1",
+        params![job_id],
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).unwrap_or((None, None));
+
+    // Generar .unib enriquecido para ecosistema Julia
+    let unib_content = format!(
+        "@unib:0.0\n@owner:pulsar-eventide\n@mode:media\n@created:{}\n@source:{}\n@title:{}\n@author:{}\n@duration:{}\n@platform:{}\n@upload_date:{}\n@keep_status:{}\n@julia_ready:{}\n@embeddings_count:{}\n@embeddings_dim:384\n@embedding_model:all-MiniLM-L6-v2\n\n{}\n\n[V#media] @video_{}:video > downloaded_from > @source_{}:source ?1.0 !0.8 {{st:confirmed}} ^system.\n",
+        chrono::Utc::now().to_rfc3339(),
+        job.url,
+        job.title.clone().unwrap_or_default(),
+        job.author.clone().unwrap_or_default(),
+        job.duration.unwrap_or(0),
+        job.platform.clone().unwrap_or_default(),
+        upload_date.unwrap_or_default(),
+        keep_status.unwrap_or_default(),
+        if transcript_with_timestamps.is_empty() { "false" } else { "true" },
+        embedding_count,
+        transcript_with_timestamps,
+        job_id,
+        job_id
+    );
+
+    Ok(unib_content)
+}
+
+#[tauri::command]
+async fn import_semantic(
+    content: String,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    // Por ahora solo validamos y guardamos en archivo
+    // La implementaciÃ³n completa requiere SemanticStorage
+    if content.trim().is_empty() {
+        return Err("Empty .unib content".to_string());
+    }
+    // TODO: Persistir en library/semantic/
+    Ok(())
+}
+#[tauri::command]
+async fn set_download_dir(path: String) -> Result<(), String> {
+    std::env::set_var("PULSAR_DOWNLOAD_DIR", &path);
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_download_dir() -> Result<String, String> {
+    Ok(std::env::var("PULSAR_DOWNLOAD_DIR").unwrap_or_else(|_| "C:/Users/danie/Downloads".to_string()))
+}
+
+#[tauri::command]
+async fn export_library_json(state: State<'_, AppState>) -> Result<String, String> {
+    let db = state.db.lock().await;
+    let jobs = db::get_all_jobs(&db).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&jobs).map_err(|e| e.to_string())
 }

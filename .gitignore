@@ -1,70 +1,51 @@
-# Local editor
-.vscode/
-
-# Runtime data
-data/
-_runtime_backups/
-
-# Local generated project status
-UNOVA_PROJECT_STATUS.md
-
-# Environment / secrets
-.env
-.env.local
-.env.*.local
-src-tauri/.env
-
-# Node / Next
 node_modules/
-.next/
-out/
+venv/
+.venv/
+.env
+.vs/
+.idea/
 dist/
 build/
-*.tsbuildinfo
-
-# Rust / Tauri
+release/
+out/
+bin/
+obj/
 target/
-target-*/
-src-tauri/target/
-src-tauri/target-*/
-src-tauri/target_cli/
-src-tauri/target_iso/
-
-# Python
-.venv/
-venv/
+target*/
+**/target/
+**/target*/
+src-tauri/target*/
+.next/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+cargo_check.log
+*.exe
+*.asar
+*.zip
+*.rar
+*.tar.gz
+*.7z
+*.mp4
+*.mov
+*.dmg
+*.pkg
+*.iso
+*.msi
+*.dll
+*.pdb
+*.log
+*.user
+*.rlib
+*.rmeta
+*.pack
+*.bin
+*.db
+*.onnx
 __pycache__/
 *.pyc
-.pytest_cache/
-
-# Logs
-*.log
-engine_boot*.log
-engine_direct*.log
-tauri_log*.txt
-server_log.txt
-lint_output.txt
-
-# Temporary / cache
-.cache/
-.tmp/
-tmp/
-*.tmp
-
-# Generated reports
-battery_report.html
-sysinfo.json
-
-# Migration staging
+*.pyo
+_unib_inspect/
+_runtime_backups/
 _migration_staging_pulsar/
-
-# Backups
 types_backup_*/
-
-# Large generated data
-data/*.hnsw
-src-tauri/data/*.hnsw
-
-# Do not version copied binaries/models from rescue source
-bin/
-models/
+hooks/test_*.txt

@@ -1,6 +1,31 @@
 import { useState } from 'react';
 
-const TIKTOK_REGEX = /https?:\/\/(?:www\.|vm\.|vt\.)?tiktok\.com\//i;
+export type Platform = 'tiktok' | 'youtube' | 'instagram' | 'generic';
+
+const PLATFORM_REGEXES: Record<Platform, RegExp> = {
+  tiktok:   /https?:\/\/(?:www\.|vm\.|vt\.)?tiktok\.com\//i,
+  youtube:  /https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)/i,
+  instagram:/https?:\/\/(?:www\.)?instagram\.com\/(?:reel|p)\//i,
+  generic:  /^https?:\/\/.{5,}/i,
+};
+
+const PLAYLIST_REGEX = /https?:\/\/(?:www\.)?tiktok\.com\/@[\w.-]+\/playlists?\//i;
+
+export function isPlaylistUrl(url: string): boolean {
+    return PLAYLIST_REGEX.test(url);
+}
+
+export function detectPlatform(url: string): Platform {
+  if (PLATFORM_REGEXES.tiktok.test(url)) return 'tiktok';
+  if (PLATFORM_REGEXES.youtube.test(url)) return 'youtube';
+  if (PLATFORM_REGEXES.instagram.test(url)) return 'instagram';
+  if (PLATFORM_REGEXES.generic.test(url)) return 'generic';
+  return 'generic';
+}
+
+function isValidUrl(url: string): boolean {
+  return Object.values(PLATFORM_REGEXES).some(rx => rx.test(url));
+}
 
 export type Status = 'idle' | 'analyzing' | 'ready' | 'processing' | 'done';
 
@@ -17,7 +42,7 @@ export function useLinkProcessor() {
         const validList: string[] = [];
         let invalidCount = 0;
         lines.forEach(line => {
-            if (TIKTOK_REGEX.test(line)) validList.push(line);
+            if (isValidUrl(line)) validList.push(line);
             else invalidCount++;
         });
         return { total: validList.length + invalidCount, validCount: validList.length, invalidCount, validList };
@@ -75,7 +100,6 @@ export function useLinkProcessor() {
 
         let tauriInvoke: any = null;
         try {
-            // Solo intentar importar tauri si estamos en el entorno correcto
             if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
                 const { invoke } = await import('@tauri-apps/api/core');
                 tauriInvoke = invoke;
@@ -86,9 +110,11 @@ export function useLinkProcessor() {
 
         let processedCount = 0;
         for (const url of validLinks) {
+            let jobCreated = false;
             try {
                 if (tauriInvoke) {
                     await tauriInvoke('add_job', { url });
+                    jobCreated = true;
                     console.log("Job queued successfully via Tauri for", url);
                 } else {
                     console.log("Attempting native fetch to Axum API for", url);
@@ -100,6 +126,7 @@ export function useLinkProcessor() {
                         });
                         if (response.ok) {
                             const data = await response.json();
+                            jobCreated = true;
                             console.log("Job queued successfully via Fetch. Job ID:", data.job_id);
                         } else {
                             console.error("Fetch ingest failed:", await response.text());
@@ -111,6 +138,14 @@ export function useLinkProcessor() {
             } catch (e) {
                 console.error("Failed to add job:", e);
             }
+
+            // Always dispatch client event so QueueSection reacts instantly
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('pulsar_job_created', { 
+                    detail: { url, timestamp: Date.now() } 
+                }));
+            }
+
             processedCount++;
             setStats(prev => ({
                 ...prev,
@@ -119,6 +154,9 @@ export function useLinkProcessor() {
         }
 
         setStatus('done');
+        setTimeout(() => {
+            resetUI();
+        }, 800);
     };
 
     const handleDownloadFile = () => {
