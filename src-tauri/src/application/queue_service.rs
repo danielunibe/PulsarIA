@@ -7,6 +7,7 @@ use metrics::{counter, gauge, histogram};
 
 
 use crate::domain::ports::JobRepository;
+use crate::domain::models::MediaMetadata;
 use crate::application::search_service::SearchService;
 use crate::infrastructure::workers::python_runner::PythonWorker;
 use crate::resilience::circuit_breaker::CircuitBreaker;
@@ -187,7 +188,7 @@ impl QueueService {
             };
 
             gauge!("worker_utilization").increment(1.0);
-            let result = Self::run_pipeline(&msg, search.clone(), &mut worker).await;
+            let result = Self::run_pipeline(&msg, repo.clone(), search.clone(), &mut worker).await;
             gauge!("worker_utilization").decrement(1.0);
 
             // Circuit breaker feedback
@@ -252,31 +253,54 @@ impl QueueService {
     }
 
     /// Invoca la infraestructura de Python mediante IPC y si retorna la transcripción, la indexa en el SearchService
-    async fn run_pipeline(job: &JobMessage, search_service: Arc<SearchService>, worker: &mut PythonWorker) -> Result<(), QueueError> {
+    async fn run_pipeline(job: &JobMessage, repo: Arc<dyn JobRepository>, search_service: Arc<SearchService>, worker: &mut PythonWorker) -> Result<(), QueueError> {
         info!("Despachando pipeline Python IPC para URL: {}", job.url);
         
         let start_time = std::time::Instant::now();
 
-        let result = match worker.run_job(job).await {
-            Ok(Some(transcript)) => {
+        let (transcript, metadata) = match worker.run_job(job).await {
+            Ok((Some(transcript), metadata)) => {
                 info!("Transcripción recibida ({} bytes). Iniciando indexación semántica...", transcript.len());
-                if let Err(e) = search_service.index_document(job.job_id, &transcript) {
-                    error!("Fallo indexando el documento {}: {}", job.job_id, e);
-                    Err(QueueError::ProcessingError(format!("Fallo Indexación HNSW: {}", e)))
-                } else {
-                    Ok(())
-                }
+                (Some(transcript), metadata)
             }
-            Ok(None) => {
+            Ok((None, metadata)) => {
                 warn!("El pipeline finalizó OK, pero no retornó transcripción de texto para el job {}", job.job_id);
-                Ok(())
+                (None, metadata)
             }
             Err(e) => {
-                Err(QueueError::ProcessingError(e.to_string()))
+                return Err(QueueError::ProcessingError(e.to_string()));
             }
         };
 
+        if let Some(meta) = metadata {
+            info!("Guardando metadata para job {}: title='{}', thumbnail='{}', duration={}", job.job_id, meta.title, meta.thumbnail, meta.duration);
+            let video_path = format!("data/processing/{}/video.mp4", job.job_id);
+            let audio_path = format!("data/processing/{}/audio.mp3", job.job_id);
+            let transcript_path = format!("data/processing/{}/transcript.txt", job.job_id);
+            
+            if let Err(e) = repo.update_media(
+                job.job_id,
+                &meta.title,
+                &meta.uploader,
+                &meta.thumbnail,
+                meta.duration,
+                &meta.upload_date,
+                &video_path,
+                &audio_path,
+                &transcript_path,
+            ) {
+                error!("Fallo guardando metadata para job {}: {}", job.job_id, e);
+            }
+        }
+
+        if let Some(transcript) = transcript {
+            if let Err(e) = search_service.index_document(job.job_id, &transcript) {
+                error!("Fallo indexando el documento {}: {}", job.job_id, e);
+                return Err(QueueError::ProcessingError(format!("Fallo Indexación HNSW: {}", e)));
+            }
+        }
+
         histogram!("pipeline_latency_seconds").record(start_time.elapsed().as_secs_f64());
-        result
+        Ok(())
     }
 }

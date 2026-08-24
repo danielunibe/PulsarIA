@@ -10,8 +10,7 @@ pub trait JobRepository: Send + Sync {
     fn get_all_jobs(&self) -> Result<Vec<JobRecord>, String>;
     fn update_status(&self, id: i64, status: &str, progress: i32) -> Result<(), String>;
     
-    // Simplificado para la demostración
-    fn update_media(&self, job_id: i64, title: &str, uploader: &str, duration: i32) -> Result<(), String>;
+    fn update_media(&self, job_id: i64, title: &str, uploader: &str, thumbnail: &str, duration: i32, upload_date: &str, video_path: &str, audio_path: &str, transcript_path: &str) -> Result<(), String>;
 }
 
 pub trait EmbeddingEngine: Send + Sync {

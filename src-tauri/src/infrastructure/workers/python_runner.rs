@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, instrument};
 use metrics::histogram;
 use crate::application::queue_service::JobMessage;
+use crate::domain::models::MediaMetadata;
 
 // ========================================================================
 // INFRASTRUCTURE: Python Runner (IPC Bridge)
@@ -37,6 +38,10 @@ struct WorkerEvent {
     message: Option<String>,
     #[serde(default)]
     text: Option<String>, // Para capturar la transcripción de `transcription_complete`
+    #[serde(default)]
+    job_id: Option<i64>,
+    #[serde(default)]
+    metadata: Option<MediaMetadata>,
 }
 
 // Payload inicial enviado por STDIN hacia Python
@@ -93,9 +98,9 @@ impl PythonWorker {
         })
     }
 
-    /// Inyecta un trabajo al Python daemon a través de STDIN y esucha la respuesta sincrónica en `run_job`
+    /// Inyecta un trabajo al Python daemon a través de STDIN y escucha la respuesta sincrónica en `run_job`
     #[instrument(skip(self, job), fields(job_id = job.job_id))]
-    pub async fn run_job(&mut self, job: &JobMessage) -> Result<Option<String>, PythonRunnerError> {
+    pub async fn run_job(&mut self, job: &JobMessage) -> Result<(Option<String>, Option<MediaMetadata>), PythonRunnerError> {
         let payload = WorkerPayload {
             job_id: job.job_id,
             url: &job.url,
@@ -111,6 +116,7 @@ impl PythonWorker {
 
         let mut line = String::new();
         let mut final_transcript: Option<String> = None;
+        let mut final_metadata: Option<MediaMetadata> = None;
         let mut transcription_start: Option<std::time::Instant> = None;
 
         while let Ok(bytes_read) = self.stdout.read_line(&mut line).await {
@@ -137,13 +143,18 @@ impl PythonWorker {
 
                     Self::handle_event(&event_data)?;
                     
+                    if event_data.event == "metadata" {
+                        if let Some(meta) = event_data.metadata {
+                            final_metadata = Some(meta);
+                        }
+                    }
                     if event_data.event == "transcription_complete" {
                         if let Some(txt) = event_data.text {
                             final_transcript = Some(txt);
                         }
                     } else if event_data.event == "completed" {
                         // Job procesado exitosamente por este worker
-                        return Ok(final_transcript);
+                        return Ok((final_transcript, final_metadata));
                     } else if event_data.event == "error" {
                         let msg = event_data.message.clone().unwrap_or_else(|| "Unknown worker error".into());
                         // Si ocurre un error de pipeline, retornamos el error pero el worker sigue vivo leyendo STDIN
@@ -162,6 +173,8 @@ impl PythonWorker {
 
     fn handle_event(event_data: &WorkerEvent) -> Result<(), PythonRunnerError> {
         match event_data.event.as_str() {
+            "metadata_started" => info!("metadata_started"),
+            "metadata" => info!("metadata received"),
             "download_started" => info!("download_started"),
             "download_complete" => info!("download_complete"),
             "transcription_started" => info!("transcription_started"),

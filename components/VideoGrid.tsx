@@ -118,12 +118,17 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop }: 
 
         const fallbackInterval = setInterval(fetchJobs, 3000);
 
+        // Refetch inmediato cuando se agregan jobs desde el input
+        const handleJobsAdded = () => { fetchJobs(); };
+        window.addEventListener('jobs-added', handleJobsAdded);
+
         return () => {
             clearTimeout(timer);
             clearInterval(fallbackInterval);
             observer.disconnect();
             unlistenProgress?.();
             unlistenIndexed?.();
+            window.removeEventListener('jobs-added', handleJobsAdded);
         };
     }, [fetchJobs]);
 

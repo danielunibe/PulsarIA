@@ -75,7 +75,6 @@ export function useLinkProcessor() {
 
         let tauriInvoke: any = null;
         try {
-            // Solo intentar importar tauri si estamos en el entorno correcto
             if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
                 const { invoke } = await import('@tauri-apps/api/core');
                 tauriInvoke = invoke;
@@ -119,6 +118,9 @@ export function useLinkProcessor() {
         }
 
         setStatus('done');
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('jobs-added'));
+        }
     };
 
     const handleDownloadFile = () => {

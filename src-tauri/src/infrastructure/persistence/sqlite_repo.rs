@@ -50,10 +50,10 @@ impl JobRepository for SqliteRepo {
         crate::db::update_job_status(&conn, id, status, progress).map_err(|e| e.to_string())
     }
 
-    fn update_media(&self, job_id: i64, title: &str, uploader: &str, duration: i32) -> Result<(), String> {
+    fn update_media(&self, job_id: i64, title: &str, uploader: &str, thumbnail: &str, duration: i32, upload_date: &str, video_path: &str, audio_path: &str, transcript_path: &str) -> Result<(), String> {
         let conn = self.conn.lock().unwrap();
         crate::db::insert_or_update_media_metadata(
-            &conn, job_id, title, uploader, "", duration, "", "", "", ""
+            &conn, job_id, title, uploader, thumbnail, duration, upload_date, video_path, audio_path, transcript_path
         ).map_err(|e| e.to_string())
     }
 }

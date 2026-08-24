@@ -51,19 +51,18 @@ pub struct SystemMetrics {
 
 struct AppState {
     db: Arc<Mutex<rusqlite::Connection>>,
-    queue: Arc<Mutex<queue::QueueManager>>,
+    queue_service: Arc<crate::application::queue_service::QueueService>,
     onnx: Arc<Mutex<Option<embedding::ONNXModelManager>>>,
     config: Arc<Mutex<SearchConfig>>,
     metrics: Arc<Mutex<SystemMetrics>>,
 }
 
 #[tauri::command]
-async fn add_job(url: String, state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<i64, String> {
+async fn add_job(url: String, state: State<'_, AppState>) -> Result<i64, String> {
     let db = state.db.lock().await;
     let job_id = db::insert_job(&db, &url).map_err(|e| e.to_string())?;
     
-    let queue = state.queue.lock().await;
-    queue.dispatch_worker(job_id, url.clone(), app_handle.clone()).await;
+    state.queue_service.dispatch(job_id, url).await.map_err(|e| e.to_string())?;
     
     Ok(job_id)
 }
@@ -447,7 +446,7 @@ async fn main() {
         })
         .manage(AppState { 
             db: Arc::new(Mutex::new(db::init_db().unwrap())), 
-            queue: qm, 
+            queue_service,
             onnx: Arc::new(Mutex::new(None)), // Unused in new arch, keeping signature to compile Tauri traits.
             config: arc_config,
             metrics: arc_metrics
