@@ -99,8 +99,7 @@
 
 /* El body responde al tema activo */
 body {
-  background-color: transparent;
-  /* Changed to transparent so Aurora can be seen underneath */
+  background-color: #07080b;
   color: var(--text-default);
   transition: background-color 0.35s ease, color 0.35s ease;
   overflow: auto;
@@ -205,3 +204,16 @@ textarea {
 }
 
 /* Suavizado de enfoque en grupo removido por problemas de visibilidad en cards activas */
+
+/* ================================================================
+   Custom Window Titlebar — Drag Region & Controls
+   ================================================================ */
+.app-drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}

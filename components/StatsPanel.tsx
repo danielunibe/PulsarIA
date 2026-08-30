@@ -1,5 +1,5 @@
 'use client';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 interface JobRecord {
     id: number;
@@ -14,11 +14,28 @@ interface JobRecord {
     video_path?: string;
 }
 
+/**
+ * Props del panel de estadísticas del dashboard.
+ * 
+ * Muestra métricas de uso: total de videos, duración total indexada,
+ * distribución por plataforma, y videos procesados esta semana.
+ */
 interface StatsPanelProps {
+    /** Lista completa de jobs (videos) de la biblioteca */
     jobs: JobRecord[];
 }
 
+/**
+ * StatsPanel — Panel de métricas de uso del dashboard.
+ * 
+ * Calcula y muestra:
+ * - Total de videos procesados
+ * - Duración total de contenido indexado (horas)
+ * - Distribución por plataforma (TikTok, YouTube, Instagram, otros)
+ * - Videos procesados esta semana
+ */
 export function StatsPanel({ jobs }: StatsPanelProps) {
+    const [now] = useState(() => Date.now());
     const stats = useMemo(() => {
         const completed = jobs.filter(j => j.status === 'complete');
         const total = completed.length;
@@ -35,11 +52,11 @@ export function StatsPanel({ jobs }: StatsPanelProps) {
         });
         
         // Videos esta semana
-        const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
         const thisWeek = completed.filter(j => new Date(j.created_at).getTime() > weekAgo).length;
         
         return { total, totalDuration, platforms, thisWeek };
-    }, [jobs]);
+    }, [jobs, now]);
 
     const formatDuration = (seconds: number) => {
         const h = Math.floor(seconds / 3600);

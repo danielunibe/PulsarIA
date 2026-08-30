@@ -1,14 +1,13 @@
+use std::path::Path;
 use std::process::Stdio;
+
+use metrics::histogram;
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error, instrument};
-use metrics::histogram;
-use crate::application::queue_service::JobMessage;
+use tracing::{info, instrument, warn};
 
-// ========================================================================
-// INFRASTRUCTURE: Python Runner (IPC Bridge)
-// ========================================================================
+use crate::domain::models::JobMessage;
 
 #[derive(Debug)]
 pub enum PythonRunnerError {
@@ -21,25 +20,51 @@ pub enum PythonRunnerError {
 impl std::fmt::Display for PythonRunnerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ProcessSpawnError(msg) => write!(f, "ProcessSpawnError: {}", msg),
-            Self::IOError(msg) => write!(f, "IOError: {}", msg),
-            Self::JsonParseError(msg) => write!(f, "JsonParseError: {}", msg),
-            Self::WorkerError(msg) => write!(f, "WorkerError: {}", msg),
+            Self::ProcessSpawnError(message) => write!(f, "ProcessSpawnError: {}", message),
+            Self::IOError(message) => write!(f, "IOError: {}", message),
+            Self::JsonParseError(message) => write!(f, "JsonParseError: {}", message),
+            Self::WorkerError(message) => write!(f, "WorkerError: {}", message),
         }
     }
 }
 
-// Estructura de evento esperada del STDOUT del proceso Python
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkerMetadata {
+    pub title: String,
+    pub uploader: String,
+    pub duration: i32,
+    pub thumbnail: String,
+    pub upload_date: String,
+    #[serde(default)]
+    pub platform: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkerResult {
+    pub transcript: String,
+    pub metadata: Option<WorkerMetadata>,
+    pub segments: Vec<serde_json::Value>,
+    pub visual_analysis: Option<serde_json::Value>,
+    pub instructional_guide: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct WorkerEvent {
     event: String,
     #[serde(default)]
     message: Option<String>,
     #[serde(default)]
-    text: Option<String>, // Para capturar la transcripción de `transcription_complete`
+    text: Option<String>,
+    #[serde(default)]
+    metadata: Option<WorkerMetadata>,
+    #[serde(default)]
+    segments: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    visual_analysis: Option<serde_json::Value>,
+    #[serde(default)]
+    instructional_guide: Option<String>,
 }
 
-// Payload inicial enviado por STDIN hacia Python
 #[derive(Debug, Serialize)]
 struct WorkerPayload<'a> {
     job_id: i64,
@@ -54,127 +79,158 @@ pub struct PythonWorker {
 
 impl PythonWorker {
     pub async fn spawn(python_path: &str, script_path: &str) -> Result<Self, PythonRunnerError> {
-        info!("Spawning persistent subprocess '{} {}'", python_path, script_path);
-
+        info!(
+            "Spawning persistent subprocess '{} {}'",
+            python_path, script_path
+        );
+        let script = Path::new(script_path);
+        let worker_dir = script.parent().unwrap_or_else(|| Path::new("."));
         let mut child = Command::new(python_path)
             .arg(script_path)
+            .current_dir(worker_dir)
+            .env("PYTHONPATH", worker_dir)
+            .env("PYTHONUNBUFFERED", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| PythonRunnerError::ProcessSpawnError(e.to_string()))?;
+            .map_err(|error| PythonRunnerError::ProcessSpawnError(error.to_string()))?;
 
         let stdin = child.stdin.take().ok_or_else(|| {
-            PythonRunnerError::IOError("No se pudo capturar STDIN del subproceso".into())
+            PythonRunnerError::IOError("Python worker did not expose stdin".to_string())
         })?;
         let stdout = child.stdout.take().ok_or_else(|| {
-            PythonRunnerError::IOError("No se pudo capturar STDOUT del subproceso".into())
+            PythonRunnerError::IOError("Python worker did not expose stdout".to_string())
         })?;
-        let mut stderr = child.stderr.take().ok_or_else(|| {
-            PythonRunnerError::IOError("No se pudo capturar STDERR del subproceso".into())
+        let stderr = child.stderr.take().ok_or_else(|| {
+            PythonRunnerError::IOError("Python worker did not expose stderr".to_string())
         })?;
 
         tokio::spawn(async move {
-            let mut reader = BufReader::new(&mut stderr);
+            let mut reader = BufReader::new(stderr);
             let mut line = String::new();
-            while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 { break; }
-                warn!("PYTHON STDERR: {}", line.trim_end());
+            loop {
                 line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) => break,
+                    Ok(_) => warn!("PYTHON STDERR: {}", line.trim_end()),
+                    Err(error) => {
+                        warn!("Failed reading Python stderr: {}", error);
+                        break;
+                    }
+                }
             }
         });
-
-        let stdout_reader = BufReader::new(stdout);
 
         Ok(Self {
             process: child,
             stdin,
-            stdout: stdout_reader,
+            stdout: BufReader::new(stdout),
         })
     }
 
-    /// Inyecta un trabajo al Python daemon a través de STDIN y esucha la respuesta sincrónica en `run_job`
     #[instrument(skip(self, job), fields(job_id = job.job_id))]
-    pub async fn run_job(&mut self, job: &JobMessage) -> Result<Option<String>, PythonRunnerError> {
+    pub async fn run_job(
+        &mut self,
+        job: &JobMessage,
+    ) -> Result<Option<WorkerResult>, PythonRunnerError> {
         let payload = WorkerPayload {
             job_id: job.job_id,
             url: &job.url,
         };
         let mut payload_json = serde_json::to_string(&payload)
-            .map_err(|e| PythonRunnerError::JsonParseError(e.to_string()))?;
+            .map_err(|error| PythonRunnerError::JsonParseError(error.to_string()))?;
         payload_json.push('\n');
 
-        self.stdin.write_all(payload_json.as_bytes()).await
-            .map_err(|e| PythonRunnerError::IOError(format!("Fallo escribiendo a stdin: {}", e)))?;
-        self.stdin.flush().await
-            .map_err(|e| PythonRunnerError::IOError(format!("Fallo flushed stdin: {}", e)))?;
+        self.stdin
+            .write_all(payload_json.as_bytes())
+            .await
+            .map_err(|error| PythonRunnerError::IOError(format!("writing stdin: {}", error)))?;
+        self.stdin
+            .flush()
+            .await
+            .map_err(|error| PythonRunnerError::IOError(format!("flushing stdin: {}", error)))?;
 
         let mut line = String::new();
         let mut final_transcript: Option<String> = None;
+        let mut metadata: Option<WorkerMetadata> = None;
+        let mut segments: Vec<serde_json::Value> = Vec::new();
+        let mut visual_analysis: Option<serde_json::Value> = None;
+        let mut instructional_guide: Option<String> = None;
         let mut transcription_start: Option<std::time::Instant> = None;
 
-        while let Ok(bytes_read) = self.stdout.read_line(&mut line).await {
-            if bytes_read == 0 { 
-                return Err(PythonRunnerError::WorkerError("Python worker died (EOF)".into()));
+        loop {
+            line.clear();
+            let bytes_read = self.stdout.read_line(&mut line).await.map_err(|error| {
+                PythonRunnerError::IOError(format!("reading stdout: {}", error))
+            })?;
+            if bytes_read == 0 {
+                return Err(PythonRunnerError::WorkerError(
+                    "Python worker died (EOF)".to_string(),
+                ));
             }
 
             let clean_line = line.trim();
             if clean_line.is_empty() {
-                line.clear();
                 continue;
             }
 
-            match serde_json::from_str::<WorkerEvent>(clean_line) {
-                Ok(event_data) => {
-                    if event_data.event == "transcription_started" {
-                        transcription_start = Some(std::time::Instant::now());
-                    }
-                    if event_data.event == "transcription_complete" {
-                        if let Some(start) = transcription_start {
-                            histogram!("transcription_latency_seconds").record(start.elapsed().as_secs_f64());
-                        }
-                    }
-
-                    Self::handle_event(&event_data)?;
-                    
-                    if event_data.event == "transcription_complete" {
-                        if let Some(txt) = event_data.text {
-                            final_transcript = Some(txt);
-                        }
-                    } else if event_data.event == "completed" {
-                        // Job procesado exitosamente por este worker
-                        return Ok(final_transcript);
-                    } else if event_data.event == "error" {
-                        let msg = event_data.message.clone().unwrap_or_else(|| "Unknown worker error".into());
-                        // Si ocurre un error de pipeline, retornamos el error pero el worker sigue vivo leyendo STDIN
-                        return Err(PythonRunnerError::WorkerError(msg));
-                    }
+            let event = match serde_json::from_str::<WorkerEvent>(clean_line) {
+                Ok(event) => event,
+                Err(error) => {
+                    warn!(
+                        "Ignoring non-JSON worker output: {} ({})",
+                        clean_line, error
+                    );
+                    continue;
                 }
-                Err(e) => {
-                    warn!("Python output no parseable (Ignorando línea): '{}' - err: {}", clean_line, e);
+            };
+
+            if event.event == "transcription_started" {
+                transcription_start = Some(std::time::Instant::now());
+            }
+            if event.event == "transcription_complete" {
+                if let Some(start) = transcription_start {
+                    histogram!("transcription_latency_seconds")
+                        .record(start.elapsed().as_secs_f64());
                 }
             }
-            line.clear();
-        }
-
-        Err(PythonRunnerError::WorkerError("Connection broken".into()))
-    }
-
-    fn handle_event(event_data: &WorkerEvent) -> Result<(), PythonRunnerError> {
-        match event_data.event.as_str() {
-            "download_started" => info!("download_started"),
-            "download_complete" => info!("download_complete"),
-            "transcription_started" => info!("transcription_started"),
-            "transcription_complete" => info!("transcription_complete emitido por Worker, interceptando texto..."),
-            "completed" => info!("completed"),
-            "error" => {
-                let msg = event_data.message.clone().unwrap_or_else(|| "Unknown error".into());
-                error!("Worker reportó error IPC de tarea: {}", msg);
+            if let Some(text) = event.text {
+                final_transcript = Some(text);
             }
-            other => {
-                info!("Evento secundario recibido: {}", other);
+            if event.metadata.is_some() {
+                metadata = event.metadata;
+            }
+            if let Some(event_segments) = event.segments {
+                segments = event_segments;
+            }
+            if let Some(event_visual_analysis) = event.visual_analysis {
+                visual_analysis = Some(event_visual_analysis);
+            }
+            if let Some(event_instructional_guide) = event.instructional_guide {
+                instructional_guide = Some(event_instructional_guide);
+            }
+
+            match event.event.as_str() {
+                "completed" => {
+                    let transcript = final_transcript.unwrap_or_default();
+                    return Ok(Some(WorkerResult {
+                        transcript,
+                        metadata,
+                        segments,
+                        visual_analysis,
+                        instructional_guide,
+                    }));
+                }
+                "error" => {
+                    return Err(PythonRunnerError::WorkerError(
+                        event
+                            .message
+                            .unwrap_or_else(|| "Unknown worker error".to_string()),
+                    ));
+                }
+                _ => info!("Worker event: {}", event.event),
             }
         }
-        Ok(())
     }
 }

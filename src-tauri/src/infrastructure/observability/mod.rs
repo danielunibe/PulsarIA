@@ -1,8 +1,8 @@
 pub mod metrics_server;
 
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 use tracing_subscriber::fmt;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 
 // ========================================================================
 // INFRASTRUCTURE: Observability & Telemetry
@@ -22,22 +22,26 @@ pub fn init_observability() -> PrometheusHandle {
         .with_line_number(true)
         .json(); // Exportación JSON limpia y parseable por Datadog/ELK
 
-    Registry::default()
+    let _ = Registry::default()
         .with(env_filter)
         .with(formatting_layer)
-        .init();
+        .try_init();
 
     // 3. Inicializar Exportador de Métricas (Devolvemos el Handle Custom)
     let builder = PrometheusBuilder::new();
-    
+
     match builder.install_recorder() {
         Ok(recorder) => {
             tracing::info!("Prometheus recorder installed successfully.");
             recorder
-        },
+        }
         Err(e) => {
-            tracing::error!("Failed installing prometheus metrics exporter: {}", e);
-            panic!("Fallo crítico iniciando exporter: {}", e);
+            tracing::warn!(
+                "Prometheus recorder already initialized; using an isolated handle: {}",
+                e
+            );
+            let recorder = PrometheusBuilder::new().build_recorder();
+            recorder.handle()
         }
     }
 }

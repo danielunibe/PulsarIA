@@ -6,14 +6,29 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 // Extraído de VideoCard.tsx para separar lógica de presentación
 // ============================================================
 
+/**
+ * Opciones del hook useVideoPlayer.
+ */
 interface UseVideoPlayerOptions {
+    /** Si esta card está activa (seleccionada) */
     isActive: boolean;
+    /** Si el video se está reproduciendo en modo expandido */
     isFullPlaying: boolean;
+    /** URL del archivo de video (local o remoto) */
     videoSrc?: string;
+    /** Callback cuando inicia la reproducción */
     onPlayStart?: () => void;
+    /** Callback cuando se detiene la reproducción */
     onPlayStop?: () => void;
 }
 
+/**
+ * Hook de reproducción de video para VideoCard.
+ * 
+ * Extraído de VideoCard.tsx para separar lógica de presentación.
+ * Maneja: hover play, drag & drop, upload de video local,
+ * control de play/pause, y cleanup de object URLs.
+ */
 export function useVideoPlayer({
     isActive,
     isFullPlaying,

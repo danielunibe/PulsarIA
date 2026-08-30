@@ -1,9 +1,16 @@
 ﻿'use client';
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { FaBrain, FaVideo, FaPlay } from 'react-icons/fa6';
 
+/**
+ * Props del panel de clustering temático.
+ * 
+ * Muestra grupos de videos agrupados por similitud semántica
+ * de sus embeddings, usando un algoritmo greedy de clustering.
+ */
 interface ClusterPanelProps {
+    /** Callback para seleccionar un video del cluster */
     onVideoSelect?: (jobId: number) => void;
 }
 
@@ -12,13 +19,20 @@ interface ClusterGroup {
     similarity: number;
 }
 
+/**
+ * ClusterPanel — Panel de agrupación temática de videos.
+ * 
+ * Ejecuta `auto_cluster_videos` en el backend para agrupar videos
+ * por similitud de embeddings. Permite ajustar el umbral de similitud
+ * y el tamaño mínimo de cluster.
+ */
 export function ClusterPanel({ onVideoSelect }: ClusterPanelProps) {
     const [clusters, setClusters] = useState<ClusterGroup[]>([]);
     const [loading, setLoading] = useState(false);
     const [threshold, setThreshold] = useState(0.7);
     const [minSize, setMinSize] = useState(2);
 
-    const loadClusters = async () => {
+    const loadClusters = useCallback(async () => {
         setLoading(true);
         try {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -27,7 +41,8 @@ export function ClusterPanel({ onVideoSelect }: ClusterPanelProps) {
                 minClusterSize: minSize 
             });
             
-            const jobsResponse = await fetch('http://localhost:8080/api/v1/jobs');
+            const { REST_API_BASE } = await import('@/lib/api-config');
+            const jobsResponse = await fetch(`${REST_API_BASE}/jobs`);
             const allJobs: any[] = jobsResponse.ok ? await jobsResponse.json() : [];
             
             const groups: ClusterGroup[] = result.map((jobIds) => {
@@ -49,11 +64,17 @@ export function ClusterPanel({ onVideoSelect }: ClusterPanelProps) {
         } finally {
             setLoading(false);
         }
-    };
+    }, [minSize, threshold]);
 
     useEffect(() => {
-        loadClusters();
-    }, []);
+        let active = true;
+        queueMicrotask(() => {
+            if (active) void loadClusters();
+        });
+        return () => {
+            active = false;
+        };
+    }, [loadClusters]);
 
     return (
         <div className="flex flex-col gap-3">
@@ -131,6 +152,9 @@ export function ClusterPanel({ onVideoSelect }: ClusterPanelProps) {
                                         className="flex items-center gap-2 p-2 rounded-[8px] bg-white/[0.02] hover:bg-white/[0.05] cursor-pointer transition-colors"
                                     >
                                         {job.thumbnail && (
+                                            // Las miniaturas provienen de dominios variables de las plataformas.
+                                            // Se mantiene <img> para evitar bloquearlas con remotePatterns de Next.
+                                            // eslint-disable-next-line @next/next/no-img-element
                                             <img src={job.thumbnail} alt="" className="w-8 h-12 rounded-[4px] object-cover" />
                                         )}
                                         <span className="text-[11px] text-white/70 truncate flex-1">{job.title}</span>

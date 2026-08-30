@@ -1,3 +1,19 @@
+/**
+ * @module design-tokens
+ * 
+ * Design tokens de Pulsar Eventide — constantes TypeScript que reflejan
+ * los CSS custom properties definidos en `globals.css`.
+ * 
+ * **Uso:** Usar estos tokens para valores dinámicos en JavaScript
+ * (ej. sombras con colores variables, cálculos de estilos inline).
+ * Para CSS estático, usar directamente `var(--token-name)`.
+ * 
+ * **Tema:** Oscuro premium con glassmorphism.
+ * - Background base: `#0a0a0a` con aurora WebGL animada
+ * - Superficies: `rgba(10,12,20,0.85)` con `backdrop-filter: blur(40px)`
+ * - Bordes: `rgba(255,255,255,0.08)` a `rgba(255,255,255,0.1)`
+ */
+
 // ================================================================
 // DESIGN TOKENS — Pulsar Eventide
 // Constantes TypeScript que reflejan los CSS custom properties.

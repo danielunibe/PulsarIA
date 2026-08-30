@@ -9,14 +9,33 @@ import { motion } from 'motion/react';
 // - Colores TikTok: Cyan (#25f4ee) + Magenta (#fe2c55)
 // ============================================================
 
+/**
+ * Props del efecto de brillo acético estilo Aceternity UI.
+ * 
+ * Envuelve un componente hijo con un efecto de brillo que sigue
+ * al cursor del mouse. Optimizado para 60fps con requestAnimationFrame.
+ */
 interface GlowingEffectProps {
+    /** Componente hijo a envolver con el efecto */
     children: React.ReactNode;
+    /** Clases CSS adicionales */
     className?: string;
+    /** Radio del brillo en píxeles (default: 200) */
     glowRadius?: number;
+    /** Color del brillo: 'cyan', 'magenta' o 'both' (default) */
     color?: 'cyan' | 'magenta' | 'both';
+    /** Si es true, desactiva el efecto de brillo */
     disabled?: boolean;
 }
 
+/**
+ * GlowingEffect — Efecto de brillo que sigue al cursor del mouse.
+ * 
+ * Implementación optimizada de Aceternity UI glow effect:
+ * - Usa requestAnimationFrame para throttling del mouse
+ * - Solo activa will-change en hover (evita memory overhead)
+ * - Colores TikTok: Cyan (#25f4ee) + Magenta (#fe2c55)
+ */
 export function GlowingEffect({
     children,
     className = '',

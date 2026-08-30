@@ -5,6 +5,13 @@ import { generateChatResponse } from "@/lib/gemini";
 
 interface Message { role: "user" | "assistant"; content: string; }
 
+/**
+ * ChatAssistantPanel — Panel de chat RAG (Retrieval-Augmented Generation).
+ * 
+ * Permite al usuario hacer preguntas en lenguaje natural sobre la
+ * biblioteca de videos. Usa Google Gemini como modelo de generación
+ * y envía los primeros 5 videos procesados como contexto.
+ */
 export function ChatAssistantPanel({ jobs = [] }: { jobs?: any[] }) {
   const [messages, setMessages] = useState<Message[]>([{ role: "assistant", content: "Hola, soy el asistente de investigación de Pulsar. Pregúntame sobre tus videos transcritos y te ayudo a encontrar información." }]);
   const [input, setInput] = useState("");

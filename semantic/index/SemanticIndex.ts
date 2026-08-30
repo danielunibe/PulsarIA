@@ -3,8 +3,8 @@
 // Índice en memoria para consultas rápidas.
 // ============================================================
 
-import { RelationTriple } from '../domain/relations';
 import { SemanticEntity } from '../domain/entities';
+import { RelationTriple } from '../domain/relations';
 
 export class SemanticIndex {
   private entities: Map<string, SemanticEntity> = new Map();
@@ -18,19 +18,20 @@ export class SemanticIndex {
       this.entities.set(entity.id, entity);
     }
 
+    const existing = new Set(
+      this.triples.map(
+        (triple) => `${triple.subjectId}\u0000${triple.relation}\u0000${triple.objectId}\u0000${triple.source}`,
+      ),
+    );
     for (const triple of triples) {
-      this.triples.push(triple);
-
-      const relKey = triple.relation;
-      if (!this.byRelation.has(relKey)) this.byRelation.set(relKey, []);
-      this.byRelation.get(relKey)!.push(triple);
-
-      if (!this.bySubject.has(triple.subjectId)) this.bySubject.set(triple.subjectId, []);
-      this.bySubject.get(triple.subjectId)!.push(triple);
-
-      if (!this.byObject.has(triple.objectId)) this.byObject.set(triple.objectId, []);
-      this.byObject.get(triple.objectId)!.push(triple);
+      const key = `${triple.subjectId}\u0000${triple.relation}\u0000${triple.objectId}\u0000${triple.source}`;
+      if (!existing.has(key)) {
+        this.triples.push(triple);
+        existing.add(key);
+      }
     }
+
+    this.rebuildLookupMaps();
   }
 
   getEntity(id: string): SemanticEntity | undefined {
@@ -38,15 +39,15 @@ export class SemanticIndex {
   }
 
   getTriplesByRelation(relation: string): RelationTriple[] {
-    return this.byRelation.get(relation) || [];
+    return [...(this.byRelation.get(relation) ?? [])];
   }
 
   getTriplesBySubject(subjectId: string): RelationTriple[] {
-    return this.bySubject.get(subjectId) || [];
+    return [...(this.bySubject.get(subjectId) ?? [])];
   }
 
   getTriplesByObject(objectId: string): RelationTriple[] {
-    return this.byObject.get(objectId) || [];
+    return [...(this.byObject.get(objectId) ?? [])];
   }
 
   clear(): void {
@@ -62,5 +63,30 @@ export class SemanticIndex {
       entities: this.entities.size,
       triples: this.triples.length,
     };
+  }
+
+  private rebuildLookupMaps(): void {
+    this.byRelation.clear();
+    this.bySubject.clear();
+    this.byObject.clear();
+
+    for (const triple of this.triples) {
+      this.addToMap(this.byRelation, triple.relation, triple);
+      this.addToMap(this.bySubject, triple.subjectId, triple);
+      this.addToMap(this.byObject, triple.objectId, triple);
+    }
+  }
+
+  private addToMap(
+    map: Map<string, RelationTriple[]>,
+    key: string,
+    triple: RelationTriple,
+  ): void {
+    const values = map.get(key);
+    if (values) {
+      values.push(triple);
+    } else {
+      map.set(key, [triple]);
+    }
   }
 }

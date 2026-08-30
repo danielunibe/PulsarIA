@@ -1,12 +1,12 @@
+use crate::application::search_service::SearchService;
+use metrics::{gauge, histogram};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{info, instrument};
-use metrics::{histogram, gauge};
-use crate::application::search_service::SearchService;
 
 // ========================================================================
 // PHASE 14: Reindex Pipeline (Compactación / Nightly Rebuilds)
-// Objetivo: Eliminar fragmentación HNSW (Tombstones de deletes) reconstruyendo 
+// Objetivo: Eliminar fragmentación HNSW (Tombstones de deletes) reconstruyendo
 // una instancia limpia atómicamente y swappeando la partición de disco.
 // ========================================================================
 
@@ -42,6 +42,10 @@ impl ReindexPipeline {
         histogram!("index_rebuild_duration_seconds").record(start_time.elapsed().as_secs_f64());
         gauge!("index_compaction_ratio").set(compaction_ratio);
 
-        info!("PIPELINE DE REINDEXACIÓN COMPLETADO en {}s. Compaction Ratio: {}", start_time.elapsed().as_secs(), compaction_ratio);
+        info!(
+            "PIPELINE DE REINDEXACIÓN COMPLETADO en {}s. Compaction Ratio: {}",
+            start_time.elapsed().as_secs(),
+            compaction_ratio
+        );
     }
 }

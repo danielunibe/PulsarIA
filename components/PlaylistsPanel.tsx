@@ -1,18 +1,35 @@
 'use client';
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { FaPlus, FaListUl } from 'react-icons/fa6';
 import { PlaylistCard } from './PlaylistCard';
 import { usePlaylists } from '@/hooks/usePlaylists';
 
+/**
+ * Props del panel de playlists temáticas.
+ * 
+ * Muestra la lista de playlists (manuales y auto-generadas), permite
+ * crear nuevas playlists, y navegar a los videos de cada una.
+ */
 interface PlaylistsPanelProps {
+  /** Callback para seleccionar/deseleccionar una playlist */
   onPlaylistSelect: (id: number | null) => void;
+  /** ID de la playlist actualmente seleccionada, o null */
   selectedPlaylistId: number | null;
 }
 
+/**
+ * PlaylistsPanel — Panel de colecciones temáticas de videos.
+ * 
+ * Features:
+ * - Lista de playlists con conteo de videos y badge "Auto"
+ * - Creación manual de playlists con nombre, descripción y color
+ * - Selección/deselección de playlist (filtra el VideoGrid)
+ * - Eliminación de playlists con confirmación
+ */
 export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: PlaylistsPanelProps) {
   const {
-    playlists, loading, createPlaylist, deletePlaylist, selectPlaylist
+    playlists, loading, error, createPlaylist, deletePlaylist, selectPlaylist
   } = usePlaylists();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -24,7 +41,8 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    await createPlaylist(newName.trim(), newDesc.trim() || undefined, selectedColor);
+    const playlistId = await createPlaylist(newName.trim(), newDesc.trim() || undefined, selectedColor);
+    if (playlistId === null) return;
     setNewName('');
     setNewDesc('');
     setSelectedColor(PLAYLIST_COLORS[1]);
@@ -35,6 +53,11 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
     const nextId = id === selectedPlaylistId ? null : id;
     await selectPlaylist(nextId);
     onPlaylistSelect(nextId);
+  };
+
+  const handleDelete = (id: number, name: string) => {
+    if (typeof window !== 'undefined' && !window.confirm(`¿Eliminar la playlist «${name}»?`)) return;
+    void deletePlaylist(id);
   };
 
   return (
@@ -56,6 +79,8 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
           <span className="text-[10px] font-black tracking-[0.2em] uppercase text-white/50">Playlists</span>
         </div>
         <button
+          type="button"
+          aria-expanded={isCreating}
           onClick={() => setIsCreating(!isCreating)}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[10px] font-bold tracking-wider uppercase text-[#8a5cff] bg-[#8a5cff]/10 hover:bg-[#8a5cff]/20 border border-[#8a5cff]/30 transition-all cursor-pointer"
         >
@@ -64,8 +89,14 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
         </button>
       </div>
 
+      {error && (
+        <div role="alert" className="rounded-xl border border-[#fe2c55]/30 bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-[#fe2c55]">
+          No se pudo completar la operación de playlist: {error}
+        </div>
+      )}
+
       {/* Create form */}
-      <AnimatePresence>
+      <>
         {isCreating && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
@@ -95,6 +126,8 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
                   <button
                     key={c}
                     type="button"
+                    aria-label={`Seleccionar color ${c}`}
+                    aria-pressed={selectedColor === c}
                     onClick={() => setSelectedColor(c)}
                     className={`w-4 h-4 rounded-full transition-transform ${selectedColor === c ? 'scale-125 ring-2 ring-white/50' : 'hover:scale-110'}`}
                     style={{ backgroundColor: c }}
@@ -122,7 +155,7 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
             </div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </>
 
       {/* Playlist list */}
       <div className="flex flex-col gap-2">
@@ -132,7 +165,7 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
             playlist={playlist}
             isSelected={playlist.id === selectedPlaylistId}
             onSelect={() => handleSelect(playlist.id)}
-            onDelete={() => deletePlaylist(playlist.id)}
+            onDelete={() => handleDelete(playlist.id, playlist.name)}
           />
         ))}
 

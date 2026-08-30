@@ -1,6 +1,6 @@
+use metrics::{counter, gauge, histogram};
 use std::path::PathBuf;
 use tracing::info;
-use metrics::{counter, histogram, gauge};
 
 // ========================================================================
 // PHASE 31: Tiered Storage
@@ -24,7 +24,7 @@ pub enum StorageTier {
 impl std::fmt::Display for StorageTier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StorageTier::Hot  => write!(f, "hot"),
+            StorageTier::Hot => write!(f, "hot"),
             StorageTier::Warm => write!(f, "warm"),
             StorageTier::Cold => write!(f, "cold"),
         }
@@ -45,10 +45,10 @@ impl TieredStorageManager {
     pub fn new(base_path: &str) -> Self {
         let base = PathBuf::from(base_path);
         Self {
-            hot_path:  base.join("hot"),
+            hot_path: base.join("hot"),
             warm_path: base.join("warm"),
             cold_path: base.join("cold"),
-            hot_max_age_secs:  7  * 86400,
+            hot_max_age_secs: 7 * 86400,
             warm_max_age_secs: 30 * 86400,
         }
     }
@@ -65,11 +65,15 @@ impl TieredStorageManager {
     }
 
     /// Mueve un snapshot de shard al tier especificado
-    pub async fn migrate_shard(&self, shard_file: &str, target_tier: StorageTier) -> Result<(), String> {
+    pub async fn migrate_shard(
+        &self,
+        shard_file: &str,
+        target_tier: StorageTier,
+    ) -> Result<(), String> {
         let start = std::time::Instant::now();
         let source = self.current_path_for(shard_file);
         let dest = match target_tier {
-            StorageTier::Hot  => self.hot_path.join(shard_file),
+            StorageTier::Hot => self.hot_path.join(shard_file),
             StorageTier::Warm => self.warm_path.join(shard_file),
             StorageTier::Cold => self.cold_path.join(shard_file),
         };
@@ -87,7 +91,8 @@ impl TieredStorageManager {
 
         histogram!("tiered_storage_migration_seconds",
             "target" => target_tier.to_string()
-        ).record(start.elapsed().as_secs_f64());
+        )
+        .record(start.elapsed().as_secs_f64());
         counter!("tiered_storage_migrations_total", "tier" => target_tier.to_string()).increment(1);
 
         info!("Shard '{}' migrado a tier {:?}", shard_file, target_tier);
@@ -101,14 +106,19 @@ impl TieredStorageManager {
         gauge!("storage_tier_cold_shards").set(cold_count as f64);
         let total = (hot_count + warm_count + cold_count).max(1) as f64;
         gauge!("storage_hot_ratio").set(hot_count as f64 / total);
-        info!("Storage tiers: hot={} warm={} cold={}", hot_count, warm_count, cold_count);
+        info!(
+            "Storage tiers: hot={} warm={} cold={}",
+            hot_count, warm_count, cold_count
+        );
     }
 
     fn current_path_for(&self, filename: &str) -> PathBuf {
         // Busca el archivo en todos los tiers
         for dir in [&self.hot_path, &self.warm_path, &self.cold_path] {
             let p = dir.join(filename);
-            if p.exists() { return p; }
+            if p.exists() {
+                return p;
+            }
         }
         self.hot_path.join(filename) // fallback
     }

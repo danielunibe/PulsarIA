@@ -49,3 +49,8 @@ _runtime_backups/
 _migration_staging_pulsar/
 types_backup_*/
 hooks/test_*.txt
+data/
+.freebuff/
+.kilo/
+yt_err.txt
+interactive-inventory-cycle1.txt

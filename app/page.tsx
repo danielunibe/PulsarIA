@@ -1,9 +1,13 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+
 import dynamic from 'next/dynamic';
+import Image from 'next/image';
+
 import { Sidebar } from '@/components/Sidebar';
-import { Header } from '@/components/Header';
+import { Header, type SearchMode } from '@/components/Header';
+
 import { VideoGrid } from '@/components/VideoGrid';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { toast } from 'sonner';
@@ -13,15 +17,21 @@ import { FaMagnifyingGlass, FaArrowLeft, FaBrain } from 'react-icons/fa6';
 import { useSettings } from '@/lib/settings-context';
 import { AuroraBackground } from '@/components/AuroraBackground';
 import { generateChatResponse } from '@/lib/gemini';
+import type { PageConfig, SortKey } from '@/components/PagePanel';
+import type { VideoData } from '@/types';
 
 const ColorBends = dynamic(
     () => import('@/components/ColorBends').then((mod) => mod.ColorBends),
     { ssr: false }
 );
 
-type SortKey = 'date_desc' | 'date_asc' | 'title' | 'duration';
+const ExpandedVideoModal = dynamic(
+    () => import('@/components/ExpandedVideoModal').then((mod) => mod.ExpandedVideoModal),
+    { ssr: false }
+);
 
 interface SemanticSearchResult {
+
     video_id: number;
     title: string | null;
     thumbnail: string | null;
@@ -29,64 +39,92 @@ interface SemanticSearchResult {
     similarity_score: number;
 }
 
+const DEFAULT_PAGE_CONFIG: PageConfig = {
+    layout: 'grid',
+    columns: 0,
+    sortKey: 'date_desc',
+    showOnlyCompleted: true,
+    showErrors: false,
+    keepStatusFilter: 'all',
+    platformFilter: 'all',
+};
+
+function formatJobDuration(value: unknown): string {
+    const seconds = Math.max(0, Math.floor(Number(value) || 0));
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+}
+
+function loadPageConfig(): PageConfig {
+    if (typeof window === 'undefined') return DEFAULT_PAGE_CONFIG;
+    try {
+        const saved = window.localStorage.getItem('pulsaria.page-config');
+        if (!saved) return DEFAULT_PAGE_CONFIG;
+        return { ...DEFAULT_PAGE_CONFIG, ...(JSON.parse(saved) as Partial<PageConfig>) };
+    } catch {
+        return DEFAULT_PAGE_CONFIG;
+    }
+}
+
 export default function Page() {
+
     const { settings } = useSettings();
     const activeTheme = settings.theme || 'carbon';
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [activeVideoId, setActiveVideoId] = useState<number | null>(null);
-    const [jobCount, setJobCount] = useState(0);
+    const [allJobs, setAllJobs] = useState<any[]>([]);
     const [basePath, setBasePath] = useState('');
 
-    const [searchResults, setSearchResults] = useState<SemanticSearchResult[] | null>(null);
-    const [aiAnswer, setAiAnswer] = useState<string | null>(null);
-    const [isSearching, setIsSearching] = useState(false);
-    const [sortKey, setSortKey] = useState<SortKey>('date_desc');
+    const completedJobs = allJobs.filter((j: any) => j.status === 'complete' || j.status === 'completed');
+    const jobCount = completedJobs.length > 0 ? completedJobs.length : allJobs.length;
+    const jobsLoaded = allJobs.length > 0;
 
-    const [pageConfig, setPageConfig] = useState({
-        layout: 'grid' as 'grid' | 'list' | 'compact',
-        columns: 0 as 0 | 2 | 3 | 4,
-        sortKey: 'date_desc' as SortKey,
-        showOnlyCompleted: false,
-        showErrors: false,
-        keepStatusFilter: 'all' as string,
-        platformFilter: 'all' as string,
-    });
-    const [allJobs, setAllJobs] = useState<any[]>([]);
+        const [searchResults, setSearchResults] = useState<SemanticSearchResult[] | null>(null);
+    const [searchMode, setSearchMode] = useState<SearchMode>('literal');
+    const [searchModeUsed, setSearchModeUsed] = useState<SearchMode | null>(null);
+    const [searchError, setSearchError] = useState<string | null>(null);
+    const [aiAnswer, setAiAnswer] = useState<string | null>(null);
+    const [aiError, setAiError] = useState<string | null>(null);
+
+    const [isSearching, setIsSearching] = useState(false);
+
+        const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
+    const [pageConfig, setPageConfig] = useState<PageConfig>(loadPageConfig);
+
+    const searchRequestRef = useRef(0);
     const scrollY = useScrollParallax(0.2);
 
     useEffect(() => {
-        const fetchInitData = async () => {
-            try {
-                let data: any[] = [];
-                try {
-                    const { invoke } = await import('@tauri-apps/api/core');
-                    data = await invoke('get_jobs');
-                } catch {
-                    const response = await fetch('http://localhost:8080/api/v1/jobs');
-                    if (response.ok) data = await response.json();
-                }
-                setAllJobs(data);
-                const completed = data.filter((j: any) => j.status === 'complete' || j.status === 'completed');
-                setJobCount(completed.length > 0 ? completed.length : data.length);
-            } catch {
-                setJobCount(0);
-            }
-        };
+        try {
+            window.localStorage.setItem('pulsaria.page-config', JSON.stringify(pageConfig));
+        } catch {
+            // El almacenamiento puede estar deshabilitado en una WebView o navegador privado.
+        }
+    }, [pageConfig]);
 
-        fetchInitData();
-        const interval = setInterval(fetchInitData, 3000);
-        return () => clearInterval(interval);
+        useEffect(() => {
+        (async () => {
+            try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                setBasePath(await invoke<string>('get_base_path'));
+            } catch {
+                // En navegador puro los assets locales no están disponibles.
+            }
+        })();
     }, []);
 
     useEffect(() => {
         let unlisten: (() => void) | undefined;
         import('@tauri-apps/api/event').then(({ listen }) => {
-            listen('job_completed_notify', (event: any) => {
-                toast.success('Video procesado', {
-                    description: event.payload?.title || `Job #${event.payload?.job_id}`,
-                    duration: 5000,
-                });
-            }).then((fn) => { unlisten = fn; });
+            try {
+                listen('job_completed_notify', (event: any) => {
+                    toast.success('Video procesado', {
+                        description: event.payload?.title || `Job #${event.payload?.job_id}`,
+                        duration: 5000,
+                    });
+                }).then((fn) => { unlisten = fn; }).catch(() => {});
+            } catch {}
         }).catch(() => {});
         return () => { unlisten?.(); };
     }, []);
@@ -101,60 +139,177 @@ export default function Page() {
         }
     }, [activeVideoId]);
 
-    const handleSearch = async (query: string) => {
-        if (!query.trim()) {
-            setSearchResults(null);
+        const handlePageConfigChange = useCallback((config: PageConfig) => {
+        setPageConfig(config);
+    }, []);
+
+    const handleSortChange = useCallback((key: string) => {
+        setPageConfig((current) => ({ ...current, sortKey: key as SortKey }));
+    }, []);
+
+    const handlePlaylistSelect = useCallback((id: number | null) => {
+        setSelectedPlaylistId(id);
+        setActiveVideoId(null);
+        setSearchResults(null);
+        setSearchError(null);
+        setAiAnswer(null);
+        setAiError(null);
+    }, []);
+
+    const applyAiResponse = (answer: string) => {
+        if (answer.startsWith('No fue posible consultar Gemini:')) {
             setAiAnswer(null);
+            setAiError(answer);
             return;
         }
-        setIsSearching(true);
+        setAiError(null);
+        setAiAnswer(answer);
+    };
+
+    const handleSearch = async (query: string, requestedMode: SearchMode = searchMode) => {
+        const requestId = ++searchRequestRef.current;
+        const normalizedQuery = query.trim();
+        if (!normalizedQuery) {
+            setSearchResults(null);
+            setAiAnswer(null);
+            setAiError(null);
+            setIsSearching(false);
+            return;
+        }
+                setIsSearching(true);
+
+        setSearchError(null);
         setAiAnswer(null);
+        setAiError(null);
+
         try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const results: SemanticSearchResult[] = await invoke('search_transcripts', { query });
+            let results: SemanticSearchResult[];
+            const isTauri = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+            if (isTauri) {
+                const { invoke } = await import('@tauri-apps/api/core');
+                results = requestedMode === 'literal'
+                    ? await invoke<SemanticSearchResult[]>('search_literal_transcripts', { query: normalizedQuery, limit: 10 })
+                    : await invoke<SemanticSearchResult[]>('search_transcripts', { query: normalizedQuery, limit: 10 });
+            } else {
+                const { REST_API_BASE } = await import('@/lib/api-config');
+                const endpoint = requestedMode === 'literal'
+                    ? `${REST_API_BASE}/search/literal`
+                    : `${REST_API_BASE}/search`;
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: normalizedQuery, limit: 10 }),
+                });
+                if (!response.ok) throw new Error(`Search failed with status ${response.status}`);
+                const payload = await response.json() as { results?: SemanticSearchResult[] };
+                results = payload.results ?? [];
+            }
+                        if (requestId !== searchRequestRef.current) return;
             setSearchResults(results);
+            setSearchModeUsed(requestedMode);
 
             // Synthesize intelligent response with Gemini RAG
+
             if (results && results.length > 0) {
                 const context = results.slice(0, 5).map(r => `Título: ${r.title || 'Video'}\nContenido del fragmento: ${r.matched_text}`);
-                generateChatResponse(query, context).then(ans => {
-                    setAiAnswer(ans);
-                }).catch(() => {});
-                toast.success(`Búsqueda completada: ${results.length} coincidencias`, {
+                                generateChatResponse(normalizedQuery, context).then(ans => {
+                    if (requestId === searchRequestRef.current) applyAiResponse(ans);
+                }).catch((error) => {
+                    if (requestId === searchRequestRef.current) setAiError(String(error));
+                });
+
+                                toast.success(`Búsqueda ${requestedMode === 'literal' ? 'literal' : 'semántica'} completada: ${results.length} coincidencias`, {
                     description: `Similitud máxima: ${(results[0].similarity_score * 100).toFixed(1)}%`
                 });
+
             } else {
-                generateChatResponse(query, []).then(ans => {
-                    setAiAnswer(ans);
-                }).catch(() => {});
+                                    generateChatResponse(normalizedQuery, []).then(ans => {
+                        if (requestId === searchRequestRef.current) applyAiResponse(ans);
+                    }).catch((error) => {
+                        if (requestId === searchRequestRef.current) setAiError(String(error));
+                    });
+
                 toast.info("Sin coincidencias en transcripciones");
             }
-        } catch (e: any) {
-            console.error("Search failed:", e);
-            generateChatResponse(query, []).then(ans => {
-                setAiAnswer(ans);
+                } catch (error) {
+            console.error("Search failed:", error);
+            if (requestId === searchRequestRef.current) {
                 setSearchResults([]);
-            }).catch(() => {});
+                setSearchError(error instanceof Error ? error.message : String(error));
+            }
         } finally {
-            setIsSearching(false);
+
+            if (requestId === searchRequestRef.current) setIsSearching(false);
         }
+
     };
 
-    const handleClearSearch = () => {
-        setSearchResults(null);
+    const handleClearSearch = useCallback(() => {
+        searchRequestRef.current += 1;
+                setSearchResults(null);
+        setSearchModeUsed(null);
+        setSearchError(null);
         setAiAnswer(null);
-    };
+        setAiError(null);
+        setIsSearching(false);
+        setActiveVideoId(null);
+    }, []);
 
-    const getLocalFileSrc = (localRelativePath?: string | null) => {
-        if (!localRelativePath) return undefined;
-        if (localRelativePath.startsWith('http://') || localRelativePath.startsWith('https://')) {
-            return localRelativePath;
+    const handleSearchResultClick = useCallback((result: SemanticSearchResult) => {
+        const job = allJobs.find((candidate) => Number(candidate.id) === result.video_id);
+        if (!job) {
+            toast.error('El video ya no está disponible', {
+                description: `No se encontró el job #${result.video_id} en la biblioteca local.`,
+            });
+            return;
         }
-        if (!basePath) return undefined;
-        return `http://asset.localhost/${basePath.replace(/\\/g, '/')}/${localRelativePath}`;
-    };
+        setActiveVideoId(result.video_id);
+    }, [allJobs]);
 
+    const [resolvedSearchVideo, setResolvedSearchVideo] = useState<VideoData | null>(null);
+
+    async function toAssetUrl(localPath: string | undefined | null): Promise<string | undefined> {
+        if (!localPath) return undefined;
+        if (localPath.startsWith('http://') || localPath.startsWith('https://')) return localPath;
+        try {
+            const { convertFileSrc } = await import('@tauri-apps/api/core');
+            return convertFileSrc(localPath);
+        } catch {
+            return undefined;
+        }
+    }
+
+    useEffect(() => {
+        let cancelled = false;
+        async function resolveVideo() {
+            const result = searchResults?.find((r) => r.video_id === activeVideoId);
+            const job = allJobs.find((j) => Number(j.id) === activeVideoId);
+            if (!result || !job) {
+                if (!cancelled) setResolvedSearchVideo(null);
+                return;
+            }
+            const thumb = await toAssetUrl(job.thumbnail) || result.thumbnail || '';
+            const videoSrc = await toAssetUrl(job.video_path) || '';
+            if (!cancelled) {
+                setResolvedSearchVideo({
+                    id: job.id,
+                    title: job.title || result.title || job.url,
+                    author: job.author || 'desconocido',
+                    duration: formatJobDuration(job.duration),
+                    tags: [],
+                    thumb,
+                    videoSrc,
+                    originalUrl: job.url,
+                    visualAnalysis: job.visual_analysis,
+                    instructionalGuide: job.instructional_guide,
+                });
+            }
+        }
+        resolveVideo();
+        return () => { cancelled = true; };
+    }, [activeVideoId, allJobs, searchResults]);
     return (
+
         <div
             className="flex h-screen w-full font-sans overflow-auto relative"
             style={{ 
@@ -240,17 +395,25 @@ export default function Page() {
             )}
 
             {/* Sidebar Exclusivo Dashboard */}
-            <Sidebar jobs={allJobs} />
+            <Sidebar
+                selectedPlaylistId={selectedPlaylistId}
+                onPlaylistSelect={handlePlaylistSelect}
+            />
 
             {/* Main Content Area */}
             <main className="flex-1 h-full overflow-y-auto custom-scrollbar flex flex-col min-w-0 p-[5px] pl-0 relative z-10">
                 <Header
                     onOpenSettings={() => setSettingsOpen(true)}
                     activeCount={jobCount}
+                    isLoading={!jobsLoaded}
                     onSearchSubmit={handleSearch}
                     onSearchClear={handleClearSearch}
-                    onSortChange={(key) => setSortKey(key as SortKey)}
-                    sortKey={sortKey}
+                    pageConfig={pageConfig}
+                    onPageConfigChange={handlePageConfigChange}
+                    onSortChange={handleSortChange}
+                    sortKey={pageConfig.sortKey}
+                    searchMode={searchMode}
+                    onSearchModeChange={setSearchMode}
                 />
 
                 {isSearching ? (
@@ -263,30 +426,43 @@ export default function Page() {
                             </div>
                         </div>
                     </div>
-                ) : (searchResults !== null || aiAnswer !== null) ? (
+                                ) : (searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null) ? (
+
                     <div className="px-8 py-4 flex flex-col gap-5">
                         {/* Search View Header */}
-                        <div className="flex items-center justify-between">
+<div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <div className="h-6 w-1 rounded-full bg-gradient-to-b from-[#fe2c55] via-[#8a5cff] to-[#25f4ee]"></div>
                                 <h2 className="text-xl font-bold text-white tracking-wide flex items-center gap-2">
-                                    <span>Resultados Inteligentes</span>
-                                    <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#8a5cff] px-2 py-0.5 rounded bg-[#8a5cff]/10 border border-[#8a5cff]/20">
-                                        IA RAG
-                                    </span>
+                                    <span>Resultados de búsqueda</span>
                                 </h2>
                             </div>
-                            <button
+                                                        <button
+                                type="button"
+                                aria-label="Volver a la biblioteca"
                                 onClick={handleClearSearch}
                                 className="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white/80 hover:text-white flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+
                             >
                                 <FaArrowLeft size={11} />
                                 <span>Volver a la Biblioteca</span>
                             </button>
                         </div>
 
+                                                {searchError && (
+                            <div role="alert" className="p-4 rounded-[20px] border border-[#fe2c55]/30 bg-[#fe2c55]/10 text-sm text-[#fe2c55]">
+                                No se pudo completar la búsqueda: {searchError}
+                            </div>
+                        )}
+
                         {/* AI Synthesized Answer Card */}
+                        {aiError && (
+                            <div role="alert" className="p-4 rounded-[20px] border border-[#fe2c55]/30 bg-[#fe2c55]/10 text-sm text-[#fe2c55]">
+                                La síntesis IA no está disponible: {aiError}
+                            </div>
+                        )}
                         {aiAnswer && (
+
                             <div 
                                 className="p-5 rounded-[20px] border flex flex-col gap-3 relative overflow-hidden"
                                 style={{
@@ -321,17 +497,23 @@ export default function Page() {
                                 Coincidencias en Videos ({searchResults?.length || 0})
                             </span>
                             {searchResults && searchResults.map((result, idx) => (
-                                <div
+                                                                <button
+                                    type="button"
                                     key={idx}
-                                    onClick={() => handlePlayStart(result.video_id)}
-                                    className="flex items-start gap-4 p-4 rounded-2xl cursor-pointer group transition-all duration-300 relative overflow-hidden bg-black/40 border border-white/10 hover:border-[#25f4ee]/40 hover:shadow-[0_10px_35px_rgba(37,244,238,0.1)]"
+                                    onClick={() => handleSearchResultClick(result)}
+                                    className="w-full flex items-start gap-4 p-4 rounded-2xl cursor-pointer group transition-all duration-300 relative overflow-hidden bg-black/40 border border-white/10 hover:border-[#25f4ee]/40 hover:shadow-[0_10px_35px_rgba(37,244,238,0.1)] text-left"
                                 >
+
                                     <div className="w-24 h-36 rounded-xl overflow-hidden shrink-0 shadow-lg border border-white/10 relative bg-black">
-                                        <img
-                                            src={getLocalFileSrc(result.thumbnail) || 'https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?q=80&w=100&auto=format&fit=crop'}
+                                                                                <Image
+                                            src={result.thumbnail || 'https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?q=80&w=100&auto=format&fit=crop'}
                                             alt={result.title || 'Video'}
-                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                            fill
+                                            unoptimized
+                                            sizes="96px"
+                                            className="object-cover group-hover:scale-105 transition-transform duration-500"
                                         />
+
                                     </div>
                                     <div className="flex-1 min-w-0 py-1">
                                         <div className="flex items-center justify-between mb-2">
@@ -344,41 +526,73 @@ export default function Page() {
                                         </div>
                                         <div className="mt-2">
                                             <p className="text-xs text-white/70 leading-relaxed font-medium line-clamp-3 bg-white/[0.02] p-2.5 rounded-xl border border-white/5">
-                                                "... {result.matched_text} ..."
+                                                                                                «... {result.matched_text} ...»
+
                                             </p>
                                         </div>
                                     </div>
-                                </div>
+                                                                </button>
                             ))}
-                            {searchResults && searchResults.length === 0 && !aiAnswer && (
+
+                                                        {searchResults && searchResults.length === 0 && !searchError && !aiAnswer && !aiError && (
+
                                 <div className="text-center py-20 text-white/40 bg-black/30 rounded-3xl border border-white/5 flex flex-col items-center gap-3">
                                     <FaMagnifyingGlass size={32} className="text-white/20" />
                                     <span>No se encontraron fragmentos semánticos para esta consulta.</span>
-                                    <button
+                                                                        <button
+                                        type="button"
                                         onClick={handleClearSearch}
                                         className="text-xs text-[#25f4ee] hover:underline"
+
                                     >
                                         Limpiar búsqueda
                                     </button>
                                 </div>
                             )}
-                        </div>
+                                                </div>
+                        {resolvedSearchVideo && (
+                            <ExpandedVideoModal
+                                key={`search-expanded-video-modal-${resolvedSearchVideo.id}`}
+                                video={resolvedSearchVideo}
+                                onClose={() => setActiveVideoId(null)}
+                            />
+                        )}
                     </div>
                 ) : (
-                    <VideoGrid
-                        activeVideoId={activeVideoId}
-                        onVideoPlayStart={handlePlayStart}
-                        onVideoPlayStop={handlePlayStop}
-                        sortKey={sortKey}
-                        layout={pageConfig.layout}
-                        columns={pageConfig.columns}
-                        showOnlyCompleted={pageConfig.showOnlyCompleted}
-                        showErrors={pageConfig.showErrors}
-                        keepStatusFilter={pageConfig.keepStatusFilter}
-                        platformFilter={pageConfig.platformFilter}
-                        onJobsChange={setAllJobs}
-                    />
+                    <>
+
+                        {selectedPlaylistId !== null && (
+                            <div className="mx-8 mt-2 mb-1 px-4 py-3 rounded-2xl border border-[#8a5cff]/25 bg-[#8a5cff]/10 flex items-center justify-between gap-4">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <span className="w-2 h-2 rounded-full bg-[#8a5cff] shadow-[0_0_10px_#8a5cff] shrink-0" />
+                                    <span className="text-xs text-white/80 truncate">Mostrando los videos de la playlist seleccionada</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => handlePlaylistSelect(null)}
+                                    className="text-[10px] font-bold uppercase tracking-wider text-[#25f4ee] hover:text-white transition-colors shrink-0"
+                                >
+                                    Ver biblioteca completa
+                                </button>
+                            </div>
+                        )}
+                        <VideoGrid
+                            activeVideoId={activeVideoId}
+                            onVideoPlayStart={handlePlayStart}
+                            onVideoPlayStop={handlePlayStop}
+                            sortKey={pageConfig.sortKey}
+                            playlistId={selectedPlaylistId ?? undefined}
+                            layout={pageConfig.layout}
+                            columns={pageConfig.columns}
+                            showOnlyCompleted={pageConfig.showOnlyCompleted}
+                            showErrors={pageConfig.showErrors}
+                            keepStatusFilter={pageConfig.keepStatusFilter}
+                            platformFilter={pageConfig.platformFilter}
+                            onJobsChange={setAllJobs}
+                        />
+                    </>
                 )}
+
             </main>
 
             {/* Settings Modal Backdrop & Panel */}

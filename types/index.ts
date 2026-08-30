@@ -31,6 +31,9 @@ export interface VideoData {
     tags: string[];
     thumb: string;
     videoSrc: string;
+    originalUrl?: string;
+    visualAnalysis?: string;
+    instructionalGuide?: string;
 }
 
 // --- Props de Componentes ---

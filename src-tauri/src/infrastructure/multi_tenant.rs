@@ -1,7 +1,7 @@
+use metrics::{counter, gauge};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
-use metrics::{counter, gauge};
 
 // ========================================================================
 // PHASE 26: Multi-Tenant Engine
@@ -63,13 +63,14 @@ impl TenantRegistry {
     /// Obtiene la configuración de un tenant o retorna la default
     pub async fn get_or_default(&self, tenant_id: &str) -> TenantConfig {
         let tenants = self.tenants.read().await;
-        tenants.get(tenant_id)
-            .cloned()
-            .unwrap_or_else(|| {
-                warn!("Tenant '{}' no registrado — usando configuración por defecto", tenant_id);
-                counter!("tenant_unknown_requests_total").increment(1);
-                TenantConfig::default_for(tenant_id)
-            })
+        tenants.get(tenant_id).cloned().unwrap_or_else(|| {
+            warn!(
+                "Tenant '{}' no registrado — usando configuración por defecto",
+                tenant_id
+            );
+            counter!("tenant_unknown_requests_total").increment(1);
+            TenantConfig::default_for(tenant_id)
+        })
     }
 
     pub async fn remove(&self, tenant_id: &str) {
@@ -92,8 +93,5 @@ pub fn tenant_cache_namespace(tenant_id: &str, base_key: &str) -> String {
 
 /// Extrae el tenant_id desde un JWT claim o header
 pub fn extract_tenant_id(jwt_sub: Option<&str>, tenant_header: Option<&str>) -> String {
-    tenant_header
-        .or(jwt_sub)
-        .unwrap_or("default")
-        .to_string()
+    tenant_header.or(jwt_sub).unwrap_or("default").to_string()
 }

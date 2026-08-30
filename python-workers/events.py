@@ -1,3 +1,21 @@
+"""
+Pulsar Eventide — Event Emitter (events.py)
+============================================
+
+Canal de comunicación entre workers Python y el backend Rust.
+
+Los eventos se emiten como JSON line-delimited por stdout, con flush
+inmediato para evitar el buffering pasivo del OS. El backend Rust
+parsea estos eventos en `queue.rs` para:
+
+1. Actualizar el estado del job en SQLite
+2. Persistir metadatos del video
+3. Emitir eventos Tauri al frontend
+
+Compatible con:
+    - `queue.rs` (ProgressEvent)
+    - `python_runner.rs` (WorkerEvent)
+"""
 import json
 import sys
 from typing import Optional, Dict, Any, List
@@ -17,9 +35,25 @@ def emit_event(
     metadata: Optional[Dict[str, Any]] = None,
     message: Optional[str] = None,
     text: Optional[str] = None,
-    segments: Optional[List[Dict[str, Any]]] = None
+    segments: Optional[List[Dict[str, Any]]] = None,
+    visual_analysis: Optional[Dict[str, Any]] = None,
+    instructional_guide: Optional[str] = None,
 ) -> None:
-    """Emite un evento estandarizado asimilable por Rust vía STDOUT."""
+    """
+    Emite un evento estandarizado por stdout para el backend Rust.
+
+    Args:
+        name: Nombre del evento (ej. 'download_started', 'metadata', 'complete').
+        job_id: ID del job asociado al evento.
+        step: Fase del pipeline (normalizado en queue.rs).
+        progress: Progreso de la fase actual (0-100).
+        metadata: Metadatos del video (título, autor, thumbnail, etc.).
+        message: Mensaje adicional (JSON serializado de metadata raw).
+        text: Texto de la transcripción completa.
+        segments: Segmentos con timestamps [{start, end, text}].
+        visual_analysis: Resultados del análisis visual.
+        instructional_guide: Instructivo audiovisual en Markdown.
+    """
     payload: Dict[str, Any] = {
         "event": name,
         "step": step or name,
@@ -37,6 +71,10 @@ def emit_event(
         payload["text"] = text
     if segments is not None:
         payload["segments"] = segments
+    if visual_analysis is not None:
+        payload["visual_analysis"] = visual_analysis
+    if instructional_guide is not None:
+        payload["instructional_guide"] = instructional_guide
     
     print(json.dumps(payload), flush=True)
 
@@ -47,7 +85,8 @@ def emit_error(msg: str, job_id: Optional[int] = None) -> None:
         name="error", 
         job_id=job_id, 
         step="error", 
-        progress=0, 
-        message=msg
+        progress=0,
+        message=msg,
+        text=msg,
     )
     print(f"CRITICAL ERROR: {msg}", file=sys.stderr, flush=True)

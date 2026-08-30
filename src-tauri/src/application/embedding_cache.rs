@@ -1,6 +1,6 @@
+use metrics::counter;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use metrics::counter;
 use tracing::{info, instrument};
 
 // ========================================================================
@@ -43,19 +43,23 @@ impl EmbeddingCache {
     #[instrument(skip(self, embedding))]
     pub fn set(&self, query: &str, embedding: Vec<f32>) {
         let key = normalize_query(query);
-        let Ok(mut cache) = self.cache.lock() else { return };
+        let Ok(mut cache) = self.cache.lock() else {
+            return;
+        };
 
         // Eviction simple: si está lleno, limpiar 20% de entradas
         if cache.len() >= self.max_capacity {
             let to_remove = self.max_capacity / 5;
             let keys: Vec<String> = cache.keys().take(to_remove).cloned().collect();
-            for k in keys { cache.remove(&k); }
+            for k in keys {
+                cache.remove(&k);
+            }
             counter!("embedding_cache_evictions_total").increment(1);
         }
 
         cache.insert(key, embedding);
     }
-    
+
     pub fn len(&self) -> usize {
         self.cache.lock().map(|c| c.len()).unwrap_or(0)
     }
@@ -63,7 +67,9 @@ impl EmbeddingCache {
 
 /// Normaliza la query para maximizar cache hits (lowercase + trim)
 fn normalize_query(query: &str) -> String {
-    query.trim().to_lowercase()
+    query
+        .trim()
+        .to_lowercase()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")

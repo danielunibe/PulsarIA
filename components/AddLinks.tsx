@@ -1,10 +1,11 @@
 'use client';
-import { useRef, useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
 import { motion } from 'motion/react';
-import { Link as LinkIcon, FileText, Upload } from 'lucide-react';
+
 import { useLinkProcessor } from '@/hooks/use-link-processor';
 import { cn } from '@/lib/utils';
-import { FaLink, FaFileLines, FaCloudArrowUp, FaPlus, FaTrash, FaRocket } from 'react-icons/fa6';
+import { FaFileLines, FaLink, FaPlus, FaRocket } from 'react-icons/fa6';
 
 // ── Solid Icons (Filled) & Native Icons ──
 const SolidLinkIcon = () => <FaLink size={14} />;
@@ -24,12 +25,13 @@ const NativeUploadIcon = () => (
 export function AddLinks() {
     const {
         activeTab, setActiveTab,
-        linkText, setLinkText,
+        
         file, setFile,
         status,
         stats,
         validLinks,
-        hasData,
+        processingError,
+
         handleProcessData,
         handleFinalProcess,
         handleDownloadFile
@@ -40,34 +42,22 @@ export function AddLinks() {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Sincronizar responsivamente para que el botón aparezca al escribir
-    useEffect(() => {
-        const text = localLinks.filter(l => l.trim().length > 0).join('\n');
-        setLinkText(text);
-    }, [localLinks, setLinkText]);
-
-    // Limpiar filas locales cuando el proceso finaliza
-    useEffect(() => {
-        if (status === 'done') {
-            setLocalLinks(['']);
-        }
-    }, [status]);
-
-    const hasLocalData = localLinks.some(l => l.trim().length > 0) || file !== null;
+    const hasLocalData = activeTab === 'link'
+        ? localLinks.some((link) => link.trim().length > 0)
+        : file !== null;
     const handleUnifiedProcess = async () => {
-        if (!hasData) return;
-        
-        // Sincronizar linkText justo antes de procesar
-        setLinkText(localLinks.join('\n'));
-        
-        // Fase 1: Análisis (local)
-        await handleProcessData();
+        if (!hasLocalData) return;
+
+        // Pasar el valor actual directamente evita depender de que un estado
+        // derivado haya terminado de actualizarse antes de iniciar el análisis.
+        await handleProcessData(activeTab === 'link' ? localLinks.join('\n') : undefined);
     };
 
     // Efecto para disparar el procesamiento real cuando los links están validados (status ready)
     useEffect(() => {
         if (status === 'ready' && validLinks.length > 0) {
-            handleFinalProcess();
+            void handleFinalProcess(() => setLocalLinks(['']));
+
         }
     }, [status, validLinks, handleFinalProcess]);
 
@@ -154,23 +144,56 @@ export function AddLinks() {
                             boxShadow: 'inset 0 0 10px rgba(139, 92, 246, 0.4), 0 0 15px rgba(139, 92, 246, 0.3)',
                         }}
                     />
-                    <button
+                                        <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'link'}
+                        disabled={status !== 'idle'}
                         onClick={() => status === 'idle' && setActiveTab('link')}
+
                         className={cn("flex-1 relative z-10 py-[8px] text-[11px] font-bold tracking-wider uppercase flex items-center justify-center gap-2 transition-colors duration-200",
                             activeTab === 'link' ? 'text-white drop-shadow-md' : 'text-white/40 hover:text-white/70')}
                     >
                         <SolidLinkIcon /> Enlace
                     </button>
-                    <button
+                                        <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'file'}
+                        disabled={status !== 'idle'}
                         onClick={() => status === 'idle' && setActiveTab('file')}
+
                         className={cn("flex-1 relative z-10 py-[8px] text-[11px] font-bold tracking-wider uppercase flex items-center justify-center gap-2 transition-colors duration-200",
                             activeTab === 'file' ? 'text-white drop-shadow-md' : 'text-white/40 hover:text-white/70')}
                     >
                         <SolidFileIcon /> Subir
                     </button>
-                </div>
+                                </div>
+
+                {processingError && (
+                    <div role="alert" className="px-3 py-2.5 rounded-[12px] bg-[#fe2c55]/10 border border-[#fe2c55]/30 text-[10px] text-[#fe2c55]">
+                        {processingError}
+                    </div>
+                )}
+
+                {stats.total > 0 && (status === 'idle' || status === 'ready') && (
+                    <div
+                        role="status"
+                        className="flex flex-col gap-1 px-3 py-2.5 rounded-[12px] bg-white/[0.03] border border-white/10 text-[10px]"
+                    >
+                        <span className="text-[#25f4ee] font-bold uppercase tracking-wider">
+                            {stats.valid} enlace{stats.valid === 1 ? '' : 's'} válido{stats.valid === 1 ? '' : 's'}
+                        </span>
+                        {stats.invalid > 0 && (
+                            <span className="text-[#fe2c55]/90">
+                                {stats.invalid} enlace{stats.invalid === 1 ? '' : 's'} inválido{stats.invalid === 1 ? '' : 's'}: revisa HTTPS y el dominio.
+                            </span>
+                        )}
+                    </div>
+                )}
 
                 {/* Input panels — Auto-height for compactness */}
+
                 <div className="relative w-full overflow-hidden">
 
                     {/* Link panel */}
@@ -178,12 +201,18 @@ export function AddLinks() {
                         "w-full transition-all duration-300 z-10 flex flex-col gap-2",
                         activeTab === 'link' ? 'opacity-100 translate-y-0' : 'hidden opacity-0 translate-y-2'
                     )}>
-                        <div className="w-full relative overflow-hidden flex flex-col gap-2 custom-scrollbar overflow-y-auto pr-1 max-h-[100px]">
+                                                <div className="w-full relative overflow-hidden flex flex-col gap-2 custom-scrollbar overflow-y-auto pr-1 max-h-[100px]">
+                            <p className="px-1 text-[10px] leading-relaxed text-white/45">
+                                Acepta videos, perfiles, playlists, likes o favoritos de TikTok. Las fuentes privadas requieren una sesión autorizada en Configuración.
+                            </p>
+
                             {localLinks.map((link, idx) => (
                                 <div key={idx} className="w-full">
-                                    <input
+                                                                        <input
                                         type="text"
+                                        aria-label={`Enlace ${idx + 1}`}
                                         value={link}
+
                                         onChange={(e) => handleUpdateRow(idx, e.target.value)}
                                         placeholder="Pegar enlace: TikTok, YouTube, Instagram..."
                                         className="w-full bg-white/5 border border-white/10 rounded-[12px] px-4 py-2.5 text-[12px] text-white/90 outline-none focus:border-[#fe2c55]/50 transition-all font-medium"
@@ -208,22 +237,38 @@ export function AddLinks() {
                         "w-full transition-all duration-300 z-10",
                         activeTab === 'file' ? 'opacity-100 translate-y-0' : 'hidden opacity-0 -translate-y-2'
                     )}>
-                        <div
+                                                <div
+                            role="button"
+                            tabIndex={status === 'idle' ? 0 : -1}
+                            aria-disabled={status !== 'idle'}
+                            aria-label={file ? `Cambiar archivo ${file.name}` : 'Seleccionar archivo TXT o CSV'}
                             className="w-full h-[80px] flex items-center justify-center gap-3 cursor-pointer group relative overflow-hidden transition-all duration-300 hover:border-[#25f4ee]/40"
+
                             style={{
                                 background: 'rgba(0,0,0,0.4)',
                                 borderRadius: '16px',
                                 border: '1px solid rgba(37,244,238,0.2)', // Cyan hint on upload border
                                 boxShadow: 'inset 0 4px 15px rgba(0,0,0,0.7)',
                             }}
-                            onClick={() => status === 'idle' && fileInputRef.current?.click()}
+                                                        onClick={() => status === 'idle' && fileInputRef.current?.click()}
+                            onKeyDown={(event) => {
+                                if (status === 'idle' && (event.key === 'Enter' || event.key === ' ')) {
+                                    event.preventDefault();
+                                    fileInputRef.current?.click();
+                                }
+                            }}
+
                         >
                             <input
                                 type="file"
                                 ref={fileInputRef}
                                 className="hidden"
                                 accept=".csv, .txt"
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFile(e.target.files?.[0] || null)}
+                                                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                    setFile(e.target.files?.[0] || null);
+                                    e.currentTarget.value = '';
+                                }}
+
                             />
                             {/* Eliminado container extra para dejar lucir el icono nativo puro */}
                             <div className="transition-all duration-500 group-hover:scale-110 drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">
@@ -241,8 +286,11 @@ export function AddLinks() {
 
                 {/* Action button — Rediseñado para máximo impacto */}
                 <div className={cn("overflow-hidden transition-all duration-500 ease-in-out relative z-10 w-full", hasLocalData && status === 'idle' ? 'max-h-40 opacity-100 mt-4' : 'max-h-0 opacity-0 mt-0')}>
-                    <motion.button
+                                        <motion.button
+                        type="button"
+                        disabled={!hasLocalData || status !== 'idle'}
                         onClick={handleUnifiedProcess}
+
                         className="w-full relative flex items-center justify-center gap-3 text-white text-[12px] sm:text-[13px] font-black tracking-[0.15em] uppercase py-4 rounded-[18px] group"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}

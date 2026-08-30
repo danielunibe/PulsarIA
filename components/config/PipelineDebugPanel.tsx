@@ -143,7 +143,7 @@ export default function PipelineDebugPanel({ actions }: Props) {
                     </span>
                   </div>
                   <p className="text-xs text-white/70 italic line-clamp-2 leading-relaxed">
-                    "...{res.matched_text}..."
+                    «...{res.matched_text}...»
                   </p>
                   <div className="flex gap-2 text-[9px] text-white/30 font-mono mt-0.5">
                     <span>Chunk #{res.chunk_index}</span>

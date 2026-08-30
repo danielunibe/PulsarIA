@@ -7,11 +7,27 @@ import { FaHeart, FaCommentDots, FaBookmark, FaShare } from 'react-icons/fa6';
 
 const icons = [FaHeart, FaCommentDots, FaBookmark, FaShare];
 
+/**
+ * Props del shell de card vacía/inactiva.
+ * 
+ * Muestra una card placeholder con el logo de TikTok,
+ * iconos decorativos (heart, comment, bookmark, share),
+ * y barras skeleton para simular contenido.
+ */
 interface InactiveCardShellProps {
+    /** Si el mouse está sobre la card (afecta opacidad y efectos) */
     hovered: boolean;
+    /** Índice del slot en el grid (para animaciones escalonadas) */
     slotIndex?: number;
 }
 
+/**
+ * InactiveCardShell — UI fantasma de card vacía para el grid.
+ * 
+ * Componente decorativo que mantiene el layout del grid cuando
+ * no hay videos reales. Muestra el logo de TikTok, iconos de
+ * interacción, y barras skeleton que se iluminan en hover.
+ */
 export function InactiveCardShell({ hovered }: InactiveCardShellProps) {
     return (
         <div

@@ -1,5 +1,15 @@
 import { useState, useEffect } from 'react';
 
+/**
+ * Hook de parallax suave basado en scroll.
+ * 
+ * Escucha el evento de scroll del elemento `<main>` y retorna
+ * un offset numérico que se puede usar para mover elementos
+ * con un efecto de profundidad (parallax).
+ * 
+ * @param speed - Velocidad del parallax (default: 0.5). Valores más altos = más movimiento.
+ * @returns Offset de scroll multiplicado por la velocidad
+ */
 export function useScrollParallax(speed: number = 0.5) {
     const [offset, setOffset] = useState(0);
 

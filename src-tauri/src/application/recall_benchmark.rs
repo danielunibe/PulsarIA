@@ -1,7 +1,7 @@
 use crate::domain::models::SearchResult;
+use metrics::{gauge, histogram};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
-use metrics::{histogram, gauge};
 
 // ========================================================================
 // PHASE 23: Dataset Recall Benchmark
@@ -46,7 +46,7 @@ where
 {
     let start_time = std::time::Instant::now();
     let total = queries.len();
-    
+
     let mut recall_at_10_sum = 0.0_f64;
     let mut recall_at_50_sum = 0.0_f64;
     let mut mrr_sum = 0.0_f64;
@@ -55,7 +55,7 @@ where
 
     for bq in &queries {
         let query_start = std::time::Instant::now();
-        
+
         let results = match search_fn(bq.query.clone()).await {
             Ok(r) => r,
             Err(e) => {
@@ -71,31 +71,46 @@ where
 
         // Recall@10: cuántos relevantes aparecen en los primeros 10
         let top_10: Vec<i64> = result_ids.iter().take(10).cloned().collect();
-        let hits_10 = top_10.iter().filter(|id| bq.relevant_doc_ids.contains(id)).count();
+        let hits_10 = top_10
+            .iter()
+            .filter(|id| bq.relevant_doc_ids.contains(id))
+            .count();
         recall_at_10_sum += hits_10 as f64 / bq.relevant_doc_ids.len().max(1) as f64;
 
         // Recall@50
         let top_50: Vec<i64> = result_ids.iter().take(50).cloned().collect();
-        let hits_50 = top_50.iter().filter(|id| bq.relevant_doc_ids.contains(id)).count();
+        let hits_50 = top_50
+            .iter()
+            .filter(|id| bq.relevant_doc_ids.contains(id))
+            .count();
         recall_at_50_sum += hits_50 as f64 / bq.relevant_doc_ids.len().max(1) as f64;
 
         // MRR: posición del primer resultado relevante
-        if let Some(pos) = result_ids.iter().position(|id| bq.relevant_doc_ids.contains(id)) {
+        if let Some(pos) = result_ids
+            .iter()
+            .position(|id| bq.relevant_doc_ids.contains(id))
+        {
             mrr_sum += 1.0 / (pos + 1) as f64;
         }
 
         // nDCG@10: Normalized Discounted Cumulative Gain
-        let dcg: f64 = top_10.iter().enumerate().map(|(pos, id)| {
-            if bq.relevant_doc_ids.contains(id) {
-                1.0 / (pos as f64 + 2.0).log2() // pos+2 porque log2(1) = 0
-            } else {
-                0.0
-            }
-        }).sum();
-        
+        let dcg: f64 = top_10
+            .iter()
+            .enumerate()
+            .map(|(pos, id)| {
+                if bq.relevant_doc_ids.contains(id) {
+                    1.0 / (pos as f64 + 2.0).log2() // pos+2 porque log2(1) = 0
+                } else {
+                    0.0
+                }
+            })
+            .sum();
+
         // IDCG: DCG ideal (todos los relevantes al inicio)
         let ideal_count = bq.relevant_doc_ids.len().min(10);
-        let idcg: f64 = (0..ideal_count).map(|pos| 1.0 / (pos as f64 + 2.0).log2()).sum();
+        let idcg: f64 = (0..ideal_count)
+            .map(|pos| 1.0 / (pos as f64 + 2.0).log2())
+            .sum();
         ndcg_sum += if idcg > 0.0 { dcg / idcg } else { 0.0 };
     }
 

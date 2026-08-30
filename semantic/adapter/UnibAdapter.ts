@@ -18,13 +18,17 @@ import {
   ThumbnailEntity,
   TranscriptEntity,
   ProjectEntity,
-  RelationTriple,
-  RelationWeight,
-  RelationSource,
   makeStableId,
   simpleChecksum,
 } from '../domain/entities';
-import { Relation, isValidWeight, RELATION_WEIGHT_PRESETS } from '../domain/relations';
+import {
+  Relation,
+  RelationSource,
+  RelationTriple,
+  RelationWeight,
+  isValidWeight,
+  RELATION_WEIGHT_PRESETS,
+} from '../domain/relations';
 import { SemanticWeight, normalizeWeight } from '../domain/weights';
 
 // Entradas de dominio Pulsar (tipos simplificados para el adapter)

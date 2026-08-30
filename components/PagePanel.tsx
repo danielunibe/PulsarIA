@@ -7,13 +7,26 @@ export type GridLayout = 'grid' | 'list' | 'compact';
 export type GridColumns = 2 | 3 | 4 | 0; // 0 = auto
 export type SortKey = 'date_desc' | 'date_asc' | 'title' | 'duration';
 
+/**
+ * Configuración de presentación de la biblioteca de videos.
+ * 
+ * Controla cómo se muestra el VideoGrid: layout, columnas,
+ * ordenamiento, filtros visuales. Se persiste en `localStorage`.
+ */
 export interface PageConfig {
+  /** Modo de visualización: 'grid' (auto-columnas), 'list' (una columna), 'compact' (cards pequeñas) */
   layout: GridLayout;
+  /** Número fijo de columnas (0 = auto basado en ancho de ventana) */
   columns: GridColumns;
+  /** Clave de ordenamiento */
   sortKey: SortKey;
+  /** Si es true, oculta jobs que no están en estado 'complete' */
   showOnlyCompleted: boolean;
+  /** Si es true, muestra solo jobs con errores */
   showErrors: boolean;
+  /** Filtrar por estado de retención: 'keep', 'online', o 'all' */
   keepStatusFilter?: string;
+  /** Filtrar por plataforma: 'tiktok', 'youtube', etc., o 'all' */
   platformFilter?: string;
 }
 
@@ -21,7 +34,7 @@ const DEFAULT_CONFIG: PageConfig = {
   layout: 'grid',
   columns: 0,
   sortKey: 'date_desc',
-  showOnlyCompleted: false,
+  showOnlyCompleted: true, // Bug #57 FIX: Must match page.tsx DEFAULT_PAGE_CONFIG
   showErrors: false,
   keepStatusFilter: 'all',
   platformFilter: 'all',
@@ -32,6 +45,13 @@ interface PagePanelProps {
   onChange: (config: PageConfig) => void;
 }
 
+/**
+ * PagePanel — Panel de configuración de presentación de la biblioteca.
+ * 
+ * Permite al usuario controlar: modo de visualización (grid/list/compact),
+ * número de columnas, ordenamiento, filtros de plataforma y retención.
+ * Todo el estado se persiste en `localStorage`.
+ */
 export function PagePanel({ config, onChange }: PagePanelProps) {
   const update = (partial: Partial<PageConfig>) => onChange({ ...config, ...partial });
 
@@ -73,7 +93,9 @@ export function PagePanel({ config, onChange }: PagePanelProps) {
             const isSelected = config.layout === opt.id;
             return (
               <button
+                type="button"
                 key={opt.id}
+                aria-pressed={isSelected}
                 onClick={() => update({ layout: opt.id as GridLayout })}
                 className={`flex-1 py-2 px-2 flex items-center justify-center gap-1.5 text-[11px] font-bold tracking-wider rounded-lg transition-all ${
                   isSelected
@@ -100,7 +122,9 @@ export function PagePanel({ config, onChange }: PagePanelProps) {
               const isSelected = config.columns === col;
               return (
                 <button
+                  type="button"
                   key={col}
+                  aria-pressed={isSelected}
                   onClick={() => update({ columns: col })}
                   className={`py-1.5 text-[11px] font-mono font-bold rounded-lg transition-all ${
                     isSelected
@@ -142,18 +166,20 @@ export function PagePanel({ config, onChange }: PagePanelProps) {
         {[
           { key: 'showOnlyCompleted', label: 'Solo videos completados', desc: 'Oculta tareas en progreso' },
           { key: 'showErrors', label: 'Mostrar registros de error', desc: 'Permite inspeccionar descargas fallidas' },
-          { key: 'keepStatusFilter', label: 'Solo conservados' },
-          { key: 'platformFilter', label: 'Solo TikTok' },
+          { key: 'keepStatusFilter', label: `Retención: ${(config.keepStatusFilter ?? 'all') === 'all' ? 'Todas' : (config.keepStatusFilter ?? 'keep') === 'keep' ? 'Conservados' : 'Online'}` },
+          { key: 'platformFilter', label: `Plataforma: ${(config.platformFilter ?? 'all') === 'all' ? 'Todas' : (config.platformFilter ?? 'all').toUpperCase()}` },
         ].map(({ key, label, desc }) => {
           const isChecked = key === 'keepStatusFilter'
-            ? (config[key as keyof PageConfig] as string) === 'keep'
+            ? (config[key as keyof PageConfig] as string) !== 'all'
             : key === 'platformFilter'
               ? (config[key as keyof PageConfig] as string) !== 'all'
               : (config[key as keyof PageConfig] as boolean);
 
           const handleClick = () => {
             if (key === 'keepStatusFilter') {
-              update({ keepStatusFilter: (config[key as keyof PageConfig] as string) === 'all' ? 'keep' : 'all' });
+              const current = config[key as keyof PageConfig] as string;
+              const next = current === 'all' ? 'keep' : current === 'keep' ? 'online' : 'all';
+              update({ keepStatusFilter: next });
             } else if (key === 'platformFilter') {
               const current = (config[key as keyof PageConfig] as string);
               const next = current === 'all' ? 'tiktok' : current === 'tiktok' ? 'youtube' : current === 'youtube' ? 'instagram' : 'all';
@@ -164,27 +190,31 @@ export function PagePanel({ config, onChange }: PagePanelProps) {
           };
 
           return (
-            <div
+            <button
+              type="button"
               key={key}
+              aria-pressed={isChecked}
               onClick={handleClick}
-              className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 transition-all cursor-pointer select-none"
+              className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 transition-all cursor-pointer select-none text-left"
             >
               <div className="flex flex-col">
                 <span className="text-xs font-bold text-white/90">{label}</span>
                 <span className="text-[9px] text-white/40">{desc}</span>
               </div>
-              <div
+              <span
+                aria-hidden="true"
                 className={`w-9 h-5 rounded-full p-0.5 transition-colors relative shrink-0 ${
                   isChecked ? 'bg-[#00d4aa]' : 'bg-white/20'
                 }`}
               >
-                <motion.div
-                  className="w-4 h-4 rounded-full bg-white shadow-md"
+                                  <motion.span
+                  className="block w-4 h-4 rounded-full bg-white shadow-md"
+
                   animate={{ x: isChecked ? 16 : 0 }}
                   transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                 />
-              </div>
-            </div>
+              </span>
+            </button>
           );
         })}
       </div>

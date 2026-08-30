@@ -1,0 +1,7 @@
+python311.zip
+.
+..\python-workers
+Lib\site-packages
+
+# Cargar site-packages del runtime portable bundleado.
+import site

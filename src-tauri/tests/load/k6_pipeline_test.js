@@ -16,8 +16,9 @@ export let options = {
     },
 };
 
+/* eslint-disable import/no-anonymous-default-export -- k6 requires a default VU function. */
 export default function () {
-    const url = 'http://127.0.0.1:9001/pipeline/ingest'; 
+    const url = 'http://127.0.0.1:8080/api/v1/ingest';
     
     const payload = JSON.stringify({
         url: 'https://video-source/sample.mp4',

@@ -54,7 +54,10 @@ pub struct EmbeddingVersionRegistry {
 
 impl EmbeddingVersionRegistry {
     pub fn new(model_name: &str, version: &str, dimensions: usize) -> Self {
-        info!("EmbeddingVersionRegistry: modelo={} v={} dims={}", model_name, version, dimensions);
+        info!(
+            "EmbeddingVersionRegistry: modelo={} v={} dims={}",
+            model_name, version, dimensions
+        );
         Self {
             current_version: version.to_string(),
             current_model: model_name.to_string(),
@@ -86,10 +89,11 @@ impl EmbeddingVersionRegistry {
     /// Migrar a nuevo modelo: retorna true si la transición requiere reindex completo
     pub fn migrate(&mut self, new_model: &str, new_version: &str) -> bool {
         let needs_reindex = new_model != self.current_model;
-        
-        info!("Migración de modelo: {}/{} → {}/{}  (reindex={})",
-            self.current_model, self.current_version,
-            new_model, new_version, needs_reindex);
+
+        info!(
+            "Migración de modelo: {}/{} → {}/{}  (reindex={})",
+            self.current_model, self.current_version, new_model, new_version, needs_reindex
+        );
 
         self.current_model = new_model.to_string();
         self.current_version = new_version.to_string();

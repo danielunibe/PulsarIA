@@ -7,14 +7,15 @@ const nextConfig: NextConfig = {
     // Static export para empaquetado Tauri (tauri.conf.json -> frontendDist: ../out)
     output: 'export',
     reactStrictMode: false,
+    allowedDevOrigins: ['127.0.0.1', 'localhost'],
     eslint: {
-        ignoreDuringBuilds: true,
+        ignoreDuringBuilds: false,
     },
     typescript: {
-        ignoreBuildErrors: true,
+        ignoreBuildErrors: false,
     },
     images: {
-        // Requerido por output: 'export' (deshabilita el optimizador de imagenes en servidor)
+        // Requerido por output: 'export' (deshabilita el optimizador de imágenes en servidor)
         unoptimized: true,
         remotePatterns: [
             {
@@ -35,8 +36,15 @@ const nextConfig: NextConfig = {
                 port: '',
                 pathname: '/**',
             },
+            {
+                protocol: 'http',
+                hostname: 'asset.localhost',
+                port: '',
+                pathname: '/**',
+            },
         ],
     },
 };
 
 export default nextConfig;
+

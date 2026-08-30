@@ -1,8 +1,8 @@
+use metrics::{counter, gauge, histogram};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, instrument};
-use metrics::{counter, histogram, gauge};
 
 // ========================================================================
 // PHASE 29: Query Analytics
@@ -43,7 +43,7 @@ pub struct ClickFeedback {
 pub struct RankingFeedback {
     pub query_id: String,
     pub tenant_id: String,
-    pub relevant_job_ids: Vec<i64>,   // Marcados como relevantes por el usuario
+    pub relevant_job_ids: Vec<i64>, // Marcados como relevantes por el usuario
     pub irrelevant_job_ids: Vec<i64>, // Marcados como irrelevantes
     pub timestamp: u64,
 }
@@ -57,7 +57,10 @@ pub struct QueryAnalyticsStore {
 
 impl QueryAnalyticsStore {
     pub fn new(max_capacity: usize) -> Self {
-        info!("QueryAnalyticsStore iniciado: max {} queries en buffer", max_capacity);
+        info!(
+            "QueryAnalyticsStore iniciado: max {} queries en buffer",
+            max_capacity
+        );
         Self {
             logs: Mutex::new(Vec::with_capacity(max_capacity)),
             max_capacity,
@@ -68,9 +71,11 @@ impl QueryAnalyticsStore {
     pub fn log_query(&self, log: QueryLog) {
         counter!("query_analytics_total", "plan" => log.query_plan.clone()).increment(1);
         histogram!("query_analytics_latency_ms").record(log.latency_ms);
-        
-        let Ok(mut logs) = self.logs.lock() else { return };
-        
+
+        let Ok(mut logs) = self.logs.lock() else {
+            return;
+        };
+
         // Eviction circular: si supera capacidad, eliminar el más antiguo
         if logs.len() >= self.max_capacity {
             logs.remove(0);
@@ -88,9 +93,11 @@ impl QueryAnalyticsStore {
             "Click feedback: query={} → job={} en posición {}",
             feedback.query_id, feedback.clicked_job_id, feedback.click_position
         );
-        
+
         // Actualizar el log con el feedback de click
-        let Ok(mut logs) = self.logs.lock() else { return };
+        let Ok(mut logs) = self.logs.lock() else {
+            return;
+        };
         if let Some(log) = logs.iter_mut().find(|l| l.query_id == feedback.query_id) {
             log.clicked_job_id = Some(feedback.clicked_job_id);
             log.click_position = Some(feedback.click_position);
@@ -99,29 +106,40 @@ impl QueryAnalyticsStore {
 
     /// Exporta todos los logs para entrenamiento de modelos (Fase 30)
     pub fn export_training_data(&self) -> Vec<QueryLog> {
-        let Ok(logs) = self.logs.lock() else { return vec![] };
-        let with_feedback: Vec<QueryLog> = logs.iter()
+        let Ok(logs) = self.logs.lock() else {
+            return vec![];
+        };
+        let with_feedback: Vec<QueryLog> = logs
+            .iter()
             .filter(|l| l.clicked_job_id.is_some())
             .cloned()
             .collect();
-        
-        info!("Exportando {} logs con feedback para entrenamiento", with_feedback.len());
+
+        info!(
+            "Exportando {} logs con feedback para entrenamiento",
+            with_feedback.len()
+        );
         with_feedback
     }
 
     /// MRR implícito calculado sobre los clicks: mide calidad real del ranking
     pub fn compute_implicit_mrr(&self) -> f64 {
-        let Ok(logs) = self.logs.lock() else { return 0.0 };
-        let clicks_with_position: Vec<usize> = logs.iter()
-            .filter_map(|l| l.click_position)
-            .collect();
-        
-        if clicks_with_position.is_empty() { return 0.0; }
-        
-        let mrr = clicks_with_position.iter()
+        let Ok(logs) = self.logs.lock() else {
+            return 0.0;
+        };
+        let clicks_with_position: Vec<usize> =
+            logs.iter().filter_map(|l| l.click_position).collect();
+
+        if clicks_with_position.is_empty() {
+            return 0.0;
+        }
+
+        let mrr = clicks_with_position
+            .iter()
             .map(|&pos| 1.0 / (pos + 1) as f64)
-            .sum::<f64>() / clicks_with_position.len() as f64;
-        
+            .sum::<f64>()
+            / clicks_with_position.len() as f64;
+
         gauge!("implicit_mrr").set(mrr);
         info!("Implicit MRR calculado: {:.4}", mrr);
         mrr
@@ -129,7 +147,10 @@ impl QueryAnalyticsStore {
 }
 
 fn now_unix() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Genera un query_id único basándose en la query text + timestamp

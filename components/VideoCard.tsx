@@ -20,6 +20,18 @@ import { toast } from 'sonner';
 //   - InactiveCardShell (UI fantasma de card vacía)
 // ============================================================
 
+/**
+ * VideoCard — Tarjeta individual de video en el grid de la biblioteca.
+ * 
+ * Componente principal de composición que coordina:
+ * - `useVideoPlayer` (lógica de reproducción)
+ * - `VideoCardOverlay` (UI de card activa con hover)
+ * - `InactiveCardShell` (UI fantasma de card vacía)
+ * 
+ * Soporta múltiples layout: grid, list, compact.
+ * Muestra badge de plataforma (TikTok/YouTube/Instagram),
+ * título, autor, y duración del video.
+ */
 export function VideoCard({
     isActive = false,
     id,
@@ -34,7 +46,15 @@ export function VideoCard({
     slotIndex = 99,
     url,
     keepStatus,
-}: VideoCardProps & { slotIndex?: number; url?: string; keepStatus?: string }) {
+    layout = 'grid',
+    onlineOnly = false,
+}: VideoCardProps & {
+    slotIndex?: number;
+    url?: string;
+    keepStatus?: string;
+    layout?: 'grid' | 'list' | 'compact';
+    onlineOnly?: boolean;
+}) {
 
     const {
         videoRef,
@@ -58,7 +78,27 @@ export function VideoCard({
     const iconTransition = isActiveOrHovered ? 'all 0.2s ease' : 'all 1s ease 0.3s';
 
     const [localKeepStatus, setLocalKeepStatus] = useState<'keep' | 'online'>('keep');
-    const currentStatus = keepStatus || localKeepStatus;
+    const currentStatus = keepStatus === 'online' ? 'online' : localKeepStatus;
+
+    const openOriginal = async (event: React.MouseEvent) => {
+        event.stopPropagation();
+        if (!url || typeof window === 'undefined') return;
+
+        try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== 'https:') throw new Error('Unsupported URL protocol');
+        } catch {
+            toast.error('La URL original no es segura o está incompleta.');
+            return;
+        }
+
+        try {
+            const { open } = await import('@tauri-apps/plugin-shell');
+            await open(url);
+        } catch {
+            window.open(url, '_blank', 'noopener,noreferrer');
+        }
+    };
 
     const PLATFORM_ICONS = {
         tiktok:    { label: 'TikTok', color: '#fe2c55', bg: 'rgba(254,44,85,0.15)' },
@@ -72,13 +112,16 @@ export function VideoCard({
     return (
         <div
             className={cn(
-                'w-full aspect-[9/16] relative overflow-hidden flex-shrink-0 group transition-all duration-500 will-change-transform video-slot-premium',
+                                'w-full relative overflow-hidden flex-shrink-0 group transition-all duration-500 will-change-transform video-slot-premium',
+                layout === 'list' ? 'aspect-[16/7] min-h-[190px] sm:min-h-[220px]' : layout === 'compact' ? 'aspect-[3/4]' : 'aspect-[9/16]',
+
                 isActive ? 'cursor-pointer' : 'cursor-pointer',
                 hovered && !isActive ? '-translate-y-[2px]' : ''
             )}
             style={{
-                background: isActive
+                                background: isActive && thumb
                     ? `url(${thumb}) center/cover no-repeat`
+
                     : hovered ? 'linear-gradient(145deg, rgba(25, 25, 25, 0.8), rgba(18, 18, 18, 0.9))' : 'linear-gradient(145deg, rgba(20, 20, 20, 0.75), rgba(13, 13, 13, 0.85))',
                 backdropFilter: isActive ? 'none' : 'blur(12px)',
                 WebkitBackdropFilter: isActive ? 'none' : 'blur(12px)',
@@ -88,15 +131,18 @@ export function VideoCard({
                     : hovered ? '0 15px 30px rgba(0, 0, 0, 0.4), inset 0 0 5px rgba(255, 255, 255, 0.02)' : '0 10px 25px rgba(0, 0, 0, 0.3), inset 0 0 10px rgba(255, 255, 255, 0.01)',
                 transition: 'transform 0.5s ease, box-shadow 0.5s ease, background 0.5s ease, border-color 0.4s ease',
             }}
-            onClick={(e) => {
-                if (!isActive) {
-                    toast.info("No hay videos completados", {
-                        description: "Pega un enlace en el panel izquierdo y pulsa 'Procesar Contenido' para comenzar.",
-                        duration: 4000,
-                    });
+                        onClick={(e) => {
+                                if (!isActive) {
+                    inputRef.current?.click();
+                    return;
+                }
+
+                if (onlineOnly) {
+                    openOriginal(e);
                     return;
                 }
                 handleCardClick(e);
+
             }}
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
@@ -150,10 +196,26 @@ export function VideoCard({
             )}
 
             {/* Ghost UI for inactive cards without a video */}
-            {!isActive && !videoUrl && <InactiveCardShell hovered={hovered} slotIndex={slotIndex} />}
+            {!isActive && !videoUrl && (
+                <>
+                    <InactiveCardShell hovered={hovered} slotIndex={slotIndex} />
+                    <button
+                        type="button"
+                        aria-label="Cargar video local"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            inputRef.current?.click();
+                        }}
+                        className="absolute left-1/2 bottom-5 z-20 -translate-x-1/2 rounded-xl border border-white/15 bg-black/60 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-white/70 backdrop-blur-md transition hover:border-[#25f4ee]/60 hover:text-white"
+                    >
+                        Cargar video local
+                    </button>
+                </>
+            )}
 
             {/* Video Player (active prop OR uploaded file) */}
-            {activeVideoRenderSrc && (
+                        {activeVideoRenderSrc && !onlineOnly && (
+
                 <video
                     ref={videoRef}
                     src={activeVideoRenderSrc}
@@ -173,8 +235,9 @@ export function VideoCard({
             )}
 
             {/* Active card TikTok overlay (author, play, tags, sidebar icons) */}
-            {isActive && (
+                        {isActive && !onlineOnly && (
                 <VideoCardOverlay
+
                     author={author}
                     title={title}
                     tags={tags}
@@ -184,7 +247,18 @@ export function VideoCard({
                 />
             )}
 
+                        {isActive && onlineOnly && (
+                <button
+                    type="button"
+                    onClick={openOriginal}
+                    className="absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/25 bg-black/50 px-5 py-3 text-xs font-bold uppercase tracking-wider text-white backdrop-blur-md transition hover:bg-black/75 hover:border-[#25f4ee]/60"
+                >
+                    Ver en TikTok
+                </button>
+            )}
+
             {/* Remove button for manually uploaded videos */}
+
             {videoUrl && hovered && !isActive && (
                 <button
                     className="absolute top-6 right-6 w-8 h-8 rounded-full flex items-center justify-center text-white text-xs z-10 pointer-events-auto transition-all hover:bg-black/90 active:scale-90"

@@ -59,7 +59,7 @@ export class UnibParser {
         const match = line.match(HEADER_PATTERN);
         if (match) {
           const key = match[1];
-          const value = match[2] || '';
+          const value = match[2] ?? '';
           headers[key] = value;
         } else {
           errors.push({ line: i + 1, raw: line, message: 'Invalid header format' });
@@ -77,9 +77,12 @@ export class UnibParser {
 
       const metadata: Record<string, string> = {};
       if (metaStr) {
-        metaStr.split(';').forEach(pair => {
-          const [k, v] = pair.split(':');
-          if (k && v !== undefined) metadata[k.trim()] = v.trim();
+        metaStr.split(';').forEach((pair) => {
+          const separator = pair.indexOf(':');
+          if (separator <= 0) return;
+          const key = pair.slice(0, separator).trim();
+          const value = pair.slice(separator + 1).trim();
+          if (key) metadata[key] = value;
         });
       }
 
@@ -91,10 +94,10 @@ export class UnibParser {
         relation,
         objectId: objId,
         objectType: objType,
-        confidence: conf !== undefined ? parseFloat(conf) : undefined,
-        importance: imp !== undefined ? parseFloat(imp) : undefined,
-        emotionalAffinity: eAff !== undefined ? parseFloat(eAff) : undefined,
-        activeAttitude: aAtt !== undefined ? parseFloat(aAtt) : undefined,
+        confidence: conf !== undefined ? Number.parseFloat(conf) : undefined,
+        importance: imp !== undefined ? Number.parseFloat(imp) : undefined,
+        emotionalAffinity: eAff !== undefined ? Number.parseFloat(eAff) : undefined,
+        activeAttitude: aAtt !== undefined ? Number.parseFloat(aAtt) : undefined,
         metadata,
         source: source || 'unknown',
         raw: line,

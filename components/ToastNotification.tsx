@@ -9,13 +9,29 @@ import { FaCheck, FaXmark, FaInfo } from 'react-icons/fa6';
 // Aporta cierre del ciclo de usuario (completar procesamiento)
 // ============================================================
 
+/**
+ * Tipos de notificación toast disponibles.
+ * 
+ * - `success`: Operación completada exitosamente (verde)
+ * - `error`: Error en la operación (rojo)
+ * - `info`: Información general (blanco)
+ * - `processing`: Operación en progreso (cian, con spinner)
+ */
 export type ToastType = 'success' | 'error' | 'info' | 'processing';
 
+/**
+ * Datos de un toast de notificación.
+ */
 export interface ToastData {
+    /** ID único del toast (para dismiss) */
     id: string;
+    /** Mensaje principal del toast */
     message: string;
+    /** Subtítulo o descripción adicional */
     subtitle?: string;
+    /** Tipo de notificación (success, error, info, processing) */
     type: ToastType;
+    /** Duración en ms antes de auto-dismiss (default: 4000) */
     duration?: number;
 }
 
@@ -124,6 +140,12 @@ function SingleToast({ toast, onDismiss }: { toast: ToastData; onDismiss: (id: s
     );
 }
 
+/**
+ * ToastContainer — Contenedor de notificaciones toast.
+ * 
+ * Renderiza una pila fija en la esquina inferior derecha con
+ * animaciones de entrada/salida y auto-dismiss.
+ */
 export function ToastContainer({ toasts, onDismiss }: ToastNotificationProps) {
     if (toasts.length === 0) return null;
 

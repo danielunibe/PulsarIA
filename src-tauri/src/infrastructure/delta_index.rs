@@ -1,8 +1,8 @@
+use metrics::{counter, gauge, histogram};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
-use metrics::{histogram, gauge, counter};
 
 // ========================================================================
 // PHASE 25: Incremental Index Rebuild (Delta Indexing)
@@ -34,7 +34,10 @@ pub struct DeltaIndexBuffer {
 
 impl DeltaIndexBuffer {
     pub fn new(merge_threshold: usize) -> Self {
-        info!("DeltaIndexBuffer creado: merge_threshold={}", merge_threshold);
+        info!(
+            "DeltaIndexBuffer creado: merge_threshold={}",
+            merge_threshold
+        );
         Self {
             pending: Mutex::new(VecDeque::new()),
             merge_threshold,
@@ -59,14 +62,18 @@ impl DeltaIndexBuffer {
     pub async fn drain(&self) -> Vec<DeltaEntry> {
         let mut pending = self.pending.lock().await;
         let entries: Vec<DeltaEntry> = pending.drain(..).collect();
-        
+
         let merged_count = entries.len();
-        self.total_merged.fetch_add(merged_count, std::sync::atomic::Ordering::Relaxed);
+        self.total_merged
+            .fetch_add(merged_count, std::sync::atomic::Ordering::Relaxed);
         gauge!("delta_buffer_size").set(0.0);
         counter!("delta_merges_total").increment(1);
-        
-        info!("Delta drain: {} vectores enviados a merge (total histórico: {})", 
-              merged_count, self.total_merged.load(std::sync::atomic::Ordering::Relaxed));
+
+        info!(
+            "Delta drain: {} vectores enviados a merge (total histórico: {})",
+            merged_count,
+            self.total_merged.load(std::sync::atomic::Ordering::Relaxed)
+        );
         entries
     }
 }
@@ -86,12 +93,14 @@ impl DeltaIndexOrchestrator {
     pub async fn run_merge_loop(&self, vector_index: Arc<dyn crate::domain::ports::VectorIndex>) {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            
-            if !self.buffer.needs_merge().await { continue; }
-            
+
+            if !self.buffer.needs_merge().await {
+                continue;
+            }
+
             let start = std::time::Instant::now();
             let entries = self.buffer.drain().await;
-            
+
             let count = entries.len();
             let mut failed = 0usize;
 
@@ -109,8 +118,13 @@ impl DeltaIndexOrchestrator {
 
             let elapsed = start.elapsed().as_secs_f64();
             histogram!("delta_merge_duration_seconds").record(elapsed);
-            
-            info!("Delta merge completado: {}/{} vectores en {:.2}s", count - failed, count, elapsed);
+
+            info!(
+                "Delta merge completado: {}/{} vectores en {:.2}s",
+                count - failed,
+                count,
+                elapsed
+            );
         }
     }
 }

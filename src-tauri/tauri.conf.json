@@ -2,12 +2,27 @@
     "$schema": "https://schema.tauri.app/config/2",
     "productName": "pulsar-eventide",
     "version": "0.1.0",
-    "identifier": "com.pulsar-eventide.app",
+    "identifier": "com.pulsar.eventide",
     "build": {
         "beforeDevCommand": "npm run dev",
         "devUrl": "http://localhost:3000",
         "beforeBuildCommand": "npm run build",
         "frontendDist": "../out"
+    },
+    "bundle": {
+        "active": true,
+        "targets": ["nsis", "msi"],
+        "resources": {
+            "resources/python": "resources/python",
+            "resources/python-workers": "resources/python-workers",
+            "resources/assets": "resources/assets",
+            "resources/bin": "resources/bin"
+        },
+        "windows": {
+            "nsis": {
+                "installMode": "currentUser"
+            }
+        }
     },
     "app": {
         "windows": [
@@ -18,7 +33,9 @@
                 "minWidth": 1000,
                 "minHeight": 750,
                 "resizable": true,
-                "fullscreen": false
+                "fullscreen": false,
+                "decorations": false,
+                "transparent": false
             }
         ]
     }

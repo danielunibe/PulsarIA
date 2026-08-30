@@ -1,13 +1,30 @@
 'use client';
 import { useState, useCallback } from 'react';
 
+/**
+ * Estado del hook de I/O semántica (export/import UNIB).
+ */
 export interface SemanticIOState {
+  /** Si está exportando un video a formato UNIB */
   exporting: boolean;
+  /** Si está importando un archivo UNIB */
   importing: boolean;
+  /** Mensaje de error, o null si no hay error */
   error: string | null;
+  /** Contenido exportado listo para descargar */
   exportedContent: string | null;
 }
 
+/**
+ * Hook para operaciones de importación/exportación UNIB.
+ * 
+ * Proporciona funciones para:
+ * - Exportar un video a formato .unib (para Julia)
+ * - Importar un archivo .unib existente a la biblioteca
+ * - Descargar el contenido exportado como archivo
+ * 
+ * Usa Tauri IPC (`export_semantic`, `import_semantic`) como canal.
+ */
 export function useSemanticIO() {
   const [state, setState] = useState<SemanticIOState>({
     exporting: false,

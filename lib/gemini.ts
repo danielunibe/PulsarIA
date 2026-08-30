@@ -5,116 +5,118 @@ export interface VideoSummary {
   sentiment: 'positive' | 'neutral' | 'negative';
 }
 
-function simulateSummary(): VideoSummary {
-  return {
-    title: 'Resumen audiovisual estructurado',
-    summary: [
-      'El contenido sintetiza ideas clave del material procesado.',
-      'Se identifican patrones semánticos y conceptos principales.',
-      'Listo para consulta interactiva y búsqueda por vectores.',
-    ],
-    category: 'Tecnología',
-    sentiment: 'positive',
-  };
-}
+const GEMINI_MODEL = 'gemini-1.5-flash';
+const ALLOWED_CATEGORIES = new Set([
+  'Programacion',
+  'Fitness',
+  'Finanzas',
+  'Humor',
+  'Educacion',
+  'Tecnologia',
+  'Otros',
+]);
 
-function simulateChatResponse(query: string): string {
-  return `Análisis RAG para "${query}": Basado en los fragmentos de video indexados en la biblioteca, los contenidos abordan conceptos relevantes sobre esta temática con alta coincidencia semántica.`;
-}
-
-export async function generateVideoSummary(transcriptText: string): Promise<VideoSummary> {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
-
-  if (!apiKey || !transcriptText.trim()) {
-    return simulateSummary();
+function requireApiKey(): string {
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error('Gemini is not configured. Set NEXT_PUBLIC_GOOGLE_API_KEY.');
   }
+  return apiKey;
+}
 
-  try {
-    const prompt = `Eres un asistente experto en analisis de contenido audiovisual. A partir del siguiente transcripto de video, genera un resumen estructurado en formato JSON, SIN bloque de codigo markdown ni texto adicional.
-
-Reglas estrictas:
-- title: titulo conceptual enriquecido (maximo 80 caracteres).
-- summary: array con exactamente 3 vinetas ejecutivas.
-- category: una categoria tematica entre: Programacion, Fitness, Finanzas, Humor, Educacion, Tecnologia, Otros.
-- sentiment: 'positive', 'neutral' o 'negative'.
-
-Transcripto:
-"""${transcriptText}"""`;
-
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+async function callGemini(prompt: string, maxOutputTokens: number): Promise<string> {
+  const apiKey = requireApiKey();
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 512 }
-      })
-    });
+        generationConfig: { temperature: 0.3, maxOutputTokens },
+      }),
+    },
+  );
 
-    if (!res.ok) return simulateSummary();
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
-    if (!text) return simulateSummary();
-
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return simulateSummary();
-
-    const parsed = JSON.parse(jsonMatch[0]) as Partial<VideoSummary>;
-    const sentiment = parsed.sentiment;
-
-    if (
-      typeof parsed.title !== 'string' ||
-      !Array.isArray(parsed.summary) ||
-      typeof parsed.category !== 'string' ||
-      typeof sentiment !== 'string' ||
-      !['positive', 'neutral', 'negative'].includes(sentiment)
-    ) {
-      return simulateSummary();
-    }
-
-    return {
-      title: parsed.title.slice(0, 80),
-      summary: parsed.summary.slice(0, 3),
-      category: parsed.category,
-      sentiment: sentiment,
-    };
-  } catch {
-    return simulateSummary();
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Gemini request failed (${response.status}): ${detail.slice(0, 300)}`);
   }
+
+  const data = await response.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!text) throw new Error('Gemini returned an empty response.');
+  return text;
+}
+
+export async function generateVideoSummary(transcriptText: string): Promise<VideoSummary> {
+  const transcript = transcriptText.trim();
+  if (!transcript) throw new Error('Cannot summarize an empty transcript.');
+
+  const prompt = `Eres un asistente experto en análisis de contenido audiovisual. A partir de la siguiente transcripción, devuelve exclusivamente JSON válido, sin markdown ni texto adicional.
+
+Esquema obligatorio:
+{"title":"string de máximo 80 caracteres","summary":["string","string","string"],"category":"Programacion|Fitness|Finanzas|Humor|Educacion|Tecnologia|Otros","sentiment":"positive|neutral|negative"}
+
+La matriz summary debe tener exactamente tres elementos y no debes inventar información ausente de la transcripción.
+
+Transcripción:
+<<<
+${transcript}
+>>>`;
+
+  const text = await callGemini(prompt, 512);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Gemini did not return a JSON summary.');
+
+  let parsed: Partial<VideoSummary>;
+  try {
+    parsed = JSON.parse(jsonMatch[0]) as Partial<VideoSummary>;
+  } catch (error) {
+    throw new Error(`Gemini returned invalid JSON: ${String(error)}`);
+  }
+
+  const sentiment = parsed.sentiment;
+  if (
+    typeof parsed.title !== 'string' ||
+    !Array.isArray(parsed.summary) ||
+    parsed.summary.length !== 3 ||
+    !parsed.summary.every((item) => typeof item === 'string') ||
+    typeof parsed.category !== 'string' ||
+    !ALLOWED_CATEGORIES.has(parsed.category) ||
+    (sentiment !== 'positive' && sentiment !== 'neutral' && sentiment !== 'negative')
+  ) {
+    throw new Error('Gemini returned a summary that does not match the required schema.');
+  }
+
+  return {
+    title: parsed.title.trim().slice(0, 80),
+    summary: parsed.summary.map((item) => item.trim()),
+    category: parsed.category,
+    sentiment,
+  };
 }
 
 export async function generateChatResponse(query: string, context: string[]): Promise<string> {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) throw new Error('Cannot answer an empty query.');
 
-  if (!apiKey) {
-    return simulateChatResponse(query);
-  }
-
-  try {
-    const contextBlock = context
-      .map((chunk, index) => `[Fragmento ${index + 1}]\n${chunk}`)
-      .join('\n\n');
-
-    const prompt = `Eres un asistente util basado unicamente en el siguiente contexto. Responde la consulta del usuario de forma clara y concisa. Si la respuesta no esta en el contexto, indicalo explicitamente.
+  const contextBlock = context.length > 0
+    ? context.map((chunk, index) => `[Fragmento ${index + 1}]\n${chunk}`).join('\n\n')
+    : '(No se encontraron fragmentos relevantes en la biblioteca.)';
+  const prompt = `Eres un asistente útil. Responde exclusivamente con base en el contexto proporcionado. Si la respuesta no está en el contexto, dilo explícitamente; no inventes datos.
 
 Contexto:
 ${contextBlock}
 
-Consulta: ${query}`;
+Consulta: ${normalizedQuery}`;
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 1024 }
-      })
-    });
-
-    if (!res.ok) return simulateChatResponse(query);
-    const data = await res.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '';
-    return text || simulateChatResponse(query);
-  } catch {
-    return simulateChatResponse(query);
+  try {
+    return await callGemini(prompt, 1024);
+  } catch (error) {
+    // La UI puede mostrar este mensaje sin presentar una respuesta inventada.
+    return `No fue posible consultar Gemini: ${error instanceof Error ? error.message : String(error)}`;
   }
 }

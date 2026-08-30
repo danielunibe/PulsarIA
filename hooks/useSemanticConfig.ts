@@ -4,6 +4,18 @@ import {
   SystemMetrics, LogEntry, DebugSearchResult 
 } from '../types/semanticConfig';
 
+/**
+ * Hook para gestionar la configuración y estado del motor semántico.
+ * 
+ * Obtiene y actualiza el estado del modelo ONNX, la base de datos,
+ * la configuración de búsqueda, las métricas del sistema y los logs
+ * en tiempo real.
+ * 
+ * Funciona tanto en modo Tauri (invoke IPC) como en navegador standalone
+ * (con datos de fallback mockeados para desarrollo).
+ * 
+ * @returns Objeto con estados, callbacks de acción, y logs en vivo
+ */
 export function useSemanticConfig() {
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [dbStatus, setDbStatus] = useState<DbStatus | null>(null);
@@ -142,32 +154,12 @@ export function useSemanticConfig() {
   };
 
   const debugSearch = async (query: string): Promise<DebugSearchResult> => {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const result = await invoke<DebugSearchResult>('debug_search_transcripts', { query });
-      const mets = await invoke<SystemMetrics>('get_system_metrics');
-      setMetrics(mets);
-      return result;
-    } catch {
-      // Simulación de búsqueda para modo browser standalone
-      const simResult: DebugSearchResult = {
-        results: [
-          {
-            video_id: 1,
-            title: `Demostración de Búsqueda: "${query}"`,
-            thumbnail: null,
-            matched_text: `Fragmento relevante simulado para la consulta: "${query}". El motor ONNX MiniLM genera representaciones de 384 dimensiones para emparejamiento semántico.`,
-            chunk_index: 0,
-            similarity_score: 0.885
-          }
-        ],
-        embedding_time_ms: 6.42,
-        onnx_inference_time_ms: 7.18,
-        sqlite_search_time_us: 1420.0,
-        total_time_ms: 15.02
-      };
-      return simResult;
-    }
+    // Bug #20 FIX: No mock data — throw error when backend unavailable
+    const { invoke } = await import('@tauri-apps/api/core');
+    const result = await invoke<DebugSearchResult>('debug_search_transcripts', { query });
+    const mets = await invoke<SystemMetrics>('get_system_metrics');
+    setMetrics(mets);
+    return result;
   };
 
   return {

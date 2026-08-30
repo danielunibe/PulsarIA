@@ -6,6 +6,16 @@
 // Fixed positioning: mismo comportamiento que el anterior.
 // ============================================================
 
+/**
+ * AuroraBackground — Fondo aurora animado con CSS puro.
+ * 
+ * Reemplaza el canvas WebGL por CSS puro de alta performance.
+ * Usa dos capas de gradientes radiales con animación en
+ * direcciones opuestas para crear profundidad.
+ * 
+ * Colores: cian (#25f4ee), magenta (#fe2c55), violeta (#8b5cf6)
+ * sobre fondo oscuro (#06080f).
+ */
 export function AuroraBackground() {
     return (
         <div

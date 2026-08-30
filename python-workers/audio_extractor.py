@@ -1,11 +1,25 @@
-import subprocess
-import shutil
+"""
+Pulsar Eventide — Audio Extractor (audio_extractor.py)
+=====================================================
+
+Responsabilidad: Extraer la pista de audio de un video usando FFmpeg.
+
+Formato de salida:
+    - MP3 16kHz mono VBR Q2 (formato óptimo para Whisper)
+    - Guardado junto al video en el directorio de procesamiento
+
+Resolución de FFmpeg:
+    Se prueba en orden: variable de entorno FFMPEG_PATH, binarios locales,
+    y PATH del sistema.
+"""
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 # ========================================================================
 # AUDIO EXTRACTOR: Extracción FFMPEG
-# Responsabilidad: Convertir MP4 -> MP3/WAV optimizado para Whisper (16kHz Mono)
+# Responsabilidad: Convertir MP4 -> MP3 optimizado para Whisper (16kHz Mono)
 # ========================================================================
 
 _WORKERS_DIR = Path(__file__).resolve().parent
@@ -13,7 +27,22 @@ _PROJECT_ROOT = _WORKERS_DIR.parent
 
 
 def resolve_ffmpeg_path() -> str:
-    """Resuelve la ruta a ffmpeg probando variables de entorno, binarios locales y PATH."""
+    """
+    Resuelve la ruta al ejecutable de FFmpeg.
+
+    Orden de búsqueda:
+        1. Variable de entorno FFMPEG_PATH (override explícito)
+        2. bin/ffmpeg en la raíz del proyecto
+        3. bin/ffmpeg en el directorio de workers
+        4. .venv/Scripts/ffmpeg (Windows)
+        5. PATH del sistema (shutil.which)
+
+    Returns:
+        Ruta al ejecutable de FFmpeg.
+
+    Raises:
+        Si no se encuentra FFmpeg, retorna 'ffmpeg' (confía en el PATH).
+    """
     env_ffmpeg = os.environ.get("FFMPEG_PATH")
     if env_ffmpeg and Path(env_ffmpeg).exists():
         return env_ffmpeg

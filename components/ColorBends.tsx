@@ -1,3 +1,17 @@
+/**
+ * @module ColorBends
+ * 
+ * ColorBends — Aurora WebGL animada usando Three.js.
+ * 
+ * Renderiza un fondo animado con gradientes radiales que se
+ * mueven suavemente, creando un efecto aurora boreal.
+ * 
+ * Características:
+ * - Soporta hasta 8 colores configurables
+ * - Interacción con el cursor del mouse (parallax)
+ * - Escalado dinámico según el ancho de ventana
+ * - Control de frecuencia, warp y ruido
+ */
 'use client';
 import React, { useEffect, useRef } from 'react';
 import * as _THREE from 'three';
@@ -137,9 +151,20 @@ export function ColorBends({
     const autoRotateRef = useRef<number>(autoRotate);
     const pointerTargetRef = useRef<any>(new THREE.Vector2(0, 0));
     const pointerCurrentRef = useRef<any>(new THREE.Vector2(0, 0));
-    const pointerSmoothRef = useRef<number>(8);
+        const pointerSmoothRef = useRef<number>(8);
+    const initialPropsRef = useRef({
+        speed,
+        transparent,
+        scale,
+        frequency,
+        warpStrength,
+        mouseInfluence,
+        parallax,
+        noise,
+    });
 
     useEffect(() => {
+
         const container = containerRef.current;
         if (!container) return;
 
@@ -155,18 +180,26 @@ export function ColorBends({
             uniforms: {
                 uCanvas: { value: new THREE.Vector2(1, 1) },
                 uTime: { value: 0 },
-                uSpeed: { value: speed },
+                                uSpeed: { value: initialPropsRef.current.speed },
+
                 uRot: { value: new THREE.Vector2(1, 0) },
                 uColorCount: { value: 0 },
                 uColors: { value: uColorsArray },
-                uTransparent: { value: transparent ? 1 : 0 },
-                uScale: { value: scale },
-                uFrequency: { value: frequency },
-                uWarpStrength: { value: warpStrength },
+                                uTransparent: { value: initialPropsRef.current.transparent ? 1 : 0 },
+
+                                uScale: { value: initialPropsRef.current.scale },
+
+                                uFrequency: { value: initialPropsRef.current.frequency },
+
+                                uWarpStrength: { value: initialPropsRef.current.warpStrength },
+
                 uPointer: { value: new THREE.Vector2(0, 0) },
-                uMouseInfluence: { value: mouseInfluence },
-                uParallax: { value: parallax },
-                uNoise: { value: noise }
+                                uMouseInfluence: { value: initialPropsRef.current.mouseInfluence },
+
+                                uParallax: { value: initialPropsRef.current.parallax },
+
+                                uNoise: { value: initialPropsRef.current.noise }
+
             },
             premultipliedAlpha: true,
             transparent: true
@@ -184,7 +217,7 @@ export function ColorBends({
         rendererRef.current = renderer;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        renderer.setClearColor(0x000000, transparent ? 0 : 1);
+        renderer.setClearColor(0x000000, initialPropsRef.current.transparent ? 0 : 1);
         renderer.domElement.style.width = '100%';
         renderer.domElement.style.height = '100%';
         renderer.domElement.style.display = 'block';

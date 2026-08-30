@@ -1,5 +1,5 @@
+use metrics::{counter, histogram};
 use tracing::{info, instrument};
-use metrics::{histogram, counter};
 
 // ========================================================================
 // PHASE 17: Adaptive Query Planner
@@ -26,14 +26,17 @@ pub struct QueryPlanner {
 
 impl QueryPlanner {
     pub fn new(reranker_enabled: bool, hybrid_enabled: bool) -> Self {
-        Self { reranker_enabled, hybrid_enabled }
+        Self {
+            reranker_enabled,
+            hybrid_enabled,
+        }
     }
 
     /// Decide el plan óptimo basándose en características de la query.
     #[instrument(skip(self))]
     pub fn plan(&self, query: &str, cache_hit: bool) -> QueryPlan {
         let start = std::time::Instant::now();
-        
+
         let plan = if cache_hit {
             // Cache hit confirmado → skip todo
             counter!("query_plan_cache_only_total").increment(1);
@@ -61,7 +64,11 @@ impl QueryPlanner {
         };
 
         histogram!("query_planner_latency_seconds").record(start.elapsed().as_secs_f64());
-        info!("Query plan seleccionado: {:?} para query de {} tokens", plan, query.split_whitespace().count());
+        info!(
+            "Query plan seleccionado: {:?} para query de {} tokens",
+            plan,
+            query.split_whitespace().count()
+        );
         plan
     }
 }
@@ -69,6 +76,8 @@ impl QueryPlanner {
 /// Heurística: detecta términos que sugieren búsqueda keyword exacta
 fn has_exact_keywords(query: &str) -> bool {
     // Indicadores de que el usuario busca algo concreto (fechas, nombres, IDs)
-    let markers = ["\"", "==", "id:", "title:", "url:", "2024", "2025", "2026", "#"];
+    let markers = [
+        "\"", "==", "id:", "title:", "url:", "2024", "2025", "2026", "#",
+    ];
     markers.iter().any(|m| query.contains(m))
 }

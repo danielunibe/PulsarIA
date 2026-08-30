@@ -1,5 +1,6 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+
+import { useCallback, useEffect, useState } from 'react';
 
 export interface PlaylistRecord {
   id: number;
@@ -7,7 +8,7 @@ export interface PlaylistRecord {
   description: string | null;
   cover_job_id: number | null;
   auto_generated: boolean;
-  topic_keywords: string; // JSON string e.g. "['rust','programacion']"
+  topic_keywords: string;
   color: string;
   created_at: string;
   item_count: number;
@@ -26,112 +27,192 @@ export interface JobRecord {
   video_path?: string;
 }
 
+import { REST_API_BASE } from '@/lib/api-config';
+
+async function restRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${REST_API_BASE}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`REST ${path} failed with status ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
 async function tauriInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     return await invoke<T>(command, args);
-  } catch (e) {
-    throw new Error(`Tauri invoke failed for ${command}: ${e}`);
+  } catch (error) {
+    throw new Error(`Tauri invoke failed for ${command}: ${String(error)}`);
   }
 }
 
+/**
+ * Hook para gestionar playlists de videos.
+ * 
+ * Proporciona CRUD completo de playlists: listar, crear, agregar/quitar videos,
+ * eliminar, y auto-generar playlists por clustering temático.
+ * 
+ * Usa Tauri IPC como canal principal y REST como fallback.
+ * 
+ * @returns Objeto con playlists, items seleccionados, callbacks y estado de carga
+ */
 export function usePlaylists() {
   const [playlists, setPlaylists] = useState<PlaylistRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [playlistItems, setPlaylistItems] = useState<JobRecord[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const errorMessage = (value: unknown) => value instanceof Error ? value.message : String(value);
 
   const fetchPlaylists = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await tauriInvoke<PlaylistRecord[]>('get_playlists');
+      let data: PlaylistRecord[];
+      try {
+        data = await tauriInvoke<PlaylistRecord[]>('get_playlists');
+      } catch {
+        data = await restRequest<PlaylistRecord[]>('/playlists');
+      }
       setPlaylists(data);
-    } catch (e) {
-      console.error('fetchPlaylists failed:', e);
+      setError(null);
+    } catch (fetchError) {
+      console.error('fetchPlaylists failed:', fetchError);
+      setError(errorMessage(fetchError));
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const createPlaylist = useCallback(async (name: string, description?: string, color?: string) => {
-    try {
-      const id = await tauriInvoke<number>('create_playlist', { name, description, color });
-      await fetchPlaylists();
-      return id;
-    } catch {
-      const newPl: PlaylistRecord = {
-        id: Date.now(),
-        name,
-        description: description || null,
-        cover_job_id: null,
-        auto_generated: false,
-        topic_keywords: '[]',
-        color: color || '#8a5cff',
-        created_at: new Date().toISOString(),
-        item_count: 0
-      };
-      setPlaylists(prev => [newPl, ...prev]);
-      return newPl.id;
-    }
-  }, [fetchPlaylists]);
-
-  const addToPlaylist = useCallback(async (playlistId: number, jobId: number) => {
-    try {
-      await tauriInvoke<void>('add_to_playlist', { playlistId, jobId });
-      if (selectedPlaylistId === playlistId) {
-        await fetchPlaylistItems(playlistId);
-      }
-      await fetchPlaylists();
-    } catch {
-      setPlaylists(prev => prev.map(p => p.id === playlistId ? { ...p, item_count: p.item_count + 1 } : p));
-    }
-  }, [selectedPlaylistId, fetchPlaylists]);
-
-  const removeFromPlaylist = useCallback(async (playlistId: number, jobId: number) => {
-    try {
-      await tauriInvoke<void>('remove_from_playlist', { playlistId, jobId });
-      if (selectedPlaylistId === playlistId) {
-        await fetchPlaylistItems(playlistId);
-      }
-      await fetchPlaylists();
-    } catch {
-      setPlaylists(prev => prev.map(p => p.id === playlistId ? { ...p, item_count: Math.max(0, p.item_count - 1) } : p));
-    }
-  }, [selectedPlaylistId, fetchPlaylists]);
-
-  const deletePlaylist = useCallback(async (playlistId: number) => {
-    try {
-      await tauriInvoke<void>('delete_playlist', { playlistId });
-    } catch {
-      setPlaylists(prev => prev.filter(p => p.id !== playlistId));
-    }
-    if (selectedPlaylistId === playlistId) {
-      setSelectedPlaylistId(null);
-      setPlaylistItems([]);
-    }
-    await fetchPlaylists();
-  }, [selectedPlaylistId, fetchPlaylists]);
-
   const fetchPlaylistItems = useCallback(async (playlistId: number) => {
     try {
-      const items = await tauriInvoke<JobRecord[]>('get_playlist_items', { playlistId });
+      let items: JobRecord[];
+      try {
+        items = await tauriInvoke<JobRecord[]>('get_playlist_items', { playlistId });
+      } catch {
+        items = await restRequest<JobRecord[]>(`/playlists/${playlistId}/items`);
+      }
       setPlaylistItems(items);
-    } catch (e) {
-      console.error('fetchPlaylistItems failed:', e);
+    } catch (fetchItemsError) {
+      console.error('fetchPlaylistItems failed:', fetchItemsError);
+      setPlaylistItems([]);
+      setError(errorMessage(fetchItemsError));
     }
   }, []);
 
-  const selectPlaylist = useCallback(async (id: number | null) => {
-    setSelectedPlaylistId(id);
-    if (id !== null) {
-      await fetchPlaylistItems(id);
-    } else {
-      setPlaylistItems([]);
-    }
-  }, [fetchPlaylistItems]);
+  const createPlaylist = useCallback(
+    async (name: string, description?: string, color?: string) => {
+      try {
+        let id: number;
+        try {
+          id = await tauriInvoke<number>('create_playlist', { name, description, color });
+        } catch {
+          const response = await restRequest<{ id: number }>('/playlists', {
+            method: 'POST',
+            body: JSON.stringify({ name, description, color }),
+          });
+          id = response.id;
+        }
+        await fetchPlaylists();
+        setError(null);
+        return id;
+      } catch (createError) {
+        console.error('createPlaylist failed:', createError);
+        setError(errorMessage(createError));
+        return null;
+      }
+    },
+    [fetchPlaylists],
+  );
+
+  const addToPlaylist = useCallback(
+    async (playlistId: number, jobId: number) => {
+      try {
+        try {
+          await tauriInvoke<void>('add_to_playlist', { playlistId, jobId });
+        } catch {
+          await restRequest<void>(`/playlists/${playlistId}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ job_id: jobId }),
+          });
+        }
+        if (selectedPlaylistId === playlistId) await fetchPlaylistItems(playlistId);
+        await fetchPlaylists();
+        setError(null);
+      } catch (addError) {
+        console.error('addToPlaylist failed:', addError);
+        setError(errorMessage(addError));
+      }
+    },
+    [fetchPlaylistItems, fetchPlaylists, selectedPlaylistId],
+  );
+
+  const removeFromPlaylist = useCallback(
+    async (playlistId: number, jobId: number) => {
+      try {
+        try {
+          await tauriInvoke<void>('remove_from_playlist', { playlistId, jobId });
+        } catch {
+          await restRequest<void>(`/playlists/${playlistId}/items/${jobId}`, { method: 'DELETE' });
+        }
+        if (selectedPlaylistId === playlistId) await fetchPlaylistItems(playlistId);
+        await fetchPlaylists();
+        setError(null);
+      } catch (removeError) {
+        console.error('removeFromPlaylist failed:', removeError);
+        setError(errorMessage(removeError));
+      }
+    },
+    [fetchPlaylistItems, fetchPlaylists, selectedPlaylistId],
+  );
+
+  const deletePlaylist = useCallback(
+    async (playlistId: number) => {
+      try {
+        try {
+          await tauriInvoke<void>('delete_playlist', { playlistId });
+        } catch {
+          await restRequest<void>(`/playlists/${playlistId}`, { method: 'DELETE' });
+        }
+        await fetchPlaylists();
+        setError(null);
+      } catch (deleteError) {
+        console.error('deletePlaylist failed:', deleteError);
+        setError(errorMessage(deleteError));
+        return;
+      }
+
+      if (selectedPlaylistId === playlistId) {
+        setSelectedPlaylistId(null);
+        setPlaylistItems([]);
+      }
+    },
+    [fetchPlaylists, selectedPlaylistId],
+  );
+
+  const selectPlaylist = useCallback(
+    async (id: number | null) => {
+      setSelectedPlaylistId(id);
+      if (id === null) setPlaylistItems([]);
+      else await fetchPlaylistItems(id);
+    },
+    [fetchPlaylistItems],
+  );
 
   useEffect(() => {
-    fetchPlaylists();
+    let active = true;
+    queueMicrotask(() => {
+      if (active) void fetchPlaylists();
+    });
+    return () => {
+      active = false;
+    };
   }, [fetchPlaylists]);
 
   return {
@@ -139,6 +220,7 @@ export function usePlaylists() {
     loading,
     selectedPlaylistId,
     playlistItems,
+    error,
     fetchPlaylists,
     createPlaylist,
     addToPlaylist,

@@ -1,4 +1,4 @@
-﻿use super::models::JobRecord;
+use super::models::JobRecord;
 
 // ========================================================================
 // DOMAIN PORTS: Interfaces para Inversion de Control
@@ -9,10 +9,18 @@ pub trait JobRepository: Send + Sync {
     fn insert_job(&self, url: &str) -> Result<i64, String>;
     fn get_all_jobs(&self) -> Result<Vec<JobRecord>, String>;
     fn update_status(&self, id: i64, status: &str, progress: i32) -> Result<(), String>;
-    
+
     // Simplificado para la demostracion
-    fn update_media(&self, job_id: i64, title: &str, uploader: &str, duration: i32) -> Result<(), String>;
-    fn get_connection(&self) -> Result<std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>, String>;
+    fn update_media(
+        &self,
+        job_id: i64,
+        title: &str,
+        uploader: &str,
+        duration: i32,
+    ) -> Result<(), String>;
+    fn get_connection(
+        &self,
+    ) -> Result<std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>, String>;
 }
 
 pub trait EmbeddingEngine: Send + Sync {
@@ -20,10 +28,16 @@ pub trait EmbeddingEngine: Send + Sync {
 }
 
 pub trait VectorIndex: Send + Sync {
-    fn insert(&self, internal_id: usize, job_id: i64, chunk_index: i64, embedding: &[f32]) -> Result<(), String>;
-    fn search(&self, query_vec: &[f32], limit: usize) -> Result<Vec<usize>, String>;
+    fn insert(
+        &self,
+        internal_id: usize,
+        job_id: i64,
+        chunk_index: i64,
+        embedding: &[f32],
+    ) -> Result<(), String>;
+    fn search(&self, query_vec: &[f32], limit: usize) -> Result<Vec<(usize, f32)>, String>;
     fn get_chunk_info(&self, internal_id: usize) -> Result<(i64, i64), String>; // Returns (job_id, chunk_index)
-    
+
     // Persistence
     fn snapshot_index(&self, file_path: &str) -> Result<(), String>;
     fn load_index(&self, file_path: &str) -> Result<(), String>;

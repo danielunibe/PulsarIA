@@ -1,8 +1,8 @@
+use metrics::{counter, gauge};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
-use tracing::{info, warn, error};
-use metrics::{counter, gauge};
+use tracing::{error, info, warn};
 
 const MAX_FAILURES: usize = 5;
 const RESET_TIMEOUT: Duration = Duration::from_secs(30);
@@ -28,6 +28,50 @@ impl Default for CircuitBreaker {
     }
 }
 
+/// Bug #55 FIX: Recover from poisoned RwLock instead of panicking.
+/// If a thread panics while holding a lock, the lock becomes "poisoned".
+/// For circuit breaker state, recovering the inner value is safe —
+/// the worst case is a stale state that self-corrects on the next transition.
+fn read_state(lock: &RwLock<State>) -> State {
+    match lock.read() {
+        Ok(guard) => *guard,
+        Err(poisoned) => {
+            warn!("circuit_breaker: state lock poisoned, recovering inner value");
+            *poisoned.into_inner()
+        }
+    }
+}
+
+fn write_state(lock: &RwLock<State>) -> std::sync::RwLockWriteGuard<'_, State> {
+    match lock.write() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            warn!("circuit_breaker: state lock poisoned, recovering inner value");
+            poisoned.into_inner()
+        }
+    }
+}
+
+fn read_last_failure(lock: &RwLock<Option<Instant>>) -> Option<Instant> {
+    match lock.read() {
+        Ok(guard) => *guard,
+        Err(poisoned) => {
+            warn!("circuit_breaker: last_failure lock poisoned, recovering inner value");
+            *poisoned.into_inner()
+        }
+    }
+}
+
+fn write_last_failure(lock: &RwLock<Option<Instant>>, value: Option<Instant>) {
+    match lock.write() {
+        Ok(mut guard) => *guard = value,
+        Err(poisoned) => {
+            warn!("circuit_breaker: last_failure lock poisoned, recovering inner value");
+            *poisoned.into_inner() = value;
+        }
+    }
+}
+
 impl CircuitBreaker {
     pub fn new() -> Self {
         gauge!("whisper_circuit_breaker_state").set(0.0); // 0 = Closed, 1 = Open, 2 = HalfOpen
@@ -40,13 +84,13 @@ impl CircuitBreaker {
     }
 
     pub fn allow_request(&self) -> bool {
-        let mut current_state = *self.state.read().unwrap();
+        let mut current_state = read_state(&self.state);
 
         if current_state == State::Open {
-            let last_failure = *self.last_failure_time.read().unwrap();
+            let last_failure = read_last_failure(&self.last_failure_time);
             if let Some(time) = last_failure {
                 if time.elapsed() >= RESET_TIMEOUT {
-                    let mut state_write = self.state.write().unwrap();
+                    let mut state_write = write_state(&self.state);
                     if *state_write == State::Open {
                         *state_write = State::HalfOpen;
                         self.half_open_requests.store(0, Ordering::SeqCst);
@@ -79,12 +123,12 @@ impl CircuitBreaker {
     }
 
     pub fn record_success(&self) {
-        let current_state = *self.state.read().unwrap();
-        
+        let current_state = read_state(&self.state);
+
         self.failures.store(0, Ordering::SeqCst);
-        
+
         if current_state == State::HalfOpen {
-            let mut state_write = self.state.write().unwrap();
+            let mut state_write = write_state(&self.state);
             if *state_write == State::HalfOpen {
                 *state_write = State::Closed;
                 gauge!("whisper_circuit_breaker_state").set(0.0);
@@ -95,32 +139,34 @@ impl CircuitBreaker {
 
     pub fn record_failure(&self) {
         counter!("whisper_failures_total").increment(1);
-        let current_state = *self.state.read().unwrap();
+        let current_state = read_state(&self.state);
 
         match current_state {
             State::Closed => {
                 let fails = self.failures.fetch_add(1, Ordering::SeqCst) + 1;
                 if fails >= MAX_FAILURES {
-                    let mut state_write = self.state.write().unwrap();
+                    let mut state_write = write_state(&self.state);
                     if *state_write == State::Closed {
                         *state_write = State::Open;
-                        *self.last_failure_time.write().unwrap() = Some(Instant::now());
+                        write_last_failure(&self.last_failure_time, Some(Instant::now()));
                         gauge!("whisper_circuit_breaker_state").set(1.0);
                         error!("circuit_breaker_open: Se alcanzó límite de errores consecutivos ({}) para Whisper Worker", MAX_FAILURES);
                     }
                 }
             }
             State::HalfOpen => {
-                let mut state_write = self.state.write().unwrap();
+                let mut state_write = write_state(&self.state);
                 if *state_write == State::HalfOpen {
                     *state_write = State::Open;
-                    *self.last_failure_time.write().unwrap() = Some(Instant::now());
+                    write_last_failure(&self.last_failure_time, Some(Instant::now()));
                     gauge!("whisper_circuit_breaker_state").set(1.0);
-                    warn!("circuit_breaker_open: La prueba falló, regresando a estado abierto (Open)");
+                    warn!(
+                        "circuit_breaker_open: La prueba falló, regresando a estado abierto (Open)"
+                    );
                 }
             }
             State::Open => {
-                *self.last_failure_time.write().unwrap() = Some(Instant::now());
+                write_last_failure(&self.last_failure_time, Some(Instant::now()));
             }
         }
     }

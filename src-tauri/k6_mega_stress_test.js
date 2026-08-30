@@ -1,6 +1,8 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
+/* eslint-disable import/no-anonymous-default-export -- k6 requires a default VU function. */
+
 // Mega Stress Test Configuration
 // Objetivo: Confirmar estabilidad, burst protection y limites Reales
 export const options = {

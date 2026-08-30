@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { TikTokProcessor } from './TikTokProcessor';
 import { useSettings } from '@/lib/settings-context';
 
@@ -116,7 +116,8 @@ export function QueueSection() {
                 data = await invoke('get_jobs');
             } catch {
                 try {
-                    const response = await fetch('http://localhost:8080/api/v1/jobs');
+                    const { REST_API_BASE } = await import('@/lib/api-config');
+                    const response = await fetch(`${REST_API_BASE}/jobs`);
                     if (response.ok) data = await response.json();
                 } catch {
                     // ignore
@@ -133,7 +134,10 @@ export function QueueSection() {
     }, []);
 
     useEffect(() => {
-        fetchTasks();
+        let active = true;
+        queueMicrotask(() => {
+            if (active) void fetchTasks();
+        });
         const interval = setInterval(fetchTasks, 2000);
 
         let unlistenProgress: (() => void) | undefined;
@@ -141,23 +145,30 @@ export function QueueSection() {
         let unlistenIndexed: (() => void) | undefined;
 
         import('@tauri-apps/api/event').then(({ listen }) => {
-            listen('job_progress', () => { fetchTasks(); }).then(fn => { unlistenProgress = fn; });
-            listen('job_completed_notify', () => { fetchTasks(); }).then(fn => { unlistenNotify = fn; });
-            listen('media_indexed', () => { fetchTasks(); }).then(fn => { unlistenIndexed = fn; });
+            const safeListen = (event: string, cb: () => void, setter: (fn: () => void) => void) => {
+                try { listen(event, cb).then(setter).catch(() => {}); } catch {}
+            };
+            safeListen('job_progress', () => { fetchTasks(); }, fn => { unlistenProgress = fn; });
+            safeListen('job_completed_notify', () => { fetchTasks(); }, fn => { unlistenNotify = fn; });
+            safeListen('media_indexed', () => { fetchTasks(); }, fn => { unlistenIndexed = fn; });
         }).catch(() => {});
 
         const handleCustomJob = (e: any) => {
             const url = e.detail?.url;
+            const realJobId = e.detail?.job_id;
             if (url) {
+                // Bug #7 FIX: Use real job_id from backend if available
                 setTasks(prev => {
-                    const tempId = Date.now();
+                    const tempId = realJobId || Date.now();
+                    // Don't create a duplicate if the real job already exists
+                    if (realJobId && prev.some(t => t.id === realJobId)) return prev;
                     const cleanName = url.replace(/https?:\/\/(www\.)?tiktok\.com\/@?/, '').split('?')[0] || 'TikTok Video';
                     return [
                         {
                             id: tempId,
                             url,
-                            status: 'downloading',
-                            progress: 15,
+                            status: 'queued',
+                            progress: 0,
                             title: `TikTok: ${cleanName}`,
                             author: 'Pulsar Engine',
                             created_at: new Date().toISOString()
@@ -166,13 +177,15 @@ export function QueueSection() {
                     ];
                 });
             }
-            setTimeout(fetchTasks, 500);
+            // Bug #7 FIX: Let the 2s interval reconcile — no immediate fetch that races
         };
 
         window.addEventListener('pulsar_job_created', handleCustomJob);
 
-        return () => {
+                return () => {
+            active = false;
             clearInterval(interval);
+
             unlistenProgress?.();
             unlistenNotify?.();
             unlistenIndexed?.();
@@ -181,7 +194,9 @@ export function QueueSection() {
     }, [fetchTasks]);
 
     // Solo mostrar las tareas en progreso (no las completadas, que ya van al Grid)
+        const isTaskError = (task: any) => ['error', 'error_dlq', 'failed', 'failure', 'cancelled', 'canceled'].includes(String(task.status).toLowerCase());
     const activeTasks = tasks.filter(t => t.status !== 'complete' && t.status !== 'completed' && t.status !== 'done');
+
     const remainingPercentage = tasks.length > 0 ? Math.round((activeTasks.length / tasks.length) * 100) : 0;
 
     // Ordenar los formatos activos por paso (video → audio → texto)
@@ -192,10 +207,12 @@ export function QueueSection() {
     });
 
     const stageProgress = useMemo(() => {
-        if (activeTasks.length === 0) return 0;
+                if (activeTasks.length === 0) return 0;
         let total = 0;
         for (const task of activeTasks) {
+            if (isTaskError(task)) continue;
             switch (task.status) {
+
                 case 'queued':
                 case 'downloading':
                     total += Math.min(task.progress, 40);
@@ -217,9 +234,11 @@ export function QueueSection() {
     }, [activeTasks]);
 
     const currentStage = useMemo(() => {
-        if (activeTasks.length === 0) return 'Idle';
+                if (activeTasks.length === 0) return 'Idle';
         const minTask = activeTasks.reduce((min, t) => t.progress < min.progress ? t : min, activeTasks[0]);
+        if (isTaskError(minTask)) return 'Error';
         switch (minTask.status) {
+
             case 'queued':
             case 'downloading':
                 return 'Descargando';
@@ -235,48 +254,59 @@ export function QueueSection() {
     }, [activeTasks]);
 
     return (
-        <div className="flex flex-col min-h-0 relative z-10 w-full font-sans">
+        <div className="flex flex-col min-h-0 relative z-10 w-full font-sans gap-4">
             {/* Cabecera de la Cola */}
             <motion.div
-                className="pb-2.5 pt-1 flex flex-col gap-2 px-1"
+                className="flex flex-col gap-3 px-1"
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
             >
-                {/* Fila 1: Título y porcentaje */}
-                <div className="flex items-center justify-between">
-                    <div className="flex-shrink-0">
-                        <h2
-                            className="text-[11px] font-black uppercase tracking-[0.22em] whitespace-nowrap text-white/50"
-                        >
-                            Cola de Procesamiento — <span className="text-[#8a5cff]">{currentStage}</span>
-                        </h2>
+                {/* Fila 1: Título y porcentaje — con más espacio */}
+                <div className="flex items-start justify-between gap-4 pt-1">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${activeTasks.length > 0 ? 'bg-[#8a5cff] shadow-[0_0_10px_#8a5cff] animate-pulse' : 'bg-white/20'}`} />
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                            <h2 className="text-[11px] font-black uppercase tracking-[0.18em] truncate text-white/70">
+                                Cola de Procesamiento
+                            </h2>
+                            {activeTasks.length > 0 && (
+                                <span className="text-[10px] font-medium text-[#8a5cff] font-mono">
+                                    {currentStage}
+                                </span>
+                            )}
+                        </div>
                     </div>
-                    <GlassPillLoader percentage={stageProgress} />
+                    {activeTasks.length > 0 && (
+                        <GlassPillLoader percentage={stageProgress} />
+                    )}
                 </div>
 
-                {/* Fila 2: Badges de formatos activos ordenados por pipeline */}
+                {/* Fila 2: Badges de formatos activos — más espacio */}
                 {sortedFormats.length > 0 && (
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                        {sortedFormats.map((fmt, i) => {
-                            const meta = FORMAT_META[fmt];
-                            const prevMeta = i > 0 ? FORMAT_META[sortedFormats[i - 1]] : null;
-                            const newStep = prevMeta && meta && prevMeta.step !== meta.step;
-                            return (
-                                <div key={fmt} className="flex items-center gap-1">
-                                    {newStep && (
-                                        <span className="text-[8px] text-white/20 font-bold">→</span>
-                                    )}
-                                    <FormatBadge fmt={fmt} />
-                                </div>
-                            );
-                        })}
+                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                        <span className="text-[9px] font-bold text-white/30 uppercase tracking-wider shrink-0">Formatos:</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                            {sortedFormats.map((fmt, i) => {
+                                const meta = FORMAT_META[fmt];
+                                const prevMeta = i > 0 ? FORMAT_META[sortedFormats[i - 1]] : null;
+                                const newStep = prevMeta && meta && prevMeta.step !== meta.step;
+                                return (
+                                    <div key={fmt} className="flex items-center gap-1">
+                                        {newStep && (
+                                            <span className="text-[9px] text-white/25 font-bold">→</span>
+                                        )}
+                                        <FormatBadge fmt={fmt} />
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
                 )}
 
-                {/* Barra de progreso por etapas */}
+                {/* Barra de progreso por etapas — más alto y espaciado */}
                 {activeTasks.length > 0 && (
-                    <div className="flex items-center gap-[3px] w-full mt-0.5">
+                    <div className="flex items-center gap-2 w-full pt-1">
                         {[
                             { label: 'Descargando', threshold: 0 },
                             { label: 'Audio', threshold: 40 },
@@ -289,44 +319,44 @@ export function QueueSection() {
                             return (
                                 <div
                                     key={stage.label}
-                                    className={`flex-1 h-[3px] rounded-full transition-all duration-500 ${
-                                        isActive ? 'bg-[#8a5cff]' : isCurrent ? 'bg-[#8a5cff]/30' : 'bg-white/10'
+                                    className={`flex-1 h-[4px] rounded-full transition-all duration-500 relative ${
+                                        isActive ? 'bg-[#8a5cff] shadow-[0_0_8px_#8a5cff]' : isCurrent ? 'bg-[#8a5cff]/40' : 'bg-white/10'
                                     }`}
-                                />
+                                    title={stage.label}
+                                >
+                                    {isCurrent && (
+                                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[8px] h-[8px] rounded-full bg-[#8a5cff] shadow-[0_0_10px_#8a5cff] animate-ping" />
+                                    )}
+                                </div>
                             );
                         })}
                     </div>
                 )}
             </motion.div>
 
-            {/* Lista de Tareas en Cola */}
-            <div className="w-full flex flex-col">
+            {/* Lista de Tareas en Cola — más gap entre cards */}
+            <div className="w-full flex flex-col min-h-0">
                 <div
                     ref={scrollContainerRef}
-                    className="w-full flex flex-col gap-3 relative z-10"
+                    className="w-full flex flex-col gap-3.5 relative z-10 queue-scrollbar"
                 >
-                    <AnimatePresence mode="popLayout">
-                        {activeTasks.length === 0 && (
-                            <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                className="flex flex-col items-center justify-center py-6 px-4 rounded-[20px] border border-dashed border-white/10 bg-white/[0.01] gap-2"
-                            >
-                                <span className="text-[24px]">🎬</span>
-                                <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 text-center">Cola libre</p>
-                                <p className="text-[10px] text-white/20 text-center leading-tight">Pega un enlace arriba para descargar y procesar</p>
-                            </motion.div>
-                        )}
-                        {activeTasks.map((task, idx) => {
-                            // ── Título: mostrar nombre real o un loading state animado
+                    {activeTasks.length === 0 ? (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="flex flex-col items-center justify-center py-8 px-4 rounded-[20px] border border-dashed border-white/10 bg-white/[0.01] gap-2"
+                        >
+                            <span className="text-[24px]">🎬</span>
+                            <p className="text-[11px] font-black uppercase tracking-widest text-white/40 text-center">Cola Libre</p>
+                            <p className="text-[10px] text-white/25 text-center leading-snug">Pega un enlace arriba para descargar y procesar</p>
+                        </motion.div>
+                    ) : (
+                        activeTasks.map((task, idx) => {
                             const displayTitle = task.title || null;
-
-                            // ── Thumbnail: si tenemos la ruta y el basePath, construir URL de asset
-                            // Por simplicidad, si el thumbnail no es http, puede ser ruta local
                             const thumbnailSrc = task.thumbnail
                                 ? (task.thumbnail.startsWith('http')
                                     ? task.thumbnail
-                                    : undefined) // rutas locales requieren basePath del Tauri, no disponible aquí
+                                    : undefined)
                                 : undefined;
 
                             return (
@@ -334,37 +364,22 @@ export function QueueSection() {
                                 className="w-full flex-shrink-0 relative"
                                 key={task.id}
                                 layout
-                                initial={{ opacity: 0, y: 24, scale: 0.96 }}
+                                initial={{ opacity: 0, y: 16, scale: 0.98 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{
                                     opacity: 0,
                                     scale: 0.85,
-                                    y: -30,
-                                    rotateX: 15,
+                                    y: -20,
                                     filter: 'blur(6px)',
-                                    zIndex: -1,
                                 }}
                                 transition={{
-                                    duration: 0.55,
-                                    delay: idx * 0.05,
+                                    duration: 0.4,
+                                    delay: idx * 0.04,
                                     ease: [0.22, 1, 0.36, 1],
-                                    layout: { duration: 0.4, ease: [0.22, 1, 0.36, 1] }
                                 }}
-                                style={{ perspective: 800, transformStyle: 'preserve-3d' }}
                             >
-                                {/* Loading shimmer cuando el título no está listo */}
-                                {!displayTitle && (
-                                    <div className="absolute top-3 left-3 right-[120px] z-20 pointer-events-none">
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-white/30 animate-pulse" />
-                                            <span className="text-[9px] font-bold text-white/30 uppercase tracking-wider animate-pulse">
-                                                Obteniendo metadata...
-                                            </span>
-                                        </div>
-                                    </div>
-                                )}
                                 <TikTokProcessor 
-                                    title={displayTitle || '\u00a0'}
+                                    title={displayTitle || ''}
                                     author={task.author || (displayTitle ? 'Pulsar Engine' : '')} 
                                     thumbnailUrl={thumbnailSrc}
                                     duration={task.duration ? String(task.duration) : '--:--'}
@@ -372,14 +387,19 @@ export function QueueSection() {
                                         task.status === 'queued' ? 'MP4' : 
                                         task.status === 'downloading' ? 'MP4' :
                                         task.status === 'processing' ? 'MP3' : 
-                                        task.status === 'transcribing' ? 'TXT' : 'MP4'
+                                        task.status === 'transcribing' || task.status === 'indexing' ? 'TXT' : 'MP4'
                                     }
-                                    stepProgress={task.progress}
+                                    stepProgress={isTaskError(task) ? 0 : task.progress}
                                 />
+                                {isTaskError(task) && (
+                                    <div role="alert" className="mt-2 rounded-[12px] border border-[#fe2c55]/30 bg-[#fe2c55]/10 px-3 py-2.5 text-[10px] text-[#fe2c55] leading-relaxed">
+                                        {task.error_message || 'No se pudo completar este contenido. Revisa los requisitos del worker y vuelve a intentarlo.'}
+                                    </div>
+                                )}
                             </motion.div>
                             );
-                        })}
-                    </AnimatePresence>
+                        })
+                    )}
                 </div>
             </div>
         </div>

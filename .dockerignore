@@ -1,0 +1,24 @@
+# Dependencies and build caches
+node_modules
+.next
+target
+target-tauri
+src-tauri/target
+src-tauri/resources
+.git
+.freebuff
+.kilo
+.vscode
+
+# Python virtual environments and caches
+python-workers/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Large data and logs
+data/processing
+data/downloads
+data/*.db*
+*.log

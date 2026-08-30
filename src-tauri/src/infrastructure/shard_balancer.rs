@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tracing::{info, warn};
 use metrics::gauge;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use tracing::{info, warn};
 
 // ========================================================================
 // PHASE 20: Adaptive Shard Balancing
@@ -28,7 +28,11 @@ impl ShardBalancer {
             .map(|_| Arc::new(AtomicUsize::new(0)))
             .collect();
 
-        Self { shard_count, query_counters, skew_threshold }
+        Self {
+            shard_count,
+            query_counters,
+            skew_threshold,
+        }
     }
 
     /// Registra una query procesada por el shard especificado
@@ -40,30 +44,42 @@ impl ShardBalancer {
 
     /// Calcula el shard óptimo para la próxima query (el menos cargado)
     pub fn optimal_shard(&self, default_shard: usize) -> usize {
-        let counts: Vec<usize> = self.query_counters.iter()
+        let counts: Vec<usize> = self
+            .query_counters
+            .iter()
             .map(|c| c.load(Ordering::Relaxed))
             .collect();
 
         let total: usize = counts.iter().sum();
-        if total == 0 { return default_shard; }
+        if total == 0 {
+            return default_shard;
+        }
 
         let max_load = *counts.iter().max().unwrap_or(&1) as f64;
         let min_load = *counts.iter().min().unwrap_or(&0) as f64;
-        let skew = if max_load > 0.0 { (max_load - min_load) / max_load } else { 0.0 };
+        let skew = if max_load > 0.0 {
+            (max_load - min_load) / max_load
+        } else {
+            0.0
+        };
 
         // Emitir skew actualizado
         gauge!("shard_skew_ratio").set(skew);
 
         if skew > self.skew_threshold {
             // Rebalancear: elegir el shard con menos carga
-            let optimal = counts.iter().enumerate()
+            let optimal = counts
+                .iter()
+                .enumerate()
                 .min_by_key(|(_, &c)| c)
                 .map(|(i, _)| i)
                 .unwrap_or(default_shard);
 
             if optimal != default_shard {
-                warn!("Shard imbalance detectado (skew={:.2}): redirigiendo de shard {} → shard {}", 
-                      skew, default_shard, optimal);
+                warn!(
+                    "Shard imbalance detectado (skew={:.2}): redirigiendo de shard {} → shard {}",
+                    skew, default_shard, optimal
+                );
             }
             optimal
         } else {
@@ -77,6 +93,9 @@ impl ShardBalancer {
             let load = counter.load(Ordering::Relaxed) as f64;
             gauge!("shard_query_load", "shard" => i.to_string()).set(load);
         }
-        info!("Shard load metrics emitidas para {} shards", self.shard_count);
+        info!(
+            "Shard load metrics emitidas para {} shards",
+            self.shard_count
+        );
     }
 }

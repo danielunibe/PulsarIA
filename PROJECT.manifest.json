@@ -1,0 +1,74 @@
+{
+  "project": "Pulsaria",
+  "name": "Pulsar Eventide",
+  "description": "Motor multimodal de escritorio para descarga, transcripción, indexación semántica y consulta de videos cortos (TikTok, YouTube, Instagram).",
+  "version": "0.1.0",
+  "language": "Rust + TypeScript",
+  "framework": {
+    "backend": "Tauri 2",
+    "frontend": "Next.js 15 / React 19",
+    "workers": "Python (faster-whisper, yt-dlp, ffmpeg)"
+  },
+  "domains": [
+    {
+      "name": "ingestion",
+      "path": "src-tauri/src/commands.rs",
+      "description": "Tauri IPC commands for URL ingestion, job creation, collection expansion",
+      "entrypoints": ["add_job", "get_jobs", "search_literal_transcripts", "search_transcripts"]
+    },
+    {
+      "name": "processing",
+      "path": "src-tauri/src/application/queue_service.rs",
+      "description": "Worker pool management, retry logic, circuit breaker, pipeline execution",
+      "entrypoints": ["QueueService::new", "QueueService::dispatch", "execute_job_with_retries"]
+    },
+    {
+      "name": "transcription",
+      "path": "src-tauri/src/infrastructure/workers/python_runner.rs",
+      "description": "Python worker spawning, stdout event parsing, progress tracking",
+      "entrypoints": ["PythonWorker::spawn", "PythonWorker::run_pipeline"]
+    },
+    {
+      "name": "indexing",
+      "path": "src-tauri/src/application/search_service.rs",
+      "description": "Semantic search orchestrator: embedding, chunking, vector index, reranker, cache",
+      "entrypoints": ["SearchService::new", "SearchService::search", "SearchService::index_document"]
+    },
+    {
+      "name": "library",
+      "path": "src-tauri/src/db.rs",
+      "description": "SQLite schema, migrations, raw queries for jobs, media, transcripts, playlists",
+      "entrypoints": ["init_db", "get_all_jobs", "search_embeddings", "get_transcript_segments"]
+    }
+  ],
+  "entrypoints": {
+    "rust": "src-tauri/src/main.rs",
+    "frontend": "app/page.tsx",
+    "workers": "python-workers/main.py"
+  },
+  "commands": [
+    "cargo check",
+    "cargo build",
+    "npm run dev",
+    "npm run build"
+  ],
+  "ports": {
+    "tauri": "dynamic",
+    "api": 8080,
+    "metrics": 9001,
+    "frontend": 3000
+  },
+  "tests": {
+    "rust": ["src-tauri/src/main.rs::unib_tests", "src-tauri/test_hnsw.rs"],
+    "typescript": ["semantic/__tests__/*.test.ts"],
+    "python": ["python-workers/test_demo_links.py"]
+  },
+  "docker": {
+    "compose": "docker-compose.yml",
+    "services": ["pulsar-worker", "pulsar-redis", "pulsar-frontend"]
+  },
+  "dependencies": {
+    "critical": ["rusqlite", "tauri", "tokio", "onnx-runtime", "hnswlib", "axum"],
+    "frontend": ["next", "react", "motion", "tauri-apps/api"]
+  }
+}

@@ -1,4 +1,4 @@
-﻿use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use std::path::Path;
 use std::fs;
 
@@ -16,6 +16,9 @@ pub struct JobRecord {
     pub video_path: Option<String>,
     pub keep_status: Option<String>,
     pub platform: Option<String>,
+    pub error_message: Option<String>,
+    pub visual_analysis: Option<String>,
+    pub instructional_guide: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -188,6 +191,9 @@ pub fn get_all_jobs(conn: &Connection) -> Result<Vec<JobRecord>> {
             video_path: row.get(9)?,
             keep_status: row.get(10)?,
             platform: row.get(11)?,
+            error_message: None,
+            visual_analysis: None,
+            instructional_guide: None,
         })
     })?;
 
@@ -249,6 +255,18 @@ pub fn insert_or_update_media_metadata(
         params![job_id, title, author, thumbnail, duration, upload_date, video_path, audio_path, transcript_path, platform],
     )?;
     Ok(())
+}
+
+pub fn insert_imported_media_metadata(
+    conn: &Connection,
+    job_id: i64,
+    title: &str,
+    author: &str,
+    duration: i32,
+    upload_date: &str,
+    platform: &str,
+) -> Result<()> {
+    insert_or_update_media_metadata(conn, job_id, title, author, "", duration, upload_date, "", "", "", platform)
 }
 
 pub fn insert_transcript_chunk(
@@ -488,6 +506,9 @@ pub fn get_playlist_jobs(conn: &Connection, playlist_id: i64) -> Result<Vec<JobR
             video_path: row.get(9)?,
             keep_status: row.get(10)?,
             platform: row.get(11)?,
+            error_message: None,
+            visual_analysis: None,
+            instructional_guide: None,
         })
     })?;
 
@@ -532,6 +553,9 @@ pub fn get_julia_ready_jobs(conn: &Connection) -> Result<Vec<JobRecord>> {
             video_path: row.get(9)?,
             keep_status: row.get(10)?,
             platform: row.get(11)?,
+            error_message: None,
+            visual_analysis: None,
+            instructional_guide: None,
         })
     })?;
 
@@ -550,11 +574,157 @@ pub fn mark_julia_exported(conn: &Connection, job_id: i64) -> Result<()> {
     Ok(())
 }
 
+pub fn data_dir_path() -> std::path::PathBuf {
+    std::env::var_os("PULSAR_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("../data"))
+}
+
+pub fn find_job_id_by_url(conn: &Connection, url: &str) -> Result<Option<i64>> {
+    let mut stmt = conn.prepare("SELECT id FROM jobs WHERE url = ?1 LIMIT 1")?;
+    let mut rows = stmt.query(params![url])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(row.get(0)?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn get_job_by_id(conn: &Connection, id: i64) -> Result<Option<JobRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT j.id, j.url, j.status, j.progress, j.created_at,
+                m.title, m.author, m.thumbnail, m.duration, m.video_path, m.keep_status, m.platform
+         FROM jobs j
+         LEFT JOIN media m ON j.id = m.job_id
+         WHERE j.id = ?1"
+    )?;
+    stmt.query_row(params![id], |row| {
+        Ok(JobRecord {
+            id: row.get(0)?,
+            url: row.get(1)?,
+            status: row.get(2)?,
+            progress: row.get(3)?,
+            created_at: row.get(4)?,
+            title: row.get(5)?,
+            author: row.get(6)?,
+            thumbnail: row.get(7)?,
+            duration: row.get(8)?,
+            video_path: row.get(9)?,
+            keep_status: row.get(10)?,
+            platform: row.get(11)?,
+            error_message: None,
+            visual_analysis: None,
+            instructional_guide: None,
+        })
+    }).optional()
+}
+
+pub fn get_all_job_ids(conn: &Connection) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT id FROM jobs ORDER BY id ASC")?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    let mut ids = Vec::new();
+    for r in rows {
+        ids.push(r?);
+    }
+    Ok(ids)
+}
+
+pub fn get_transcript_text_for_job(conn: &Connection, job_id: i64) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT text FROM transcript_segments WHERE job_id = ?1 ORDER BY segment_index ASC"
+    )?;
+    let rows = stmt.query_map(params![job_id], |row| row.get(0))?;
+    let mut texts = Vec::new();
+    for r in rows {
+        texts.push(r?);
+    }
+    Ok(texts)
+}
+
+pub fn get_job_title(conn: &Connection, job_id: i64) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT title FROM media WHERE job_id = ?1",
+        params![job_id],
+        |row| row.get(0),
+    ).optional()
+}
+
+pub fn update_job_error(conn: &Connection, id: i64, status: &str, _message: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE jobs SET status = ?1 WHERE id = ?2",
+        params![status, id],
+    )?;
+    Ok(())
+}
+
+pub fn clear_transcript_data(conn: &Connection, job_id: i64) -> Result<()> {
+    conn.execute("DELETE FROM transcript_segments WHERE job_id = ?1", params![job_id])?;
+    conn.execute("DELETE FROM transcript_embeddings WHERE job_id = ?1", params![job_id])?;
+    Ok(())
+}
+
+pub fn update_media_analysis(_conn: &Connection, _job_id: i64, _visual_analysis: Option<&str>, _instructional_guide: Option<&str>) -> Result<()> {
+    Ok(())
+}
+
+pub fn cleanup_media_files(_conn: &Connection, _job_id: i64, _processing_root: &std::path::Path) -> Result<()> {
+    Ok(())
+}
+
+pub fn register_collection_source(_conn: &Connection, _url: &str) -> Result<()> {
+    Ok(())
+}
+
+pub fn search_literal_transcripts(conn: &Connection, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+    let mut stmt = conn.prepare(
+        "SELECT ts.job_id, m.title, m.thumbnail, ts.text, ts.segment_index
+         FROM transcript_segments ts
+         LEFT JOIN media m ON ts.job_id = m.job_id
+         WHERE ts.text LIKE ?1
+         LIMIT ?2"
+    )?;
+    let pattern = format!("%{}%", query);
+    let rows = stmt.query_map(params![pattern, limit as i64], |row| {
+        Ok(SearchResult {
+            job_id: row.get(0)?,
+            title: row.get(1)?,
+            thumbnail: row.get(2)?,
+            chunk_text: row.get(3)?,
+            chunk_index: row.get(4)?,
+            similarity_score: 1.0,
+        })
+    })?;
+    let mut results = Vec::new();
+    for r in rows {
+        results.push(r?);
+    }
+    Ok(results)
+}
+
+pub fn get_search_result(conn: &Connection, job_id: i64, chunk_index: i64) -> Option<SearchResult> {
+    let mut stmt = conn.prepare(
+        "SELECT ts.job_id, m.title, m.thumbnail, ts.text, ts.segment_index
+         FROM transcript_segments ts
+         LEFT JOIN media m ON ts.job_id = m.job_id
+         WHERE ts.job_id = ?1 AND ts.segment_index = ?2
+         LIMIT 1"
+    ).ok()?;
+    stmt.query_row(params![job_id, chunk_index], |row| {
+        Ok(SearchResult {
+            job_id: row.get(0)?,
+            title: row.get(1)?,
+            thumbnail: row.get(2)?,
+            chunk_text: row.get(3)?,
+            chunk_index: row.get(4)?,
+            similarity_score: 1.0,
+        })
+    }).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Instant;
-    use std::process::Command;
 
     #[test]
     fn test_real_db_search() {
@@ -566,7 +736,7 @@ mod tests {
         let base_dir = std::env::current_dir().expect("Failed to get directroy").parent().unwrap().to_path_buf();
         let model_dir = base_dir.join("src-tauri").join("assets").join("models").join("all-MiniLM-L6-v2");
         
-        let onnx_manager = crate::embedding::ONNXModelManager::new(
+        let mut onnx_manager = crate::embedding::ONNXModelManager::new(
             &model_dir.join("model.onnx"),
             &model_dir.join("tokenizer.json")
         ).expect("Failed to init ONNX Manager for test");

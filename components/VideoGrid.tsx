@@ -1,9 +1,9 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { VideoCard } from '@/components/VideoCard';
-import { INACTIVE_SLOTS_COUNT, MOCK_ACTIVE_VIDEOS } from '@/lib/mock-data';
+import { INACTIVE_SLOTS_COUNT } from '@/lib/mock-data';
 import { FaFolderOpen } from 'react-icons/fa6';
 
 const ExpandedVideoModal = dynamic(
@@ -11,18 +11,38 @@ const ExpandedVideoModal = dynamic(
     { ssr: false }
 );
 
+/**
+ * Props del componente VideoGrid.
+ * 
+ * Grid dinámico que muestra videos procesados (jobs completados) junto con
+ * slots decorativos vacíos para mantener el layout. Soporta múltiples
+ * modos de visualización (grid/list/compact) y filtrado por estado,
+ * plataforma y política de retención.
+ */
 interface VideoGridProps {
+    /** ID del video que se está reproduciendo actualmente, o null */
     activeVideoId: number | null;
+    /** Callback cuando se inicia la reproducción de un video */
     onVideoPlayStart: (id: number) => void;
+    /** Callback cuando se detiene la reproducción de un video */
     onVideoPlayStop: (id: number) => void;
+    /** Clave de ordenamiento: 'date_desc', 'date_asc', 'title', 'duration' */
     sortKey?: string;
+    /** ID de playlist para filtrar videos (si se muestra una playlist específica) */
     playlistId?: number;
+    /** Modo de visualización: 'grid' (auto-columnas), 'list' (una columna), 'compact' (cards pequeñas) */
     layout?: 'grid' | 'list' | 'compact';
+    /** Número fijo de columnas (0 = auto basado en ancho de ventana) */
     columns?: 0 | 2 | 3 | 4;
+    /** Si es true, oculta jobs en estado 'error' o 'queued' */
     showOnlyCompleted?: boolean;
+    /** Si es true, muestra solo jobs con errores */
     showErrors?: boolean;
+    /** Callback que notifica al padre cuando cambia la lista de jobs */
     onJobsChange?: (jobs: JobRecord[]) => void;
+    /** Filtrar por estado de retención: 'keep', 'online' */
     keepStatusFilter?: string;
+    /** Filtrar por plataforma: 'tiktok', 'youtube', etc. */
     platformFilter?: string;
 }
 
@@ -36,17 +56,43 @@ interface ProgressEvent {
     progress: number;
 }
 
+/**
+ * Registro de un job (video) con sus metadatos de media.
+ * 
+ * Coincide con la estructura `JobRecord` del backend Rust (db.rs).
+ * Se obtiene mediante el comando Tauri `get_jobs` o el endpoint REST `/api/v1/jobs`.
+ */
 interface JobRecord {
+    /** ID autoincremental del job */
     id: number;
+    /** URL original del video */
     url: string;
+    /** Estado actual: 'queued', 'downloading', 'metadata', 'transcribing', 'indexing', 'processing', 'complete', 'error' */
     status: string;
+    /** Progreso del pipeline (0-100) */
     progress: number;
+    /** Timestamp de creación del job (ISO 8601) */
     created_at: string;
+    /** Título del video (extraído por yt-dlp) */
     title?: string;
+    /** Autor/creador del video */
     author?: string;
+    /** URL o path local de la miniatura del video */
     thumbnail?: string;
+    /** Duración del video en segundos */
     duration?: number;
+    /** Path local al archivo de video procesado */
     video_path?: string;
+    /** Mensaje de error si el job falló */
+    error_message?: string;
+    /** Resultados del análisis visual (JSON serializado) */
+    visual_analysis?: string;
+    /** Instructivo audiovisual generado por IA */
+    instructional_guide?: string;
+    /** Poltica de retencin del archivo: 'keep' o 'online' */
+    keep_status?: string;
+    /** Plataforma de origen: 'tiktok', 'youtube', etc. */
+    platform?: string;
 }
 
 // -- Convierte una ruta local de archivo a una URL que Tauri puede renderizar
@@ -63,7 +109,21 @@ async function toAssetUrl(localPath: string | undefined): Promise<string | undef
     }
 }
 
-export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, sortKey, playlistId, onJobsChange, keepStatusFilter, platformFilter }: VideoGridProps) {
+export function VideoGrid({
+    activeVideoId,
+    onVideoPlayStart,
+    onVideoPlayStop,
+    sortKey,
+    playlistId,
+    layout = 'grid',
+    columns = 0,
+    showOnlyCompleted = true,
+    showErrors = false,
+    onJobsChange,
+    keepStatusFilter,
+    platformFilter,
+}: VideoGridProps) {
+
     const [hoveredGlobalIndex, setHoveredGlobalIndex] = useState<number | null>(null);
     const [isInitialLoad, setIsInitialLoad] = useState(true);
     const [jobs, setJobs] = useState<JobRecord[]>([]);
@@ -72,41 +132,68 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
     const [containerWidth, setContainerWidth] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    // Solo mostrar trabajos completados en la Librer�a de Videos
-    const completedJobs = (playlistId ? playlistJobs.filter(j => j.status === 'complete') : jobs.filter(j => j.status === 'complete'))
-    .filter(j => (keepStatusFilter ?? 'all') === 'all' || (j as any).keep_status === (keepStatusFilter ?? 'all'))
-    .filter(j => (platformFilter ?? 'all') === 'all' || (j as any).platform === (platformFilter ?? 'all') || (j.url || '').includes(platformFilter ?? 'all'));
+    const sourceJobs = playlistId ? playlistJobs : jobs;
+    const isCompleted = (job: JobRecord) => ['complete', 'completed'].includes(job.status.toLowerCase());
+    const isError = (job: JobRecord) => ['error', 'failed', 'failure', 'cancelled', 'canceled'].includes(job.status.toLowerCase());
+    const normalizedPlatformFilter = (platformFilter ?? 'all').toLowerCase();
 
-    // C�lculo din�mico de columnas bas�ndonos en el ancho del contenedor
-    const currentColumns = Math.max(1, Math.floor((containerWidth + SPACING) / (CARD_MIN_WIDTH + SPACING)));
+    // PagePanel controla qué estados aparecen en la biblioteca; la cola sigue mostrando el progreso completo.
+    // Bug #5 FIX: Error jobs are ALWAYS visible in the grid
+    const visibleJobs = sourceJobs
+        .filter((job) => {
+            const isJobError = isError(job);
+            // Error jobs always visible; completed always visible;
+            // others depend on showOnlyCompleted
+            const statusVisible = isCompleted(job) || isJobError || !showOnlyCompleted;
+            const keepVisible = (keepStatusFilter ?? 'all') === 'all'
+                || job.keep_status === (keepStatusFilter ?? 'all');
+            const jobPlatform = job.platform?.toLowerCase() ?? '';
+            const platformVisible = normalizedPlatformFilter === 'all'
+                || jobPlatform === normalizedPlatformFilter
+                || job.url.toLowerCase().includes(normalizedPlatformFilter);
+            return statusVisible && keepVisible && platformVisible && Boolean(job.status);
+        });
+
+    // Cálculo de columnas basado en el ancho real, salvo cuando el usuario fija un número.
+    const autoColumns = Math.max(1, Math.floor((containerWidth + SPACING) / (CARD_MIN_WIDTH + SPACING)));
+    const currentColumns = layout === 'list' ? 1 : columns || autoColumns;
 
     // -- Fetching de jobs: primero Tauri IPC, si falla usa la REST API --
     const fetchJobs = useCallback(async () => {
-        if (playlistId) {
+                if (playlistId) {
             try {
-                const { invoke } = await import('@tauri-apps/api/core');
-                const items = await invoke<JobRecord[]>('get_playlist_items', { playlistId });
+                let items: JobRecord[];
+                try {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    items = await invoke<JobRecord[]>('get_playlist_items', { playlistId });
+                } catch {
+                    const { REST_API_BASE } = await import('@/lib/api-config');
+                    const response = await fetch(`${REST_API_BASE}/playlists/${playlistId}/items`);
+                    if (!response.ok) throw new Error(`Playlist request failed with status ${response.status}`);
+                    items = await response.json() as JobRecord[];
+                }
                 setPlaylistJobs(items);
-                if (onJobsChange) onJobsChange(items);
             } catch {
                 setPlaylistJobs([]);
             }
             return;
         }
+
         let data: JobRecord[] = [];
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             data = await invoke('get_jobs');
         } catch {
             try {
-                const response = await fetch('http://localhost:8080/api/v1/jobs');
+                const { REST_API_BASE } = await import('@/lib/api-config');
+                const response = await fetch(`${REST_API_BASE}/jobs`);
                 if (response.ok) data = await response.json();
             } catch { /* sin conexion */ }
         }
         setJobs(data);
         if (onJobsChange) onJobsChange(data);
         setPlaylistJobs([]);
-    }, [playlistId]);
+    }, [onJobsChange, playlistId]);
 
     // -- Resolver rutas locales de assets de manera as�ncrona
     const resolveAssets = useCallback(async (list: JobRecord[]) => {
@@ -121,11 +208,15 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
         setResolvedAssets(prev => ({ ...prev, ...updates }));
     }, []);
 
-    useEffect(() => {
+        useEffect(() => {
         const timer = setTimeout(() => setIsInitialLoad(false), 2000);
-        fetchJobs();
+        let active = true;
+        queueMicrotask(() => {
+            if (active) void fetchJobs();
+        });
 
         // Resize observer para responsividad
+
         const observer = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 setContainerWidth(entry.contentRect.width);
@@ -149,8 +240,10 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
         const fallbackInterval = setInterval(fetchJobs, 3000);
 
         return () => {
+                        active = false;
             clearTimeout(timer);
             clearInterval(fallbackInterval);
+
             observer.disconnect();
             unlistenProgress?.();
             unlistenIndexed?.();
@@ -159,8 +252,15 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
 
     // Resolver assets cada vez que cambian los jobs
     useEffect(() => {
-        if (jobs.length > 0) resolveAssets(jobs);
-    }, [jobs, resolveAssets]);
+        const sourceJobs = playlistId ? playlistJobs : jobs;
+        let active = true;
+        queueMicrotask(() => {
+            if (active && sourceJobs.length > 0) void resolveAssets(sourceJobs);
+        });
+        return () => {
+            active = false;
+        };
+    }, [jobs, playlistId, playlistJobs, resolveAssets]);
 
     // -- Funci�n de animaci�n tipo Mac Dock
     const getCardAnimation = (idx: number, isInitial: boolean) => {
@@ -201,14 +301,18 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
     };
 
     // -- Lista a renderizar: jobs completados reales
-    const sortedJobs = [...completedJobs].sort((a, b) => {
+        const sortedJobs = [...visibleJobs].sort((a, b) => {
+
+            const aDate = Date.parse(a.created_at || '') || a.id;
+      const bDate = Date.parse(b.created_at || '') || b.id;
       switch (sortKey) {
-        case 'date_asc':  return a.id - b.id;
-        case 'date_desc': return b.id - a.id;
-        case 'title':     return (a.title || '').localeCompare(b.title || '');
+        case 'date_asc':  return aDate - bDate;
+        case 'date_desc': return bDate - aDate;
+        case 'title':     return (a.title || '').localeCompare(b.title || '', 'es');
         case 'duration':  return (b.duration || 0) - (a.duration || 0);
-        default:          return b.id - a.id;
+        default:          return bDate - aDate;
       }
+
     });
     const showEmptyState = sortedJobs.length === 0;
     const renderList = sortedJobs;
@@ -264,23 +368,32 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
                 ref={containerRef}
                 className="video-grid-container"
                 style={{
-                    display: 'grid',
+                                        display: layout === 'list' ? 'flex' : 'grid',
+
                     marginTop: '12px',
-                    gridTemplateColumns: `repeat(auto-fill, minmax(${CARD_MIN_WIDTH}px, 1fr))`,
+                                        gridTemplateColumns: layout === 'list'
+                        ? undefined
+                        : `repeat(${columns || 'auto-fill'}, minmax(${layout === 'compact' ? 160 : CARD_MIN_WIDTH}px, 1fr))`,
+                    flexDirection: layout === 'list' ? 'column' : undefined,
                     gap: containerWidth < 800 ? '16px' : `${SPACING}px`,
+
                     justifyContent: 'center',
                     paddingBottom: '80px'
                 }}
             >
                 {/* -- Tarjetas de videos completados o mocks -- */}
-                {renderList.map((job: any, idx: number) => {
+                                {renderList.map((job: any, idx: number) => {
                     const isRealJob = 'status' in job;
                     const assets = isRealJob ? resolvedAssets[job.id] : undefined;
                     const thumbnailSrc = isRealJob ? assets?.thumb : job.thumb;
                     const videoSrc = isRealJob ? assets?.video : job.videoSrc;
                     const isPlaying = activeVideoId === job.id;
+                    const playable = !isRealJob || isCompleted(job as JobRecord);
+                    const failed = isRealJob && isError(job as JobRecord);
+                    const onlineOnly = isRealJob && job.keep_status === 'online';
 
                     return (
+
                         <motion.div
                             key={job.id}
                             layoutId={`video-card-${job.id}`}
@@ -297,21 +410,44 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
                             onMouseLeave={() => setHoveredGlobalIndex(null)}
                             style={{ position: 'relative' }}
                         >
-                            <VideoCard
-                                id={job.id}
-                                isActive={isRealJob}
-                                title={job.title || (isRealJob ? job.url : 'Untitled')}
-                                author={job.author || 'Unknown'}
-                                duration={isRealJob ? formatDuration(job.duration) : job.duration}
-                                tags={job.tags || []}
-                                thumb={thumbnailSrc}
-                                videoSrc={videoSrc}
-                                url={job.url}
-                                isFullPlaying={isPlaying}
-                                onPlayStart={() => onVideoPlayStart(job.id)}
-                                onPlayStop={() => onVideoPlayStop(job.id)}
-                                keepStatus={(job as any).keep_status}
-                            />
+                                                        {playable ? (
+                                <VideoCard
+                                    id={job.id}
+                                    isActive={isRealJob}
+                                    layout={layout}
+                                    title={job.title || (isRealJob ? job.url : 'Untitled')}
+                                    author={job.author || 'Unknown'}
+                                    duration={isRealJob ? formatDuration(job.duration) : job.duration}
+                                    tags={job.tags || []}
+                                    thumb={thumbnailSrc}
+                                    videoSrc={videoSrc}
+                                    url={job.url}
+                                    isFullPlaying={isPlaying}
+                                    onPlayStart={() => onVideoPlayStart(job.id)}
+                                    onPlayStop={() => onVideoPlayStop(job.id)}
+                                    keepStatus={job.keep_status}
+                                    onlineOnly={onlineOnly}
+                                />
+                            ) : (
+                                <div className={`w-full min-h-[160px] rounded-[24px] border p-5 flex flex-col justify-between ${failed ? 'border-[#fe2c55]/30 bg-[#280d17]/70' : 'border-white/10 bg-black/35'}`}>
+                                    <div>
+                                        <span className={`text-[9px] font-black uppercase tracking-[0.2em] ${failed ? 'text-[#fe2c55]' : 'text-[#25f4ee]'}`}>
+                                            {failed ? 'Error en procesamiento' : 'Procesamiento en curso'}
+                                        </span>
+                                        <h3 className="mt-3 text-sm font-bold text-white line-clamp-2">{job.title || job.url}</h3>
+                                        {failed && (job as JobRecord).error_message && (
+                                            <p className="mt-2 text-[10px] text-[#fe2c55]/80 line-clamp-3">{(job as JobRecord).error_message}</p>
+                                        )}
+                                    </div>
+                                    <div className="mt-5 flex items-center gap-3">
+                                        <div className="h-1.5 flex-1 rounded-full bg-white/10 overflow-hidden">
+                                            <div className={`h-full rounded-full ${failed ? 'bg-[#fe2c55]' : 'bg-[#25f4ee]'}`} style={{ width: `${Math.min(100, Math.max(0, job.progress || 0))}%` }} />
+                                        </div>
+                                        <span className="text-[10px] font-mono text-white/70">{Math.round(job.progress || 0)}%</span>
+                                    </div>
+                                </div>
+                            )}
+
                         </motion.div>
                     );
                 })}
@@ -335,14 +471,16 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
                             onMouseLeave={() => setHoveredGlobalIndex(null)}
                             style={{ position: 'relative' }}
                         >
-                            <VideoCard isActive={false} slotIndex={i} />
+                                                        <VideoCard isActive={false} slotIndex={i} layout={layout} />
+
                         </motion.div>
                     );
                 })}
             </div>
 
             {/* -- Modal expandido -- */}
-            <AnimatePresence>
+                        <>
+
                 {activeVideoId !== null && (() => {
                     const allAvailableJobs = playlistId ? [...playlistJobs, ...jobs] : jobs;
                     const activeJob = allAvailableJobs.find(j => j.id === activeVideoId);
@@ -355,7 +493,11 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
                         duration: formatDuration(activeJob.duration),
                         tags: [] as string[],
                         thumb: assets?.thumb || '',
-                        videoSrc: assets?.video || ''
+                                                videoSrc: assets?.video || '',
+                        originalUrl: activeJob.url,
+                        visualAnalysis: activeJob.visual_analysis,
+                        instructionalGuide: activeJob.instructional_guide,
+
                     };
                     return (
                         <ExpandedVideoModal
@@ -365,7 +507,8 @@ export function VideoGrid({ activeVideoId, onVideoPlayStart, onVideoPlayStop, so
                         />
                     );
                 })()}
-            </AnimatePresence>
+                        </>
+
         </motion.div>
     );
 }

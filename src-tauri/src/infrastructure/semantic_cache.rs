@@ -1,11 +1,11 @@
 use crate::domain::models::SearchResult;
-use sha2::{Sha256, Digest};
 use metrics::counter;
-use tracing::{info, warn, instrument};
+use sha2::{Digest, Sha256};
+use tracing::{info, instrument, warn};
 
 // ========================================================================
 // INFRASTRUCTURE: Semantic Cache (Redis)
-// Propósito: Interceptar consultas idénticas (mismo vector + limite) 
+// Propósito: Interceptar consultas idénticas (mismo vector + limite)
 // para servir los Top-K pre-calculados al instante, aliviando CPU y GPU.
 // ========================================================================
 
@@ -38,7 +38,7 @@ impl SemanticCache {
             hasher.update(val.to_ne_bytes());
         }
         hasher.update(limit.to_ne_bytes());
-        
+
         let result = hasher.finalize();
         format!("pulsar:cache:{:x}", result)
     }
@@ -52,19 +52,25 @@ impl SemanticCache {
         let _start_time = std::time::Instant::now();
         let key = self.generate_cache_key(query_embedding, limit);
 
-        if let Ok(mut con) = self.client.clone().unwrap().get_multiplexed_async_connection().await {
+        if let Ok(mut con) = self
+            .client
+            .clone()
+            .unwrap()
+            .get_multiplexed_async_connection()
+            .await
+        {
             let res: redis::RedisResult<String> = redis::AsyncCommands::get(&mut con, &key).await;
             if let Ok(cached_json) = res {
                 if let Ok(results) = serde_json::from_str::<Vec<SearchResult>>(&cached_json) {
                     counter!("semantic_cache_hits_total").increment(1);
                     info!("SemanticCache hit para clave cruzada de métricas: {}", key);
-                    
+
                     // Solo metricaremos latencia si tenemos la feature redis real prendida
                     return Some(results);
                 }
             }
         }
-        
+
         counter!("semantic_cache_misses_total").increment(1);
         None
     }
@@ -77,8 +83,16 @@ impl SemanticCache {
 
         let key = self.generate_cache_key(query_embedding, limit);
         if let Ok(json) = serde_json::to_string(results) {
-            if let Ok(mut con) = self.client.clone().unwrap().get_multiplexed_async_connection().await {
-                let _: redis::RedisResult<()> = redis::AsyncCommands::set_ex(&mut con, &key, json, self.ttl_seconds as u64).await;
+            if let Ok(mut con) = self
+                .client
+                .clone()
+                .unwrap()
+                .get_multiplexed_async_connection()
+                .await
+            {
+                let _: redis::RedisResult<()> =
+                    redis::AsyncCommands::set_ex(&mut con, &key, json, self.ttl_seconds as u64)
+                        .await;
                 info!("SemanticCache almacenó nuevos resultados para {}", key);
             }
         }

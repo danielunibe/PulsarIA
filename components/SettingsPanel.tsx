@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
+
 import { cn } from '@/lib/utils';
 import { SHADOW, SURFACE, ACCENT } from '@/lib/design-tokens';
-import { useSettings, AppTheme } from '@/lib/settings-context';
+import { useSettings, AppTheme, RetentionPolicy } from '@/lib/settings-context';
+
 import { 
     FaXmark, 
     FaDownload, 
@@ -27,6 +29,10 @@ const SolidFolderIcon = () => <FaFolder size={11} />;
 const SolidPaletteIcon = () => <FaPalette size={13} />;
 const SolidCheckIcon = () => <FaCheck size={18} />;
 
+/**
+ * Opciones de tema visual disponibles para la aplicación.
+ * Cada tema define gradientes, colores de borde y acentos.
+ */
 const THEME_OPTIONS: Array<{
     id: AppTheme;
     name: string;
@@ -163,28 +169,69 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
     const [formats, setFormats] = useState<string[]>(settings.formats);
     const [folder, setFolder] = useState(settings.folder);
     const [selectedTheme, setSelectedTheme] = useState<AppTheme>(settings.theme || 'carbon');
+    const [retention, setRetention] = useState<RetentionPolicy>(settings.retention || 'keep');
+    const [cookiesBrowser, setCookiesBrowser] = useState<typeof settings.cookiesBrowser>(settings.cookiesBrowser || '');
 
     // Engine & Model State
-    const [modelOnline, setModelOnline] = useState(true);
+    const [modelOnline, setModelOnline] = useState<boolean | null>(null);
     const [similarityThreshold, setSimilarityThreshold] = useState(0.45);
-    const [hnswShards, setHnswShards] = useState(8);
+    const [hnswShards] = useState(4);
+    const [settingsError, setSettingsError] = useState<string | null>(null);
 
     // AI Cluster State
     const [clusterThreshold, setClusterThreshold] = useState(0.70);
     const [clusterMinSize, setClusterMinSize] = useState(2);
-    const [clustersList, setClustersList] = useState<any[]>([]);
+        const [clustersList, setClustersList] = useState<any[]>([]);
     const [clusteringLoading, setClusteringLoading] = useState(false);
+    const [clusteringError, setClusteringError] = useState<string | null>(null);
+
+    const [now] = useState(() => Date.now());
 
     useEffect(() => {
-        setFormats(settings.formats);
-        setFolder(settings.folder);
-        setSelectedTheme(settings.theme || 'carbon');
+
+        let active = true;
+        queueMicrotask(() => {
+            if (!active) return;
+            setFormats(settings.formats);
+            setFolder(settings.folder);
+            setSelectedTheme(settings.theme || 'carbon');
+            setRetention(settings.retention || 'keep');
+            setCookiesBrowser(settings.cookiesBrowser || '');
+        });
+        return () => {
+            active = false;
+        };
     }, [settings]);
 
     useEffect(() => {
-        import('@tauri-apps/api/core').then(({ invoke }) =>
-            invoke<string>('get_download_dir').then(setFolder).catch(() => {})
-        );
+        let active = true;
+        void (async () => {
+            try {
+                // In browser mode (no Tauri), use settings defaults
+                if (typeof window === 'undefined' || !(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
+                    if (active) setModelOnline(false);
+                    return;
+                }
+                const { invoke } = await import('@tauri-apps/api/core');
+                const [downloadDir, modelStatus, searchConfig] = await Promise.all([
+                    invoke<string>('get_download_dir'),
+                    invoke<{ loaded: boolean }>('get_model_status'),
+                    invoke<{ min_score: number }>('get_search_config'),
+                ]);
+                if (!active) return;
+                setFolder(downloadDir);
+                setModelOnline(modelStatus.loaded);
+                setSimilarityThreshold(searchConfig.min_score);
+            } catch (error) {
+                if (active) {
+                    setModelOnline(false);
+                    setSettingsError(error instanceof Error ? error.message : String(error));
+                }
+            }
+        })();
+        return () => {
+            active = false;
+        };
     }, []);
 
     // Format stats
@@ -202,11 +249,11 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
             else platforms.generic++;
         });
         
-        const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        const thisWeek = completed.filter(j => new Date(j.created_at || Date.now()).getTime() > weekAgo).length;
-        
+        const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+        const thisWeek = completed.filter(j => new Date(j.created_at || now).getTime() > weekAgo).length;
+
         return { total, totalDuration, platforms, thisWeek };
-    }, [jobs]);
+    }, [jobs, now]);
 
     const formatDuration = (seconds: number) => {
         const h = Math.floor(seconds / 3600);
@@ -230,24 +277,61 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
 
     const runClustering = async () => {
         setClusteringLoading(true);
+        setClusteringError(null);
         try {
+            if (typeof window === 'undefined' || !(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
+                setClusteringError('Clustering requires the Tauri desktop app');
+                return;
+            }
             const { invoke } = await import('@tauri-apps/api/core');
-            const result: number[][] = await invoke('auto_cluster_videos', { 
-                threshold: clusterThreshold, 
-                minClusterSize: clusterMinSize 
+            const result: number[][] = await invoke('auto_cluster_videos', {
+                threshold: clusterThreshold,
+                minClusterSize: clusterMinSize,
             });
             const groups = result.map(jobIds => {
                 const matched = jobIds.map(id => jobs.find(j => j.id === id)).filter(Boolean);
                 return { count: matched.length, jobs: matched };
             }).filter(g => g.jobs.length > 0);
             setClustersList(groups);
-        } catch {
-            // fallback simulated clustering
-            setClustersList([
-                { count: Math.min(stats.total, 3), jobs: jobs.slice(0, 3) }
-            ]);
+        } catch (error) {
+            setClustersList([]);
+            setClusteringError(error instanceof Error ? error.message : String(error));
         } finally {
             setClusteringLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        setSettingsError(null);
+        try {
+            // Try Tauri IPC first (desktop app)
+            let tauriAvailable = false;
+            try {
+                if (typeof window !== 'undefined' && (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    await Promise.all([
+                        invoke('set_download_dir', { path: folder }),
+                        invoke('set_default_retention', { retention }),
+                        invoke('set_cookie_browser', { browser: cookiesBrowser }),
+                        invoke('set_formats', { formats }),
+                        invoke('update_search_config', {
+                            minScore: similarityThreshold,
+                            maxResults: 10,
+                            chunkSize: 150,
+                            chunkOverlap: 50,
+                        }),
+                    ]);
+                    tauriAvailable = true;
+                }
+            } catch {
+                // Tauri not available — fall through to local save
+            }
+
+            // Always save settings locally (works in both Tauri and browser mode)
+            updateSettings({ formats, folder, theme: selectedTheme, retention, cookiesBrowser });
+            onClose();
+        } catch (error) {
+            setSettingsError(error instanceof Error ? error.message : String(error));
         }
     };
 
@@ -267,8 +351,11 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                         CONFIGURACIÓN <span className="text-[var(--accent-primary)]">GLOBAL</span>
                     </h2>
                 </div>
-                <button
+                                <button
+                    type="button"
+                    aria-label="Cerrar configuración"
                     onClick={onClose}
+
                     className="w-9 h-9 rounded-[12px] flex items-center justify-center transition-all border border-white/10 bg-white/[0.04] hover:bg-[#fe2c55]/20 hover:border-[#fe2c55]/40 text-white/60 hover:text-white cursor-pointer"
                 >
                     <SolidXIcon />
@@ -278,8 +365,11 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
             {/* Sub-Navigation Tabs */}
             <div className="px-5 pb-3">
                 <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-black/50 border border-white/10">
-                    <button
+                                        <button
+                        type="button"
+                        aria-pressed={activeTab === 'general'}
                         onClick={() => setActiveTab('general')}
+
                         className={`py-2 px-1 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'general'
                                 ? 'bg-white/10 text-white border border-white/20 shadow-sm'
@@ -289,8 +379,11 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                         <FaSliders size={11} />
                         <span className="truncate">General</span>
                     </button>
-                    <button
+                                        <button
+                        type="button"
+                        aria-pressed={activeTab === 'stats'}
                         onClick={() => setActiveTab('stats')}
+
                         className={`py-2 px-1 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'stats'
                                 ? 'bg-[#3b82f6]/20 text-[#3b82f6] border border-[#3b82f6]/40 shadow-sm'
@@ -300,8 +393,11 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                         <FaChartSimple size={11} />
                         <span className="truncate">Stats</span>
                     </button>
-                    <button
+                                        <button
+                        type="button"
+                        aria-pressed={activeTab === 'engine'}
                         onClick={() => setActiveTab('engine')}
+
                         className={`py-2 px-1 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'engine'
                                 ? 'bg-[#25f4ee]/20 text-[#25f4ee] border border-[#25f4ee]/40 shadow-sm'
@@ -311,8 +407,11 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                         <FaMicrochip size={11} />
                         <span className="truncate">Engine</span>
                     </button>
-                    <button
+                                        <button
+                        type="button"
+                        aria-pressed={activeTab === 'ai'}
                         onClick={() => setActiveTab('ai')}
+
                         className={`py-2 px-1 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'ai'
                                 ? 'bg-[#8a5cff]/20 text-[#8a5cff] border border-[#8a5cff]/40 shadow-sm'
@@ -462,9 +561,12 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                                             {category.options.map(fmt => {
                                                 const on = formats.includes(fmt.id);
                                                 return (
-                                                    <button
+                                                                                                        <button
+                                                        type="button"
                                                         key={fmt.id}
+                                                        aria-pressed={on}
                                                         onClick={() => toggleFormat(fmt.id)}
+
                                                         className="group relative flex flex-col items-start p-3 rounded-[16px] transition-all duration-300 border overflow-hidden cursor-pointer"
                                                         style={{
                                                             background: on
@@ -506,8 +608,59 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                             })}
                         </SectionCard>
 
+                                                <SectionCard>
+                            <SectionTitle icon={SolidDownloadIcon} label="Retención de Archivos" />
+                            <div className="grid grid-cols-2 gap-2">
+                                {([
+                                    { id: 'keep' as const, label: 'Conservar local', description: 'Reproduce desde este equipo', color: '#10b981' },
+                                    { id: 'online' as const, label: 'Solo online', description: 'Borra video, audio y TXT', color: '#25f4ee' },
+                                ]).map((option) => {
+                                    const selected = retention === option.id;
+                                    return (
+                                        <button
+                                            key={option.id}
+                                            type="button"
+                                            onClick={() => setRetention(option.id)}
+                                            className="p-3 rounded-[14px] border text-left transition-all"
+                                            style={{
+                                                background: selected ? `${option.color}12` : 'rgba(255,255,255,0.02)',
+                                                borderColor: selected ? `${option.color}55` : 'rgba(255,255,255,0.08)',
+                                            }}
+                                        >
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="text-[11px] font-bold text-white/90">{option.label}</span>
+                                                <span className={`w-2 h-2 rounded-full ${selected ? 'opacity-100' : 'opacity-25'}`} style={{ background: option.color }} />
+                                            </div>
+                                            <span className="block mt-1 text-[9px] leading-relaxed text-white/45">{option.description}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <p className="mt-2 px-1 text-[10px] text-white/40 leading-relaxed">
+                                La opción «Solo online» mantiene metadata, transcripción y búsqueda, pero elimina los archivos pesados después de que el job termina.
+                            </p>
+                        </SectionCard>
+
+                        <SectionCard>
+                            <SectionTitle icon={FaBrain} label="Fuentes Privadas" />
+                            <select
+                                value={cookiesBrowser}
+                                onChange={(event) => setCookiesBrowser(event.target.value as typeof cookiesBrowser)}
+                                className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white/90 outline-none focus:border-[#8a5cff]/50 transition-colors cursor-pointer"
+                            >
+                                <option value="">Solo fuentes públicas</option>
+                                <option value="chrome">Chrome (sesión local)</option>
+                                <option value="edge">Edge (sesión local)</option>
+                                <option value="firefox">Firefox (sesión local)</option>
+                            </select>
+                            <p className="mt-2 px-1 text-[10px] text-white/40 leading-relaxed">
+                                Para likes, favoritos o playlists privadas, inicia sesión en el navegador elegido. Pulsaria usa el lector local de yt-dlp y no copia ni guarda las cookies.
+                            </p>
+                        </SectionCard>
+
                         {/* Save Folder */}
                         <SectionCard>
+
                             <SectionTitle icon={SolidFolderIcon} label="Carpeta de Guardado" />
                             <div
                                 className="flex items-center gap-2 px-3 py-2.5 rounded-[12px] bg-black/40 border border-white/10"
@@ -579,9 +732,15 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                     <SectionCard className="flex flex-col gap-4">
                         <div className="flex items-center justify-between">
                             <SectionTitle icon={FaMicrochip} label="Motor Semántico ONNX" />
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[9px] font-mono font-bold border border-emerald-500/30 flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                ONLINE
+                                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold border flex items-center gap-1 ${
+                                modelOnline === false
+                                    ? 'bg-[#fe2c55]/10 text-[#fe2c55] border-[#fe2c55]/30'
+                                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${modelOnline === false ? 'bg-[#fe2c55]' : 'bg-emerald-400'}`} />
+
+                                                                {modelOnline === null ? 'COMPROBANDO...' : modelOnline ? 'ONLINE' : 'NO DISPONIBLE'}
+
                             </span>
                         </div>
 
@@ -608,11 +767,13 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                                 <span className="text-[10px] uppercase font-bold tracking-wider text-white/60">Umbral de Similitud Semántica</span>
                                 <span className="text-xs font-mono font-bold text-[#25f4ee]">{(similarityThreshold * 100).toFixed(0)}%</span>
                             </div>
-                            <input
+                                                        <input
                                 type="range"
+                                aria-label="Umbral de similitud semántica"
                                 min="0.2"
                                 max="0.9"
                                 step="0.05"
+
                                 value={similarityThreshold}
                                 onChange={(e) => setSimilarityThreshold(parseFloat(e.target.value))}
                                 className="w-full accent-[#25f4ee] cursor-pointer"
@@ -629,8 +790,11 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                     <SectionCard className="flex flex-col gap-4">
                         <div className="flex items-center justify-between">
                             <SectionTitle icon={FaBrain} label="Clustering & Grafos IA" />
-                            <button
+                                                        <button
+                                type="button"
+                                aria-label="Ejecutar clustering"
                                 onClick={runClustering}
+
                                 disabled={clusteringLoading}
                                 className="px-3 py-1 rounded-[10px] bg-[#8a5cff]/20 hover:bg-[#8a5cff]/30 text-[#8a5cff] border border-[#8a5cff]/40 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
                             >
@@ -642,24 +806,45 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                         <p className="text-[11px] text-white/50 leading-relaxed">
                             Algoritmo de clustering semántico no supervisado para agrupar videos por temas recurrentes y proximidad conceptual.
                         </p>
+                        {clusteringError && (
+                            <div role="alert" className="rounded-xl border border-[#fe2c55]/30 bg-[#fe2c55]/10 px-3 py-2 text-[10px] text-[#fe2c55]">
+                                No se pudo ejecutar el clustering: {clusteringError}
+                            </div>
+                        )}
 
                         <div className="p-3.5 rounded-[14px] bg-black/30 border border-white/5 flex flex-col gap-2.5">
                             <div className="flex items-center justify-between">
                                 <span className="text-[10px] uppercase font-bold tracking-wider text-white/60">Afinidad Mínima del Cluster</span>
                                 <span className="text-xs font-mono font-bold text-[#8a5cff]">{(clusterThreshold * 100).toFixed(0)}%</span>
                             </div>
-                            <input
+                                                        <input
                                 type="range"
+                                aria-label="Afinidad mínima del cluster"
                                 min="0.5"
                                 max="0.95"
                                 step="0.05"
+
                                 value={clusterThreshold}
-                                onChange={(e) => setClusterThreshold(parseFloat(e.target.value))}
+                                                                onChange={(e) => setClusterThreshold(parseFloat(e.target.value))}
                                 className="w-full accent-[#8a5cff] cursor-pointer"
                             />
                         </div>
 
+                        <label className="flex items-center justify-between gap-3 p-3.5 rounded-[14px] bg-black/30 border border-white/5 text-[10px] uppercase font-bold tracking-wider text-white/60">
+                            Tamaño mínimo del cluster
+                            <input
+                                type="number"
+                                aria-label="Tamaño mínimo del cluster"
+                                min="2"
+                                max="50"
+                                value={clusterMinSize}
+                                onChange={(e) => setClusterMinSize(Math.min(50, Math.max(2, Number(e.target.value) || 2)))}
+                                className="w-16 rounded-lg bg-black/50 border border-white/10 px-2 py-1 text-right text-xs font-mono text-white outline-none focus:border-[#8a5cff]/50"
+                            />
+                        </label>
+
                         {/* Clusters List */}
+
                         <div className="flex flex-col gap-2">
                             <span className="text-[9px] uppercase font-bold tracking-widest text-white/40">
                                 Grupos Semánticos Detectados ({clustersList.length})
@@ -680,7 +865,8 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                                 ))
                             ) : (
                                 <div className="p-4 rounded-[12px] bg-black/20 border border-white/5 text-center text-[10px] text-white/40">
-                                    Presiona "Ejecutar" para descubrir clusters temáticos en tu biblioteca.
+                                                                        Presiona «Ejecutar» para descubrir clusters temáticos en tu biblioteca.
+
                                 </div>
                             )}
                         </div>
@@ -688,16 +874,18 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                 )}
             </div>
 
-            {/* Footer CTA */}
+                        {/* Footer CTA */}
             <div className="px-5 py-4 border-t border-white/10">
-                <button
-                    onClick={() => {
-                        import('@tauri-apps/api/core').then(({ invoke }) =>
-                            invoke('set_download_dir', { path: folder }).catch(() => {})
-                        );
-                        updateSettings({ formats, folder, theme: selectedTheme });
-                        onClose();
-                    }}
+                {settingsError && (
+                    <div role="alert" className="mb-3 rounded-xl border border-[#fe2c55]/30 bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-[#fe2c55]">
+                        No se pudo guardar la configuración: {settingsError}
+                    </div>
+                )}
+
+                                <button
+                    type="button"
+                    onClick={() => { void handleSave(); }}
+
                     className="w-full py-2.5 rounded-[12px] font-black tracking-[0.15em] uppercase text-white transition-all active:scale-[0.98] cursor-pointer"
                     style={{
                         background: 'linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03))',

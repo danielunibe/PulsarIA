@@ -70,13 +70,16 @@ pub struct JobRecord {
     pub status: String,
     pub progress: i32,
     pub created_at: String,
-    
+
     // Media details (Flattened for simplicity matching current DB)
     pub title: Option<String>,
     pub author: Option<String>,
     pub thumbnail: Option<String>,
     pub duration: Option<i32>,
     pub video_path: Option<String>,
+    pub error_message: Option<String>,
+    pub visual_analysis: Option<String>,
+    pub instructional_guide: Option<String>,
 }
 
 // Resultado puro de una búsqueda semántica
@@ -129,4 +132,12 @@ pub struct SystemMetrics {
     pub average_db_time_ms: f32,
     pub model_load_time_ms: f32,
     pub total_queries_run: u64,
+}
+
+// Mensaje de trabajo para la cola de procesamiento
+#[derive(Debug, Clone)]
+pub struct JobMessage {
+    pub job_id: i64,
+    pub url: String,
+    pub attempt: u32,
 }

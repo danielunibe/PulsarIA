@@ -1,7 +1,7 @@
+use metrics::{counter, gauge};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
-use metrics::{counter, gauge};
 
 // ========================================================================
 // PHASE 32: Distributed Replication
@@ -66,7 +66,7 @@ impl ReplicationMap {
         let shard_id = replica.shard_id;
         let mut shards = self.shards.write().await;
         shards.entry(shard_id).or_default().push(replica);
-        
+
         let replica_count: usize = shards.values().map(|v| v.len()).sum();
         gauge!("replication_total_replicas").set(replica_count as f64);
         info!("Réplica registrada para shard {}", shard_id);
@@ -78,14 +78,21 @@ impl ReplicationMap {
         let replicas = shards.get(&shard_id)?;
 
         // 1. Intentar Primary primero
-        if let Some(primary) = replicas.iter().find(|r| r.state == ReplicaState::Primary && r.is_alive()) {
+        if let Some(primary) = replicas
+            .iter()
+            .find(|r| r.state == ReplicaState::Primary && r.is_alive())
+        {
             return Some(primary.node_url.clone());
         }
 
         // 2. Failover a primera réplica viva
-        warn!("Shard {} — Primary offline, haciendo failover a réplica", shard_id);
+        warn!(
+            "Shard {} — Primary offline, haciendo failover a réplica",
+            shard_id
+        );
         counter!("replication_failovers_total").increment(1);
-        replicas.iter()
+        replicas
+            .iter()
             .find(|r| r.state == ReplicaState::Replica && r.is_alive())
             .map(|r| r.node_url.clone())
     }
@@ -102,7 +109,8 @@ impl ReplicationMap {
                 }
             }
         }
-        let online: usize = shards.values()
+        let online: usize = shards
+            .values()
             .flat_map(|v| v.iter())
             .filter(|r| r.is_alive())
             .count();
@@ -116,11 +124,16 @@ impl ReplicationMap {
 
         // Degradar primaries existentes (deben estar offline)
         for r in replicas.iter_mut() {
-            if r.state == ReplicaState::Primary { r.state = ReplicaState::Offline; }
+            if r.state == ReplicaState::Primary {
+                r.state = ReplicaState::Offline;
+            }
         }
 
         // Promover la primera réplica viva
-        if let Some(new_primary) = replicas.iter_mut().find(|r| r.state == ReplicaState::Replica) {
+        if let Some(new_primary) = replicas
+            .iter_mut()
+            .find(|r| r.state == ReplicaState::Replica)
+        {
             new_primary.state = ReplicaState::Primary;
             let url = new_primary.node_url.clone();
             counter!("replication_promotions_total").increment(1);
@@ -128,7 +141,10 @@ impl ReplicationMap {
             return Some(url);
         }
 
-        warn!("Shard {} — no hay réplicas disponibles para promover", shard_id);
+        warn!(
+            "Shard {} — no hay réplicas disponibles para promover",
+            shard_id
+        );
         None
     }
 }

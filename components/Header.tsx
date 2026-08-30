@@ -1,10 +1,29 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { TT_PINK, TT_CYAN, TIKTOK_LOGO_PATH } from '@/types';
-import { FaMagnifyingGlass, FaXmark, FaListUl, FaGear, FaClock, FaCalendarDay, FaArrowDownAZ, FaStopwatch, FaFolder, FaBox } from 'react-icons/fa6';
+import { 
+    FaMagnifyingGlass, 
+    FaXmark, 
+    FaSliders, 
+    FaGear, 
+    FaClock, 
+    FaCalendarDay, 
+    FaArrowDownAZ, 
+    FaStopwatch, 
+    FaTableCells, 
+    FaListUl, 
+    FaGrip,
+    FaCheck,
+    FaFilter,
+    FaWindowMinimize,
+    FaWindowMaximize,
+    FaWindowRestore,
+    FaXmark as FaClose
+} from 'react-icons/fa6';
 import { toast } from 'sonner';
+import { type PageConfig, type GridLayout, type GridColumns, type SortKey } from './PagePanel';
 
 const TikTokIcon = ({ size = 28, className = "" }: { size?: number, className?: string }) => (
     <svg
@@ -13,7 +32,7 @@ const TikTokIcon = ({ size = 28, className = "" }: { size?: number, className?: 
         viewBox="0 0 24 24"
         className={className}
         style={{
-            fill: 'rgba(255,255,255,0.8)',
+            fill: 'rgba(255,255,255,0.85)',
             filter: `drop-shadow(2px 0px 0px ${TT_PINK}40) drop-shadow(-2px 0px 0px ${TT_CYAN}40)`,
         }}
     >
@@ -21,16 +40,18 @@ const TikTokIcon = ({ size = 28, className = "" }: { size?: number, className?: 
     </svg>
 );
 
-const SearchIcon = () => <FaMagnifyingGlass size={15} />;
-const XIcon = () => <FaXmark size={13} />;
-const SortIcon = () => <FaListUl size={15} />;
+const SearchIcon = () => <FaMagnifyingGlass size={14} />;
+const XIcon = () => <FaXmark size={12} />;
+const ViewSlidersIcon = () => <FaSliders size={14} />;
 const SettingsIcon = () => <FaGear size={15} />;
-const ClockFillIcon = () => <FaClock size={14} />;
-const CalendarFillIcon = () => <FaCalendarDay size={14} />;
-const SortAlphaIcon = () => <FaArrowDownAZ size={14} />;
-const TimerFillIcon = () => <FaStopwatch size={14} />;
-const FolderFillIcon = () => <FaFolder size={14} />;
-const BoxFillIcon = () => <FaBox size={14} />;
+const ClockFillIcon = () => <FaClock size={13} />;
+const CalendarFillIcon = () => <FaCalendarDay size={13} />;
+const SortAlphaIcon = () => <FaArrowDownAZ size={13} />;
+const TimerFillIcon = () => <FaStopwatch size={13} />;
+const MinimizeIcon = () => <FaWindowMinimize size={12} />;
+const MaximizeIcon = () => <FaWindowMaximize size={12} />;
+const RestoreIcon = () => <FaWindowRestore size={12} />;
+const CloseIcon = () => <FaClose size={12} />;
 
 const SORT_OPTIONS = [
     { id: 'date_desc', label: 'Más Recientes', Icon: ClockFillIcon },
@@ -54,51 +75,142 @@ const btnBase: React.CSSProperties = {
     transform: 'scale(1)',
 };
 
+export type SearchMode = 'literal' | 'semantic';
+
+/**
+ * Props del componente Header.
+ */
 interface HeaderProps {
+    /** Callback para abrir el panel de Settings */
     onOpenSettings: () => void;
+    /** Número de videos activos */
     activeCount?: number;
-    onSearchSubmit?: (query: string) => void;
+    /** Si los jobs se están cargando inicialmente */
+    isLoading?: boolean;
+    /** Callback cuando el usuario envía una búsqueda */
+    onSearchSubmit?: (query: string, mode?: SearchMode) => void;
+    /** Callback cuando el usuario limpia la búsqueda */
     onSearchClear?: () => void;
+    /** Configuración actual de presentación y filtros de biblioteca */
+    pageConfig?: PageConfig;
+    /** Callback para actualizar la configuración de vista */
+    onPageConfigChange?: (config: PageConfig) => void;
+    /** Callback cuando cambia el criterio de ordenamiento */
     onSortChange?: (key: string) => void;
+    /** Clave de ordenamiento actual */
     sortKey?: string;
+    /** Modo de búsqueda actual */
+    searchMode?: SearchMode;
+    /** Callback para cambiar modo de búsqueda */
+    onSearchModeChange?: (mode: SearchMode) => void;
 }
 
-export function Header({ onOpenSettings, activeCount = 0, onSearchSubmit, onSearchClear, onSortChange, sortKey }: HeaderProps) {
-    const [searchOpen, setSearchOpen] = useState(false);
-    const [sortOpen, setSortOpen] = useState(false);
-    const activeSort = sortKey || 'date_desc';
+function useWindowControls() {
+    const [isMaximized, setIsMaximized] = useState(false);
+
+    const minimize = async () => {
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const window = getCurrentWindow();
+            await window.minimize();
+        } catch (e) {
+            console.warn('Window minimize failed:', e);
+        }
+    };
+
+    const maximize = async () => {
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const window = getCurrentWindow();
+            if (isMaximized) {
+                await window.unmaximize();
+                setIsMaximized(false);
+            } else {
+                await window.maximize();
+                setIsMaximized(true);
+            }
+        } catch (e) {
+            console.warn('Window maximize failed:', e);
+        }
+    };
+
+    const close = async () => {
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const window = getCurrentWindow();
+            await window.close();
+        } catch (e) {
+            console.warn('Window close failed:', e);
+        }
+    };
+
+    const startDragging = async () => {
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const window = getCurrentWindow();
+            await window.startDragging();
+        } catch (e) {
+            console.warn('Window drag failed:', e);
+        }
+    };
+
+    // Listen for maximize/unmaximize events
+    useEffect(() => {
+        let unlistenMaximized: (() => void) | undefined;
+        let unlistenUnmaximized: (() => void) | undefined;
+        import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+            const window = getCurrentWindow();
+            import('@tauri-apps/api/event').then(({ listen }) => {
+                listen('tauri://maximized', () => setIsMaximized(true)).then(fn => { unlistenMaximized = fn; }).catch(() => {});
+                listen('tauri://unmaximized', () => setIsMaximized(false)).then(fn => { unlistenUnmaximized = fn; }).catch(() => {});
+            }).catch(() => {});
+        }).catch(() => {});
+        return () => { unlistenMaximized?.(); unlistenUnmaximized?.(); };
+    }, []);
+
+    return { isMaximized, minimize, maximize, close, startDragging };
+}
+
+export function Header({
+    onOpenSettings,
+    activeCount = 0,
+    onSearchSubmit,
+    onSearchClear,
+    pageConfig,
+    onPageConfigChange,
+    onSortChange,
+    sortKey,
+    searchMode = 'literal',
+    isLoading = false,
+}: HeaderProps) {
+    const [viewMenuOpen, setViewMenuOpen] = useState(false);
+    const activeSort = sortKey || pageConfig?.sortKey || 'date_desc';
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
-    const sortRef = useRef<HTMLDivElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
+    const dragRef = useRef<HTMLDivElement>(null);
+    const { isMaximized, minimize, maximize, close, startDragging } = useWindowControls();
 
-    useEffect(() => {
-        if (searchOpen) setTimeout(() => inputRef.current?.focus(), 100);
-    }, [searchOpen]);
-
-    useEffect(() => {
-        if (!searchOpen) return;
-        const timer = setTimeout(() => {
-            if (query === '' && document.activeElement !== inputRef.current) setSearchOpen(false);
-        }, 3000);
-        return () => clearTimeout(timer);
-    }, [searchOpen, query]);
-
+    // Cerrar menú al hacer clic fuera
     useEffect(() => {
         const handler = (e: MouseEvent) => {
-            if (sortRef.current && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+                setViewMenuOpen(false);
+            }
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
-    // -- Debounced semantic search: fire automatically 800ms after the user
-    // stops typing a 3+ character query. Clearing the field resets the search.
+    // Debounced search
     const onSearchSubmitRef = useRef(onSearchSubmit);
     const onSearchClearRef = useRef(onSearchClear);
+    const searchModeRef = useRef<SearchMode>(searchMode);
     useEffect(() => {
         onSearchSubmitRef.current = onSearchSubmit;
         onSearchClearRef.current = onSearchClear;
-    }, [onSearchSubmit, onSearchClear]);
+        searchModeRef.current = searchMode;
+    }, [onSearchSubmit, onSearchClear, searchMode]);
 
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     useEffect(() => {
@@ -108,218 +220,381 @@ export function Header({ onOpenSettings, activeCount = 0, onSearchSubmit, onSear
             onSearchClearRef.current?.();
             return;
         }
-        if (trimmed.length < 3) return;
+        if (trimmed.length < 2) return;
         debounceRef.current = setTimeout(() => {
-            onSearchSubmitRef.current?.(query);
-        }, 800);
+            onSearchSubmitRef.current?.(query, searchModeRef.current);
+        }, 600);
         return () => {
             if (debounceRef.current) clearTimeout(debounceRef.current);
         };
     }, [query]);
 
+    const updateConfig = (partial: Partial<PageConfig>) => {
+        if (pageConfig && onPageConfigChange) {
+            onPageConfigChange({ ...pageConfig, ...partial });
+        }
+        if (partial.sortKey && onSortChange) {
+            onSortChange(partial.sortKey);
+        }
+    };
+
     return (
-        <div className="w-full px-8 pt-5 pb-3 flex items-center justify-between sticky top-0 z-40 self-start pointer-events-none">
+        <div className="w-full sticky top-0 z-50 pointer-events-none">
+            {/* Custom Window Titlebar — Drag Region + Window Controls */}
             <div
-                onClick={() => {
-                    if (activeCount === 0) {
-                        toast.info("No hay videos completados", {
-                            description: "Pega un enlace en el panel izquierdo para comenzar a descargar y procesar.",
-                            duration: 4000
-                        });
-                    } else {
-                        toast.success("Biblioteca de TikTok", {
-                            description: `${activeCount} videos completados y listos en la biblioteca.`,
-                            duration: 3500
-                        });
+                ref={dragRef}
+                className="w-full flex items-center justify-between h-10 px-4 pointer-events-auto app-drag-region"
+                style={{
+                    background: 'rgba(10, 11, 16, 0.6)',
+                    backdropFilter: 'blur(40px)',
+                    WebkitBackdropFilter: 'blur(40px)',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                    userSelect: 'none',
+                }}
+                onDoubleClick={maximize}
+                onMouseDown={(e) => {
+                    if (e.button === 0 && dragRef.current === e.currentTarget) {
+                        startDragging();
                     }
                 }}
-                className="h-10 flex items-center gap-2.5 px-4 pointer-events-auto relative overflow-hidden group shadow-lg drop-shadow-[0_0_15px_rgba(254,44,85,0.4)] cursor-pointer"
-                style={{
-                    ...btnBase,
-                    background: 'linear-gradient(135deg, rgba(254,44,85,0.2) 0%, rgba(37,244,238,0.2) 100%)',
-                    border: '1px solid rgba(255,255,255,0.15)',
-                    boxShadow: 'inset 0 4px 15px rgba(0,0,0,0.5), inset 0 0 20px rgba(254,44,85,0.1)',
-                }}
             >
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] duration-1000 transition-all pointer-events-none" />
-                <div className="absolute top-0 bottom-0 left-0 w-[2px] bg-[#fe2c55] shadow-[0_0_10px_#fe2c55]" />
-                <div className="absolute top-0 bottom-0 right-0 w-[2px] bg-[#25f4ee] shadow-[0_0_10px_#25f4ee]" />
-                <div className="flex items-center justify-center relative scale-[1.05]">
-                    <TikTokIcon size={20} className="relative z-10" />
+                {/* App Title / Brand */}
+                <div className="flex items-center gap-2.5 pointer-events-none app-no-drag">
+                    <TikTokIcon size={18} className="drop-shadow-[0_0_8px_rgba(254,44,85,0.5)]" />
+                    <span className="font-black tracking-[0.15em] uppercase text-white/90 text-[11px] drop-shadow-md">
+                        PULSARIA
+                    </span>
                 </div>
-                <span className="font-black tracking-[0.2em] uppercase text-white drop-shadow-md relative z-10" style={{ fontSize: '12px', textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
-                    {activeCount} TIKTOKS
-                </span>
+
+                {/* Window Controls — Minimize, Maximize, Close */}
+                <div className="flex items-center gap-1 pointer-events-auto app-no-drag">
+                    <button
+                        type="button"
+                        onClick={minimize}
+                        title="Minimizar"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all cursor-pointer app-no-drag"
+                    >
+                        <MinimizeIcon />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={maximize}
+                        title={isMaximized ? 'Restaurar' : 'Maximizar'}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all cursor-pointer app-no-drag"
+                    >
+                        {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={close}
+                        title="Cerrar"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-[#fe2c55] hover:bg-[#fe2c55]/10 transition-all cursor-pointer app-no-drag"
+                    >
+                        <CloseIcon />
+                    </button>
+                </div>
             </div>
 
-            <div className="flex items-center gap-3 pointer-events-auto">
-                {/* Simplified Intelligent AI Search Bar */}
-                <div 
-                    className="relative flex items-center h-10 px-3.5 rounded-[14px] transition-all duration-300 w-60 sm:w-80 md:w-96 focus-within:w-72 sm:focus-within:w-96 md:focus-within:w-[420px] focus-within:border-[#8a5cff]/50 focus-within:shadow-[0_0_20px_rgba(138,92,255,0.2)]"
+            {/* Header Content — Search, View/Sort, Settings */}
+            <div className="w-full px-8 pt-4 pb-3 flex items-center justify-between sticky top-10 z-40 self-start pointer-events-none">
+                {/* 1. Contador de Tiktoks */}
+                <div
+                    onClick={() => {
+                        if (activeCount === 0) {
+                            toast.info("Biblioteca vacía", {
+                                description: "Pega un enlace en el panel izquierdo para procesar tu primer video.",
+                                duration: 3500
+                            });
+                        } else {
+                            toast.success("Biblioteca de TikTok", {
+                                description: `${activeCount} videos disponibles para consulta.`,
+                                duration: 3000
+                            });
+                        }
+                    }}
+                    className="h-10 flex items-center gap-2.5 px-4 pointer-events-auto relative overflow-hidden group shadow-lg cursor-pointer"
                     style={{
                         ...btnBase,
-                        justifyContent: 'flex-start',
-                        gap: '10px',
-                        cursor: 'text'
+                        background: 'linear-gradient(135deg, rgba(254,44,85,0.2) 0%, rgba(37,244,238,0.2) 100%)',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        boxShadow: 'inset 0 4px 15px rgba(0,0,0,0.5), inset 0 0 20px rgba(254,44,85,0.1)',
                     }}
-                    onClick={() => inputRef.current?.focus()}
                 >
-                    <span className="flex-shrink-0 flex items-center text-[#8a5cff] drop-shadow-[0_0_8px_rgba(138,92,255,0.4)]">
-                        <SearchIcon />
-                    </span>
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={query}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
-                        onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                            if (e.key === 'Enter' && onSearchSubmit) {
-                                onSearchSubmit(query);
-                            }
-                        }}
-                        placeholder="Búsqueda inteligente con IA (temas, conceptos, transcripciones)..."
-                        className="flex-1 bg-transparent outline-none font-medium text-xs text-white placeholder-white/40 min-w-0"
-                    />
-                    {query.trim().length > 0 && (
-                        <button
-                            onClick={(e: React.MouseEvent) => {
-                                e.stopPropagation();
-                                setQuery('');
-                                if (onSearchClear) onSearchClear();
-                            }}
-                            className="text-white/40 hover:text-white transition-colors cursor-pointer bg-transparent border-none p-1 flex-shrink-0"
-                        >
-                            <XIcon />
-                        </button>
-                    )}
-                    <span className="hidden sm:inline-block text-[8px] font-mono font-bold uppercase tracking-wider text-[#8a5cff] bg-[#8a5cff]/10 px-1.5 py-0.5 rounded border border-[#8a5cff]/20">
-                        IA RAG
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] duration-1000 transition-all pointer-events-none" />
+                    <div className="absolute top-0 bottom-0 left-0 w-[2px] bg-[#fe2c55] shadow-[0_0_10px_#fe2c55]" />
+                    <div className="absolute top-0 bottom-0 right-0 w-[2px] bg-[#25f4ee] shadow-[0_0_10px_#25f4ee]" />
+                    <div className="flex items-center justify-center relative scale-[1.05]">
+                        <TikTokIcon size={20} className="relative z-10" />
+                    </div>
+                    <span className="font-black tracking-[0.2em] uppercase text-white drop-shadow-md relative z-10 text-[12px]">
+                        {isLoading ? '...' : `${activeCount} TIKTOKS`}
                     </span>
                 </div>
 
-                <div ref={sortRef} className="relative">
-                    <motion.button
-                        onClick={() => setSortOpen(o => !o)}
+                {/* 2. Barra de Búsqueda TikTok Pink + Botón de Vista y Orden + Configuración */}
+                <div className="flex items-center gap-3 pointer-events-auto">
+                    {/* Search Bar TikTok Pink Estilizada y Simple */}
+                    <div 
+                        className="relative flex items-center h-10 px-3.5 rounded-[14px] transition-all duration-300 w-64 sm:w-80 md:w-96 focus-within:w-72 sm:focus-within:w-96 md:focus-within:w-[440px] cursor-text"
                         style={{
                             ...btnBase,
-                            width: '40px',
-                            border: sortOpen ? '1px solid rgba(37,244,238,0.45)' : btnBase.border,
-                            background: sortOpen ? 'rgba(5,15,15,0.8)' : btnBase.background,
+                            justifyContent: 'flex-start',
+                            gap: '10px',
+                            border: '1px solid rgba(254, 44, 85, 0.35)',
+                            background: 'linear-gradient(135deg, rgba(254, 44, 85, 0.08) 0%, rgba(10, 11, 16, 0.75) 100%)',
+                            boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.15), 0 8px 20px rgba(0,0,0,0.5)',
                         }}
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        animate={sortOpen
-                            ? { boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.8), 0 0 12px rgba(37,244,238,0.2)' }
-                            : { boxShadow: btnBase.boxShadow as string }
-                        }
-                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                        className="group"
+                        onClick={() => inputRef.current?.focus()}
                     >
-                        <motion.span
-                            animate={{ rotate: sortOpen ? 180 : 0, color: sortOpen ? '#25f4ee' : 'rgba(255,255,255,0.5)' }}
-                            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                            style={{ display: 'flex', filter: sortOpen ? 'drop-shadow(0 0 8px rgba(37,244,238,0.6))' : 'none' }}
-                        >
-                            <SortIcon />
-                        </motion.span>
-                    </motion.button>
+                        <span className="flex-shrink-0 flex items-center text-[#fe2c55] drop-shadow-[0_0_8px_rgba(254,44,85,0.6)]">
+                            <SearchIcon />
+                        </span>
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            value={query}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+                            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                                if (e.key === 'Enter' && onSearchSubmit) {
+                                    if (debounceRef.current) clearTimeout(debounceRef.current);
+                                    onSearchSubmit(query, searchMode);
+                                }
+                            }}
+                            placeholder="Buscar por contenido, autor, tema o transcripción..."
+                            className="flex-1 bg-transparent outline-none font-medium text-xs text-white placeholder-white/45 min-w-0"
+                        />
+                        {query.trim().length > 0 && (
+                            <button
+                                type="button"
+                                onClick={(e: React.MouseEvent) => {
+                                    e.stopPropagation();
+                                    setQuery('');
+                                    if (onSearchClear) onSearchClear();
+                                }}
+                                className="text-white/40 hover:text-[#fe2c55] transition-colors cursor-pointer bg-transparent border-none p-1 flex-shrink-0"
+                                title="Limpiar búsqueda"
+                            >
+                                <XIcon />
+                            </button>
+                        )}
+                    </div>
 
-                    <AnimatePresence>
-                        {sortOpen && (
+                    {/* Botón y Menú Unificado: Vista y Ordenamiento */}
+                    <div ref={menuRef} className="relative">
+                        <motion.button
+                            type="button"
+                            onClick={() => setViewMenuOpen(o => !o)}
+                            title="Opciones de visualización y ordenamiento"
+                            style={{
+                                ...btnBase,
+                                width: '40px',
+                                border: viewMenuOpen ? '1px solid rgba(37,244,238,0.5)' : btnBase.border,
+                                background: viewMenuOpen ? 'rgba(8,18,22,0.85)' : btnBase.background,
+                            }}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            animate={viewMenuOpen
+                                ? { boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.8), 0 0 14px rgba(37,244,238,0.25)' }
+                                : { boxShadow: btnBase.boxShadow as string }
+                            }
+                            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                            className="group"
+                        >
+                            <motion.span
+                                animate={{ rotate: viewMenuOpen ? 90 : 0, color: viewMenuOpen ? '#25f4ee' : 'rgba(255,255,255,0.6)' }}
+                                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                                style={{ display: 'flex', filter: viewMenuOpen ? 'drop-shadow(0 0 8px rgba(37,244,238,0.6))' : 'none' }}
+                            >
+                                <ViewSlidersIcon />
+                            </motion.span>
+                        </motion.button>
+
+                        {/* Popover / Menú Desplegable de Vista y Filtros */}
+                        {viewMenuOpen && (
                             <motion.div
-                                className="absolute top-full right-0 mt-2 w-52 overflow-hidden z-50"
+                                className="absolute top-full right-0 mt-2 w-64 p-3.5 overflow-hidden z-50 flex flex-col gap-3 font-sans"
                                 initial={{ opacity: 0, y: -8, scale: 0.96, transformOrigin: 'top right' }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: -8, scale: 0.96 }}
                                 transition={{ type: 'spring', stiffness: 380, damping: 26 }}
                                 style={{
-                                    background: 'rgba(5,7,12,0.95)',
+                                    background: 'rgba(8, 10, 16, 0.96)',
                                     backdropFilter: 'blur(40px)',
-                                    borderRadius: '16px',
-                                    border: '1px solid rgba(37,244,238,0.12)',
-                                    boxShadow: '0 20px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(37,244,238,0.06), inset 0 1px 0 rgba(255,255,255,0.06)',
+                                    borderRadius: '18px',
+                                    border: '1px solid rgba(37,244,238,0.18)',
+                                    boxShadow: '0 25px 50px rgba(0,0,0,0.8), 0 0 0 1px rgba(37,244,238,0.08), inset 0 1px 0 rgba(255,255,255,0.08)',
                                 }}
                             >
-                                <div className="px-4 py-2.5 border-b border-white/[0.04]">
-                                    <span className="font-bold uppercase tracking-[0.22em] text-white/35" style={{ fontSize: '9px' }}>Ordenar por</span>
-                                </div>
-                                {SORT_OPTIONS.map((opt, idx) => (
-                                    <motion.button
-                                        key={opt.id}
-                                        onClick={() => {
-                                            onSortChange?.(opt.id);
-                                            setSortOpen(false);
-                                        }}
-                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left"
-                                        initial={{ opacity: 0, x: -6 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: idx * 0.04, type: 'spring', stiffness: 400, damping: 26 }}
-                                        whileHover={{ backgroundColor: 'rgba(255,255,255,0.04)', x: 2 }}
-                                        style={{
-                                            color: activeSort === opt.id ? '#25f4ee' : 'rgba(255,255,255,0.65)',
-                                            cursor: 'pointer',
-                                            border: 'none',
-                                            background: 'transparent',
-                                        }}
-                                    >
-                                        <span
-                                            style={{
-                                                color: activeSort === opt.id ? '#25f4ee' : 'rgba(255,255,255,0.4)',
-                                                filter: activeSort === opt.id ? 'drop-shadow(0 0 6px rgba(37,244,238,0.6))' : 'none',
-                                            }}
-                                        >
-                                            <opt.Icon />
+                                {/* Cabecera del Menú */}
+                                <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
+                                    <div className="flex items-center gap-2">
+                                        <FaSliders size={11} className="text-[#25f4ee]" />
+                                        <span className="font-bold uppercase tracking-[0.2em] text-white/50 text-[10px]">
+                                            Vista y Ordenamiento
                                         </span>
-                                        <span className={cn('font-semibold tracking-wide flex-1', activeSort === opt.id ? 'text-[#25f4ee]' : '')} style={{ fontSize: '12px' }}>{opt.label}</span>
-                                        {activeSort === opt.id && (
-                                            <motion.div
-                                                layoutId="sort-active"
-                                                className="w-1.5 h-1.5 rounded-full"
-                                                style={{ background: '#25f4ee', boxShadow: '0 0 8px #25f4ee' }}
-                                            />
-                                        )}
-                                    </motion.button>
-                                ))}
+                                    </div>
+                                </div>
+
+                                {/* 1. Selector de Disposición (Layout) */}
+                                <div className="flex flex-col gap-1.5">
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-white/40">
+                                        Disposición
+                                    </span>
+                                    <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-white/[0.03] border border-white/5">
+                                        {[
+                                            { id: 'grid', label: 'Grid', icon: FaTableCells },
+                                            { id: 'list', label: 'Lista', icon: FaListUl },
+                                            { id: 'compact', label: 'Compacto', icon: FaGrip },
+                                        ].map(opt => {
+                                            const Icon = opt.icon;
+                                            const isSelected = (pageConfig?.layout || 'grid') === opt.id;
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    key={opt.id}
+                                                    onClick={() => updateConfig({ layout: opt.id as GridLayout })}
+                                                    className={`py-1.5 px-1 flex items-center justify-center gap-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
+                                                        isSelected
+                                                            ? 'bg-[#25f4ee]/20 text-[#25f4ee] border border-[#25f4ee]/40 shadow-[0_0_10px_rgba(37,244,238,0.2)]'
+                                                            : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
+                                                    }`}
+                                                >
+                                                    <Icon size={10} />
+                                                    <span>{opt.label}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* 2. Columnas en Pantalla (si el layout es Grid) */}
+                                {(pageConfig?.layout || 'grid') === 'grid' && (
+                                    <div className="flex flex-col gap-1.5">
+                                        <span className="text-[9px] font-bold uppercase tracking-wider text-white/40">
+                                            Columnas
+                                        </span>
+                                        <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-white/[0.03] border border-white/5">
+                                            {([0, 2, 3, 4] as GridColumns[]).map(col => {
+                                                const isSelected = (pageConfig?.columns ?? 0) === col;
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        key={col}
+                                                        onClick={() => updateConfig({ columns: col })}
+                                                        className={`py-1 text-[10px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                                                            isSelected
+                                                                ? 'bg-[#8a5cff]/20 text-[#8a5cff] border border-[#8a5cff]/40 shadow-[0_0_10px_rgba(138,92,255,0.25)]'
+                                                                : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
+                                                        }`}
+                                                    >
+                                                        {col === 0 ? 'Auto' : `${col} Col`}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 3. Criterio de Orden */}
+                                <div className="flex flex-col gap-1.5 pt-1 border-t border-white/[0.04]">
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-white/40">
+                                        Ordenar Por
+                                    </span>
+                                    <div className="flex flex-col gap-0.5">
+                                        {SORT_OPTIONS.map(opt => {
+                                            const isSelected = activeSort === opt.id;
+                                            return (
+                                                <button
+                                                    key={opt.id}
+                                                    type="button"
+                                                    onClick={() => updateConfig({ sortKey: opt.id as SortKey })}
+                                                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
+                                                        isSelected 
+                                                            ? 'bg-white/[0.06] text-[#25f4ee]' 
+                                                            : 'text-white/60 hover:text-white hover:bg-white/[0.03]'
+                                                    }`}
+                                                >
+                                                    <span className={isSelected ? 'text-[#25f4ee]' : 'text-white/40'}>
+                                                        <opt.Icon />
+                                                    </span>
+                                                    <span className="text-xs font-semibold flex-1">
+                                                        {opt.label}
+                                                    </span>
+                                                    {isSelected && (
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-[#25f4ee] shadow-[0_0_6px_#25f4ee]" />
+                                                    )}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* 4. Filtro Rápido: Solo Completados */}
+                                <div className="pt-2 border-t border-white/[0.04]">
+                                    <button
+                                        type="button"
+                                        onClick={() => updateConfig({ showOnlyCompleted: !(pageConfig?.showOnlyCompleted ?? true) })}
+                                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 text-left transition-all cursor-pointer"
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <FaFilter size={10} className="text-white/40" />
+                                            <span className="text-xs font-medium text-white/80">
+                                                Solo completados
+                                            </span>
+                                        </div>
+                                        <div 
+                                            className={`w-4 h-4 rounded-md flex items-center justify-center border transition-all ${
+                                                pageConfig?.showOnlyCompleted ?? true
+                                                    ? 'bg-[#10b981]/20 border-[#10b981]/50 text-[#10b981]'
+                                                    : 'border-white/20 bg-black/40'
+                                            }`}
+                                        >
+                                            {(pageConfig?.showOnlyCompleted ?? true) && <FaCheck size={9} />}
+                                        </div>
+                                    </button>
+                                </div>
                             </motion.div>
                         )}
-                    </AnimatePresence>
-                </div>
+                    </div>
 
-                <motion.button
-                    onClick={onOpenSettings}
-                    title="Configuración y Ajustes"
-                    style={{
-                        ...btnBase,
-                        height: '40px',
-                        padding: '0 14px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.03) 100%)',
-                        border: '1px solid rgba(255,255,255,0.22)',
-                        boxShadow: '0 6px 20px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.25)',
-                    }}
-                    whileHover={{
-                        scale: 1.04,
-                        borderColor: 'rgba(37,244,238,0.6)',
-                        boxShadow: '0 0 20px rgba(37,244,238,0.3), inset 0 1px 2px rgba(255,255,255,0.4)',
-                    }}
-                    whileTap={{ scale: 0.96 }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                    className="group cursor-pointer"
-                >
-                    <motion.span
-                        style={{ color: '#ffffff', display: 'flex' }}
-                        whileHover={{ rotate: 90, color: '#25f4ee' }}
-                        transition={{ type: 'spring', stiffness: 300, damping: 15 }}
-                        className="drop-shadow-[0_0_8px_rgba(255,255,255,0.6)]"
+                    {/* 3. Botón de Configuración */}
+                    <motion.button
+                        type="button"
+                        onClick={onOpenSettings}
+                        title="Configuración y Ajustes"
+                        style={{
+                            ...btnBase,
+                            height: '40px',
+                            padding: '0 14px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.03) 100%)',
+                            border: '1px solid rgba(255,255,255,0.22)',
+                            boxShadow: '0 6px 20px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.25)',
+                        }}
+                        whileHover={{
+                            scale: 1.04,
+                            borderColor: 'rgba(37,244,238,0.6)',
+                            boxShadow: '0 0 20px rgba(37,244,238,0.3), inset 0 1px 2px rgba(255,255,255,0.4)',
+                        }}
+                        whileTap={{ scale: 0.96 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                        className="group cursor-pointer"
                     >
-                        <SettingsIcon />
-                    </motion.span>
-                    <span className="hidden md:inline text-xs font-bold text-white tracking-wider uppercase drop-shadow-sm">
-                        Configuración
-                    </span>
-                </motion.button>
+                        <motion.span
+                            style={{ color: '#ffffff', display: 'flex' }}
+                            whileHover={{ rotate: 90, color: '#25f4ee' }}
+                            transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+                            className="drop-shadow-[0_0_8px_rgba(255,255,255,0.6)]"
+                        >
+                            <SettingsIcon />
+                        </motion.span>
+                        <span className="hidden md:inline text-xs font-bold text-white tracking-wider uppercase drop-shadow-sm">
+                            Configuración
+                        </span>
+                    </motion.button>
+                </div>
             </div>
         </div>
     );

@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use metrics::{counter, gauge};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn};
-use metrics::{counter, gauge};
 
 // ========================================================================
 // PHASE 13.5 — Chaos Testing Harness
@@ -15,7 +15,7 @@ use metrics::{counter, gauge};
 
 pub struct ChaosConfig {
     pub redis_failure_mode: Arc<AtomicBool>,
-    pub shard_failure_mode: Arc<AtomicBool>,  // Simula 1 de N shards caído
+    pub shard_failure_mode: Arc<AtomicBool>, // Simula 1 de N shards caído
     pub worker_failure_mode: Arc<AtomicBool>, // Simula fallos del Whisper worker
 }
 
@@ -106,7 +106,10 @@ pub fn record_advanced_metrics(
     // Demasiados hits iguales seguidos = queries degeneradas o cache poisoning
     let thrash_rate = if consecutive_cache_hits > 50 {
         // Posible cache poisoning o consultas degeneradas en loop
-        warn!("Cache thrash detectado: {} hits consecutivos idénticos", consecutive_cache_hits);
+        warn!(
+            "Cache thrash detectado: {} hits consecutivos idénticos",
+            consecutive_cache_hits
+        );
         consecutive_cache_hits as f64 / 1000.0
     } else {
         0.0
@@ -117,7 +120,7 @@ pub fn record_advanced_metrics(
     // Aquí emitimos un mock; en producción real, se hace cosine similarity contra anchor set
     // y si cae < 0.8 el modelo necesita re-entrenamiento.
     gauge!("vector_drift_score").set(0.02); // Mock: 2% drift (healthy)
-    
+
     if !cache_hit {
         counter!("cache_misses_total_v2").increment(1);
     }

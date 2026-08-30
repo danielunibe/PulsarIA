@@ -78,12 +78,20 @@ Pulsaria/
 
 ## ⚡ Guía de Inicio Rápido
 
-### Prerrequisitos
+### Prerrequisitos para desarrollo
 - **Node.js** v20+ y **npm**
 - **Rust Toolchain** (rustc, cargo)
-- **Python 3.10+** (con `ffmpeg` accesible en el PATH)
+- Python 3.10+ y FFmpeg accesible en el PATH solo para ejecutar el árbol fuente sin el instalador.
 
-### Instalación de dependencias
+### Instalador Windows
+
+El artefacto `src-tauri/target-tauri/release/bundle/nsis/pulsar-eventide_0.1.0_x64-setup.exe` instala Pulsar Eventide para el usuario actual. El instalador contiene el frontend estático, el ejecutable Rust, Python embebible, workers, Faster-Whisper, yt-dlp, los modelos ONNX/MiniLM y FFmpeg; el usuario no necesita instalar Node, Rust, Python ni FFmpeg para usar el paquete.
+
+La biblioteca y la configuración se guardan en `%APPDATA%\\Pulsar Eventide`; los videos procesados se guardan en la carpeta de Descargas por defecto y pueden cambiarse desde Settings. Los recursos del bundle se leen desde la carpeta `resources` instalada, mientras que los datos escribibles no se colocan junto al ejecutable.
+
+La descarga de TikTok sigue dependiendo de que el enlace sea accesible y autorizado por el usuario. Las cookies del navegador son opt-in, se usan en el proceso de descarga y no se copian a SQLite ni se persisten como archivos de configuración.
+
+### Instalación de dependencias para desarrollo
 ```bash
 # 1. Dependencias del frontend
 npm install

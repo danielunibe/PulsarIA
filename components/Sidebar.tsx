@@ -2,12 +2,25 @@
 
 import { AddLinks } from './AddLinks';
 import { QueueSection } from './QueueSection';
+import { PlaylistsPanel } from './PlaylistsPanel';
 
+/**
+ * Props del componente Sidebar — panel lateral izquierdo de Pulsar Eventide.
+ * 
+ * Contiene: AddLinks (ingesta de enlaces), QueueSection (monitor de progreso de la cola)
+ * y PlaylistsPanel (colecciones temáticas).
+ */
 export interface SidebarProps {
-    jobs?: any[];
+    /** ID de la playlist actualmente seleccionada, o null */
+    selectedPlaylistId: number | null;
+    /** Callback para seleccionar/deseleccionar una playlist */
+    onPlaylistSelect: (id: number | null) => void;
 }
 
-export function Sidebar({ jobs = [] }: SidebarProps) {
+export function Sidebar({
+    selectedPlaylistId,
+    onPlaylistSelect,
+}: SidebarProps) {
     return (
         <aside
             className="w-[360px] xl:w-[380px] 2xl:w-[400px] h-full flex-shrink-0 relative overflow-hidden z-20 flex flex-col font-sans"
@@ -20,11 +33,14 @@ export function Sidebar({ jobs = [] }: SidebarProps) {
             }}
         >
             {/* Scrollable Column Content — Dashboard Exclusivo */}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 flex flex-col gap-4 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-5 flex flex-col gap-5 custom-scrollbar">
                 <AddLinks />
                 <QueueSection />
+                <PlaylistsPanel
+                    selectedPlaylistId={selectedPlaylistId}
+                    onPlaylistSelect={onPlaylistSelect}
+                />
             </div>
         </aside>
     );
 }
-

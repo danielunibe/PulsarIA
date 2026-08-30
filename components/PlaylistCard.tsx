@@ -1,16 +1,35 @@
 'use client';
 import { motion } from 'motion/react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { FaListUl, FaWandMagicSparkles, FaTrash } from 'react-icons/fa6';
 import type { PlaylistRecord } from '@/hooks/usePlaylists';
 
+/**
+ * Props de la tarjeta individual de playlist.
+ * 
+ * Muestra el nombre, descripción, keywords temáticas, badge "Auto"
+ * y thumbnail de portada de una playlist.
+ */
 interface PlaylistCardProps {
+  /** Datos de la playlist */
   playlist: PlaylistRecord;
+  /** Si esta playlist está actualmente seleccionada */
   isSelected: boolean;
+  /** Callback para seleccionar/deseleccionar la playlist */
   onSelect: () => void;
+  /** Callback para eliminar la playlist */
   onDelete: () => void;
+  /** URL del thumbnail de portada (opcional) */
   coverThumb?: string;
 }
 
+/**
+ * PlaylistCard — Tarjeta individual de una playlist.
+ * 
+ * Renderiza una card con: thumbnail de portada (o bloque de color),
+ * nombre, descripción corta, keywords temáticas, badge "Auto" si
+ * fue generada automáticamente, y botón de eliminar.
+ */
 export function PlaylistCard({ playlist, isSelected, onSelect, onDelete, coverThumb }: PlaylistCardProps) {
   const keywords = (() => {
     try { 
@@ -26,7 +45,16 @@ export function PlaylistCard({ playlist, isSelected, onSelect, onDelete, coverTh
     <motion.div
       whileHover={{ scale: 1.015, y: -1 }}
       whileTap={{ scale: 0.98 }}
+      role="button"
+      tabIndex={0}
+      aria-pressed={isSelected}
       onClick={onSelect}
+      onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
       className="relative flex items-center gap-3 p-3 rounded-2xl cursor-pointer group transition-all duration-300"
       style={{
         background: isSelected
@@ -49,6 +77,8 @@ export function PlaylistCard({ playlist, isSelected, onSelect, onDelete, coverTh
         }}
       >
         {coverThumb ? (
+          // Las portadas pueden proceder de cualquier proveedor de thumbnails.
+          // eslint-disable-next-line @next/next/no-img-element
           <img src={coverThumb} alt="" className="w-full h-full object-cover" />
         ) : (
           <FaListUl size={14} style={{ color }} />
@@ -79,6 +109,8 @@ export function PlaylistCard({ playlist, isSelected, onSelect, onDelete, coverTh
 
       {/* Delete button */}
       <button
+        type="button"
+        aria-label={`Eliminar playlist ${playlist.name}`}
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
         className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-400/10"
         title="Eliminar playlist"

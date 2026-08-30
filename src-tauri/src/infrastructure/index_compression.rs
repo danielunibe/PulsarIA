@@ -1,5 +1,5 @@
+use metrics::{gauge, histogram};
 use tracing::{info, warn};
-use metrics::{histogram, gauge};
 
 // ========================================================================
 // PHASE 21: Index Compression con Product Quantization (PQ)
@@ -27,16 +27,27 @@ pub struct ProductQuantizer {
 
 impl ProductQuantizer {
     /// Crea un PQ para vectores de `total_dim` dimensiones.
-    pub fn new(total_dim: usize, m_subvectors: usize, num_centroids: usize) -> Result<Self, String> {
+    pub fn new(
+        total_dim: usize,
+        m_subvectors: usize,
+        num_centroids: usize,
+    ) -> Result<Self, String> {
         if total_dim % m_subvectors != 0 {
-            return Err(format!("total_dim ({}) debe ser divisible por m_subvectors ({})", total_dim, m_subvectors));
+            return Err(format!(
+                "total_dim ({}) debe ser divisible por m_subvectors ({})",
+                total_dim, m_subvectors
+            ));
         }
 
         let subvec_dim = total_dim / m_subvectors;
-        info!("ProductQuantizer creado: {}D → {} subvectores de {}D, {} centroides cada uno", 
-              total_dim, m_subvectors, subvec_dim, num_centroids);
-        info!("Reducción de memoria estimada: {:.1}x", 
-              (total_dim as f32 * 4.0) / (m_subvectors as f32)); // f32=4bytes vs 1 byte codebook
+        info!(
+            "ProductQuantizer creado: {}D → {} subvectores de {}D, {} centroides cada uno",
+            total_dim, m_subvectors, subvec_dim, num_centroids
+        );
+        info!(
+            "Reducción de memoria estimada: {:.1}x",
+            (total_dim as f32 * 4.0) / (m_subvectors as f32)
+        ); // f32=4bytes vs 1 byte codebook
 
         Ok(Self {
             m_subvectors,
@@ -51,9 +62,13 @@ impl ProductQuantizer {
     /// En producción real: faiss o implementación k-means paralela.
     pub fn train(&mut self, vectors: &[Vec<f32>]) {
         let start = std::time::Instant::now();
-        
+
         if vectors.len() < self.num_centroids {
-            warn!("Corpus demasiado pequeño para entrenar PQ ({} < {})", vectors.len(), self.num_centroids);
+            warn!(
+                "Corpus demasiado pequeño para entrenar PQ ({} < {})",
+                vectors.len(),
+                self.num_centroids
+            );
             return;
         }
 
@@ -69,8 +84,11 @@ impl ProductQuantizer {
         self.is_trained = true;
         gauge!("pq_corpus_size").set(vectors.len() as f64);
         histogram!("pq_training_duration_seconds").record(start.elapsed().as_secs_f64());
-        info!("PQ codebook entrenado en {}ms con {} vectores", 
-              start.elapsed().as_millis(), vectors.len());
+        info!(
+            "PQ codebook entrenado en {}ms con {} vectores",
+            start.elapsed().as_millis(),
+            vectors.len()
+        );
     }
 
     /// Comprime un vector 384d a M bytes (uno por subvector).
@@ -90,7 +108,9 @@ impl ProductQuantizer {
                 .min_by(|&a, &b| {
                     let dist_a = l2_distance(subvec, &self.codebook[m][a]);
                     let dist_b = l2_distance(subvec, &self.codebook[m][b]);
-                    dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
+                    dist_a
+                        .partial_cmp(&dist_b)
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .unwrap_or(0);
 
@@ -109,5 +129,9 @@ impl ProductQuantizer {
 }
 
 fn l2_distance(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum::<f32>().sqrt()
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (x - y).powi(2))
+        .sum::<f32>()
+        .sqrt()
 }

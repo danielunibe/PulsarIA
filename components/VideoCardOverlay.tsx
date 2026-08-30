@@ -13,12 +13,24 @@ import { FaPlay } from 'react-icons/fa6';
 // Vinyl eliminado
 // ============================================================
 
+/**
+ * Props del overlay de VideoCard.
+ * 
+ * Muestra información superpuesta sobre la tarjeta de video:
+ * título, autor, tags, waveform de audio animado, y botón de play.
+ */
 interface VideoCardOverlayProps {
+    /** Autor del video */
     author?: string;
+    /** Título del video */
     title?: string;
+    /** Tags/categorías del video */
     tags?: string[];
+    /** Si el video se está reproduciendo actualmente */
     isFullPlaying: boolean;
+    /** String de transición CSS para iconos */
     iconTransition: string;
+    /** Callback al hacer click en el botón de play */
     onPlayClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }
 
@@ -43,6 +55,13 @@ function AudioWaveform() {
     );
 }
 
+/**
+ * VideoCardOverlay — Overlay minimalista sobre VideoCard.
+ * 
+ * En reposo: muestra solo play + título.
+ * En hover: aparecen tags y autor.
+ * Cuando reproduce: muestra waveform de audio animado.
+ */
 export function VideoCardOverlay({
     author,
     title,
