@@ -8,20 +8,21 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::{Arc, Mutex as StdMutex, LazyLock};
 use tokio::sync::Mutex;
-use tokio::time::Duration;
 use rusqlite::params;
 use tauri::{Emitter, State};
 use serde::{Deserialize, Serialize};
 use serde_json;
+#[cfg(windows)]
+use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use crate::url_utils::is_collection_source;
 use crate::api::middleware::security::is_valid_sandbox_url;
 use crate::application::semantic_chunker::SemanticChunker;
 use crate::db;
 use crate::embedding;
 use crate::queue;
-use crate::domain::ports::EmbeddingEngine;
 
 /// Bug #33 FIX: Maximum concurrent workers spawned by collection expansion.
 const MAX_COLLECTION_WORKERS: usize = 8;
@@ -34,6 +35,7 @@ pub struct WorkerConfig {
     pub formats: Vec<String>,
     pub cookies_browser: String,
     pub retention: String,
+    pub processing: ProcessingSettings,
 }
 
 impl Default for WorkerConfig {
@@ -43,8 +45,46 @@ impl Default for WorkerConfig {
             formats: vec!["mp4".into(), "mp3".into(), "txt".into()],
             cookies_browser: String::new(),
             retention: "keep".into(),
+            processing: ProcessingSettings::default(),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProcessingSettings {
+    pub quality: u8,
+    pub profile: String,
+    pub whisper_model: String,
+    pub device: String,
+    pub compute_type: String,
+    pub video_fit: String,
+    #[serde(default)]
+    pub configured: bool,
+}
+
+impl Default for ProcessingSettings {
+    fn default() -> Self {
+        Self {
+            quality: 78,
+            profile: "high".into(),
+            whisper_model: "tiny".into(),
+            device: "cpu".into(),
+            compute_type: "int8".into(),
+            video_fit: "cover".into(),
+            configured: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct HardwareProfile {
+    pub cpu_name: String,
+    pub logical_cores: usize,
+    pub ram_bytes: u64,
+    pub gpu_name: Option<String>,
+    pub vram_bytes: Option<u64>,
+    pub whisper_gpu_supported: bool,
+    pub recommended_quality: String,
 }
 /// Estado compartido de la aplicación Tauri.
 ///
@@ -138,6 +178,38 @@ pub fn emit_log(app_handle: &tauri::AppHandle, message: String) {
     }
 }
 
+/// Resolve the bundled/local MiniLM model consistently for development,
+/// packaged Tauri builds, and explicit user overrides.
+pub fn resolve_model_dir() -> PathBuf {
+    let current_dir = std::env::current_dir().unwrap_or_default();
+    let mut candidates = Vec::new();
+
+    if let Some(configured) = std::env::var_os("ONNX_MODEL_DIR") {
+        candidates.push(PathBuf::from(configured));
+    }
+    candidates.extend([
+        current_dir.join("assets/models/all-MiniLM-L6-v2"),
+        current_dir.join("src-tauri/assets/models/all-MiniLM-L6-v2"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/assets/models/all-MiniLM-L6-v2"),
+    ]);
+    if let Some(executable_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(PathBuf::from))
+    {
+        candidates.push(executable_dir.join("resources/assets/models/all-MiniLM-L6-v2"));
+        candidates.push(executable_dir.join("assets/models/all-MiniLM-L6-v2"));
+    }
+
+    candidates
+        .into_iter()
+        .find(|candidate| {
+            candidate.join("model.onnx").is_file()
+                && candidate.join("tokenizer.json").is_file()
+        })
+        .unwrap_or_else(|| current_dir.join("assets/models/all-MiniLM-L6-v2"))
+}
+
 fn processing_root() -> PathBuf {
     std::env::var_os("PULSAR_DOWNLOAD_DIR")
         .map(PathBuf::from)
@@ -146,10 +218,71 @@ fn processing_root() -> PathBuf {
 }
 
 async fn sync_collection_sources(
-    _db: Arc<StdMutex<rusqlite::Connection>>,
-    _queue: Arc<Mutex<queue::QueueManager>>,
-    _app_handle: tauri::AppHandle,
+    db: Arc<StdMutex<rusqlite::Connection>>,
+    queue: Arc<Mutex<queue::QueueManager>>,
+    app_handle: tauri::AppHandle,
 ) {
+    let sources = match db.lock() {
+        Ok(connection) => match db::get_collection_sources_to_sync(&connection) {
+            Ok(sources) => sources,
+            Err(error) => {
+                emit_log(&app_handle, format!("Collection sync lookup failed: {}", error));
+                return;
+            }
+        },
+        Err(_) => {
+            emit_log(&app_handle, "Collection sync could not lock the database".into());
+            return;
+        }
+    };
+
+    for source in sources {
+        let collection_urls = {
+            let queue_guard = queue.lock().await;
+            queue_guard.expand_collection(&source).await
+        };
+        let collection_urls = match collection_urls {
+            Ok(urls) => urls,
+            Err(error) => {
+                emit_log(
+                    &app_handle,
+                    format!("Collection sync failed for {}: {}", source, error),
+                );
+                continue;
+            }
+        };
+
+        let mut queued = 0usize;
+        for video_url in collection_urls.into_iter().take(200) {
+            let job_id = match db.lock() {
+                Ok(connection) => match db::find_job_id_by_url(&connection, &video_url) {
+                    Ok(Some(_)) => None,
+                    Ok(None) => db::insert_job(&connection, &video_url).ok(),
+                    Err(error) => {
+                        emit_log(&app_handle, format!("Collection job insert failed: {}", error));
+                        None
+                    }
+                },
+                Err(_) => None,
+            };
+
+            if let Some(job_id) = job_id {
+                let queue_guard = queue.lock().await;
+                queue_guard
+                    .dispatch_worker(job_id, video_url, app_handle.clone())
+                    .await;
+                queued += 1;
+            }
+        }
+
+        if let Ok(connection) = db.lock() {
+            let _ = db::mark_collection_source_synced(&connection, &source);
+        }
+        emit_log(
+            &app_handle,
+            format!("Collection sync complete: {} new jobs queued", queued),
+        );
+    }
 }
 
 pub async fn collection_sync_loop(
@@ -205,6 +338,199 @@ pub fn load_persisted_retention() {
             std::env::set_var("PULSAR_DEFAULT_RETENTION", policy);
         }
     }
+}
+
+pub fn load_persisted_formats() {
+    if std::env::var_os("PULSAR_FORMATS").is_some() {
+        return;
+    }
+    let settings_path = settings_data_dir().join("formats.json");
+    if let Ok(contents) = fs::read_to_string(settings_path) {
+        if let Ok(formats) = serde_json::from_str::<Vec<String>>(&contents) {
+            if !formats.is_empty() {
+                if let Ok(serialized) = serde_json::to_string(&formats) {
+                    std::env::set_var("PULSAR_FORMATS", serialized);
+                }
+            }
+        }
+    }
+}
+
+pub fn load_persisted_processing_settings() -> ProcessingSettings {
+    let path = settings_data_dir().join("processing_settings.json");
+    let mut settings = fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<ProcessingSettings>(&contents).ok())
+        .unwrap_or_default();
+
+    if !(0..=100).contains(&settings.quality)
+        || !matches!(settings.video_fit.as_str(), "cover" | "contain")
+        || !matches!(settings.profile.as_str(), "fast" | "balanced" | "high")
+        || !matches!(settings.whisper_model.as_str(), "tiny" | "small" | "medium")
+        || !matches!(settings.device.as_str(), "cpu" | "cuda")
+    {
+        settings = ProcessingSettings::default();
+    }
+
+    apply_processing_environment(&settings);
+    settings
+}
+
+fn gpu_probe() -> (Option<String>, Option<u64>) {
+    let output = Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=name,memory.total",
+            "--format=csv,noheader,nounits",
+        ])
+        .output();
+    let Ok(output) = output else { return (None, None) };
+    if !output.status.success() {
+        return (None, None);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_default();
+    let mut parts = line.split(',').map(str::trim);
+    let name = parts.next().filter(|value| !value.is_empty()).map(str::to_string);
+    let vram_bytes = parts
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|mib| mib * 1024 * 1024);
+    (name, vram_bytes)
+}
+
+fn bundled_cuda_runtime_exists() -> bool {
+    let mut candidates = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("resources/python/Lib/site-packages/ctranslate2/cudnn64_9.dll"));
+        }
+    }
+    if let Ok(current) = std::env::current_dir() {
+        candidates.push(current.join("src-tauri/resources/python/Lib/site-packages/ctranslate2/cudnn64_9.dll"));
+        candidates.push(current.join("resources/python/Lib/site-packages/ctranslate2/cudnn64_9.dll"));
+    }
+    candidates.into_iter().any(|path| path.is_file())
+}
+
+fn detect_hardware_profile() -> HardwareProfile {
+    let (gpu_name, vram_bytes) = gpu_probe();
+    let whisper_gpu_supported = gpu_name.is_some() && bundled_cuda_runtime_exists();
+    let logical_cores = num_cpus::get().max(1);
+    let ram_bytes = total_ram_bytes();
+    let recommended_quality = if whisper_gpu_supported && vram_bytes.unwrap_or(0) >= 6 * 1024 * 1024 * 1024 {
+        "high"
+    } else if logical_cores >= 8 || ram_bytes >= 16 * 1024 * 1024 * 1024 {
+        "balanced"
+    } else {
+        "fast"
+    };
+
+    HardwareProfile {
+        cpu_name: std::env::var("PROCESSOR_IDENTIFIER").unwrap_or_else(|_| "CPU local".into()),
+        logical_cores,
+        ram_bytes,
+        gpu_name,
+        vram_bytes,
+        whisper_gpu_supported,
+        recommended_quality: recommended_quality.into(),
+    }
+}
+
+#[cfg(windows)]
+fn total_ram_bytes() -> u64 {
+    let mut status = MEMORYSTATUSEX {
+        dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+        dwMemoryLoad: 0,
+        ullTotalPhys: 0,
+        ullAvailPhys: 0,
+        ullTotalPageFile: 0,
+        ullAvailPageFile: 0,
+        ullTotalVirtual: 0,
+        ullAvailVirtual: 0,
+        ullAvailExtendedVirtual: 0,
+    };
+    unsafe {
+        if GlobalMemoryStatusEx(&mut status) != 0 {
+            return status.ullTotalPhys;
+        }
+    }
+    0
+}
+
+#[cfg(not(windows))]
+fn total_ram_bytes() -> u64 {
+    0
+}
+
+fn apply_processing_environment(settings: &ProcessingSettings) {
+    std::env::set_var("WHISPER_MODEL", &settings.whisper_model);
+    std::env::set_var("WHISPER_DEVICE", &settings.device);
+    std::env::set_var("WHISPER_COMPUTE_TYPE", &settings.compute_type);
+    std::env::set_var("PULSAR_PROCESSING_QUALITY", &settings.quality.to_string());
+}
+
+fn derive_processing_settings(quality: u8, video_fit: String) -> Result<ProcessingSettings, String> {
+    if !matches!(video_fit.as_str(), "cover" | "contain") {
+        return Err("Video fit must be 'cover' or 'contain'".into());
+    }
+    let hardware = detect_hardware_profile();
+    let quality = quality.min(100);
+    let (profile, whisper_model, device, compute_type) = if quality < 35 {
+        ("fast", "tiny", "cpu", "int8")
+    } else if quality < 72 {
+        if hardware.whisper_gpu_supported {
+            ("balanced", "small", "cuda", "float16")
+        } else {
+            ("balanced", "small", "cpu", "int8")
+        }
+    } else if hardware.whisper_gpu_supported {
+        ("high", "medium", "cuda", "float16")
+    } else {
+        ("high", "small", "cpu", "int8")
+    };
+
+    Ok(ProcessingSettings {
+        quality,
+        profile: profile.into(),
+        whisper_model: whisper_model.into(),
+        device: device.into(),
+        compute_type: compute_type.into(),
+        video_fit,
+        configured: true,
+    })
+}
+
+#[tauri::command]
+pub fn get_hardware_profile() -> HardwareProfile {
+    detect_hardware_profile()
+}
+
+#[tauri::command]
+pub async fn get_processing_settings(
+    state: State<'_, AppState>,
+) -> Result<ProcessingSettings, String> {
+    let config = state.worker_config.read().await;
+    Ok(config.processing.clone())
+}
+
+#[tauri::command]
+pub async fn set_processing_settings(
+    quality: u8,
+    video_fit: String,
+    state: State<'_, AppState>,
+) -> Result<ProcessingSettings, String> {
+    let settings = derive_processing_settings(quality, video_fit)?;
+    apply_processing_environment(&settings);
+    let serialized = serde_json::to_string_pretty(&settings).map_err(|error| error.to_string())?;
+    fs::create_dir_all(settings_data_dir()).map_err(|error| error.to_string())?;
+    fs::write(settings_data_dir().join("processing_settings.json"), serialized.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let mut config = state.worker_config.write().await;
+    config.processing = settings.clone();
+    Ok(settings)
 }
 
 pub fn load_persisted_search_config() -> SearchConfig {
@@ -365,10 +691,26 @@ pub async fn add_job(
             .db
             .lock()
             .map_err(|_| "Database mutex poisoned".to_string())?;
-        if let Some(existing_id) = db::find_job_id_by_url(&db, &url).map_err(|e| e.to_string())? {
-            return Ok(existing_id);
+        let existing_job = match db::find_job_id_by_url(&db, &url).map_err(|e| e.to_string())? {
+            Some(existing_id) => db::get_job_by_id(&db, existing_id).map_err(|e| e.to_string())?,
+            None => None,
+        };
+        if let Some(existing_job) = existing_job {
+            let status = existing_job.status.to_lowercase();
+            if matches!(
+                status.as_str(),
+                "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
+            ) {
+                db::cleanup_media_files(&db, existing_job.id, &processing_root())
+                    .map_err(|e| e.to_string())?;
+                db::reset_job_for_retry(&db, existing_job.id).map_err(|e| e.to_string())?;
+            } else {
+                return Ok(existing_job.id);
+            }
+            existing_job.id
+        } else {
+            db::insert_job(&db, &url).map_err(|e| e.to_string())?
         }
-        db::insert_job(&db, &url).map_err(|e| e.to_string())?
     };
 
     let cfg = state.worker_config.read().await.clone();
@@ -384,14 +726,64 @@ pub async fn get_jobs(state: State<'_, AppState>) -> Result<Vec<db::JobRecord>, 
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::get_all_jobs(&db).map_err(|e| e.to_string())
+    let mut jobs = db::get_all_jobs(&db).map_err(|e| e.to_string())?;
+    // Do not advertise a stale database path as playable media. This is
+    // especially important after an interrupted native run or power loss.
+    for job in &mut jobs {
+        if job
+            .video_path
+            .as_deref()
+            .map(PathBuf::from)
+            .is_some_and(|path| !path.is_file())
+        {
+            job.video_path = None;
+        }
+    }
+    Ok(jobs)
 }
 
 #[tauri::command]
 pub fn get_base_path() -> Result<String, String> {
     std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| e.to_string())
+        .map(|path| path.to_string_lossy().to_string())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn retry_job(
+    job_id: i64,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let url = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        let job = db::get_job_by_id(&db, job_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "Trabajo no encontrado".to_string())?;
+        let status = job.status.to_lowercase();
+        if !matches!(
+            status.as_str(),
+            "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
+        ) {
+            return Err("El trabajo todavía no está disponible para reintento".to_string());
+        }
+        // Remove only this job's processing directory and stale media paths.
+        // A retry starts from a clean pipeline instead of reusing partial files.
+        db::cleanup_media_files(&db, job_id, &processing_root())
+            .map_err(|error| error.to_string())?;
+        db::reset_job_for_retry(&db, job_id).map_err(|error| error.to_string())?;
+        job.url
+    };
+
+    let config = state.worker_config.read().await.clone();
+    let queue = state.queue.lock().await;
+    queue
+        .dispatch_worker_with_config(job_id, url, app_handle, Some(config))
+        .await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -446,19 +838,11 @@ pub async fn get_model_status(state: State<'_, AppState>) -> Result<ModelStatus,
     let onnx = state.onnx.lock().await;
     let loaded = onnx.is_some();
 
-    let model_candidates = [
-        PathBuf::from("assets/models/all-MiniLM-L6-v2"),
-        PathBuf::from("src-tauri/assets/models/all-MiniLM-L6-v2"),
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .unwrap_or_default()
-            .join("resources/assets/models/all-MiniLM-L6-v2"),
-    ];
-    let model_path = model_candidates
-        .iter()
-        .find(|c| c.join("model.onnx").exists())
-        .map(|c| c.join("model.onnx").to_string_lossy().to_string())
+    let model_dir = resolve_model_dir();
+    let model_path = model_dir
+        .join("model.onnx")
+        .is_file()
+        .then(|| model_dir.join("model.onnx").to_string_lossy().to_string())
         .unwrap_or_else(|| "model.onnx not found".to_string());
 
     Ok(ModelStatus {
@@ -476,12 +860,7 @@ pub async fn reload_model(
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     emit_log(&app_handle, "Reloading ONNX model...".into());
-    let base_dir = std::env::current_dir().map_err(|e| e.to_string())?;
-
-    let model_dir = base_dir
-        .join("assets")
-        .join("models")
-        .join("all-MiniLM-L6-v2");
+    let model_dir = resolve_model_dir();
 
     let start = std::time::Instant::now();
     let onnx_manager = embedding::ONNXModelManager::new(
@@ -790,6 +1169,42 @@ pub async fn auto_cluster_videos(
     db::cluster_videos_by_similarity(&db, thresh, min_size).map_err(|e| e.to_string())
 }
 
+#[derive(Deserialize)]
+pub struct AiPlaylistInput {
+    pub name: String,
+    pub description: Option<String>,
+    pub color: String,
+    pub cover_job_id: Option<i64>,
+    pub topic_keywords: Vec<String>,
+    pub job_ids: Vec<i64>,
+}
+
+#[tauri::command]
+pub async fn replace_ai_playlists(
+    groups: Vec<AiPlaylistInput>,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::PlaylistRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    let inputs = groups.iter().map(|group| {
+        let keywords = serde_json::to_string(&group.topic_keywords).unwrap_or_else(|_| "[]".to_string());
+        let description = group.description.as_deref();
+        (group, keywords, description)
+    }).collect::<Vec<_>>();
+    let refs = inputs.iter().map(|(group, keywords, description)| db::AutoPlaylistInput {
+        name: &group.name,
+        description: *description,
+        color: &group.color,
+        cover_job_id: group.cover_job_id,
+        topic_keywords: keywords,
+        job_ids: &group.job_ids,
+    }).collect::<Vec<_>>();
+    db::replace_auto_playlists(&db, &refs).map_err(|e| e.to_string())?;
+    db::get_all_playlists(&db).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn set_video_keep_status(
     job_id: i64,
@@ -1073,12 +1488,7 @@ pub async fn import_semantic(content: String, state: State<'_, AppState>) -> Res
         .snapshot_index()
         .map_err(|error| format!("HNSW snapshot failed after UNIB import: {}", error))?;
 
-    let data_dir = if PathBuf::from("data").exists() {
-        PathBuf::from("data")
-    } else {
-        PathBuf::from("../data")
-    };
-    let semantic_dir = data_dir.join("semantic");
+    let semantic_dir = db::data_dir_path().join("semantic");
     fs::create_dir_all(&semantic_dir).map_err(|error| error.to_string())?;
 
     let mut hasher = DefaultHasher::new();
@@ -1095,6 +1505,7 @@ pub async fn set_download_dir(path: String, state: State<'_, AppState>) -> Resul
         return Err("Download directory cannot be empty".to_string());
     }
     fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    std::env::set_var("PULSAR_DOWNLOAD_DIR", &path);
     {
         let mut wc = state.worker_config.write().await;
         wc.download_dir = path.to_string_lossy().to_string();
@@ -1134,6 +1545,11 @@ pub async fn set_cookie_browser(browser: String, state: State<'_, AppState>) -> 
         let mut wc = state.worker_config.write().await;
         wc.cookies_browser = browser.clone();
     }
+    if browser.is_empty() {
+        std::env::remove_var("PULSAR_COOKIES_FROM_BROWSER");
+    } else {
+        std::env::set_var("PULSAR_COOKIES_FROM_BROWSER", &browser);
+    }
     let settings_dir = settings_data_dir();
     fs::create_dir_all(&settings_dir).map_err(|error| error.to_string())?;
     fs::write(settings_dir.join("cookie_browser.txt"), browser.as_bytes())
@@ -1147,9 +1563,10 @@ pub async fn set_formats(formats: Vec<String>, state: State<'_, AppState>) -> Re
         let mut wc = state.worker_config.write().await;
         wc.formats = formats.clone();
     }
+    let serialized = serde_json::to_string(&formats).map_err(|error| error.to_string())?;
+    std::env::set_var("PULSAR_FORMATS", &serialized);
     let settings_dir = settings_data_dir();
     fs::create_dir_all(&settings_dir).map_err(|error| error.to_string())?;
-    let serialized = serde_json::to_string(&formats).map_err(|error| error.to_string())?;
     fs::write(
         settings_dir.join("formats.json"),
         serialized.as_bytes(),
@@ -1173,6 +1590,7 @@ pub async fn set_default_retention(retention: String, state: State<'_, AppState>
         let mut wc = state.worker_config.write().await;
         wc.retention = retention.clone();
     }
+    std::env::set_var("PULSAR_DEFAULT_RETENTION", &retention);
     let settings_dir = settings_data_dir();
     fs::create_dir_all(&settings_dir).map_err(|error| error.to_string())?;
     fs::write(settings_dir.join("retention.txt"), retention.as_bytes())

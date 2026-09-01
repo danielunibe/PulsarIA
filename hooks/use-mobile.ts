@@ -19,7 +19,8 @@ export function useIsMobile() {
             setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
         }
         mql.addEventListener("change", onChange)
-        setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+        // Defer the first synchronization until after the effect commits.
+        queueMicrotask(onChange)
         return () => mql.removeEventListener("change", onChange)
     }, [])
 

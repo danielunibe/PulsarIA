@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import Image from 'next/image';
 
 import { Sidebar } from '@/components/Sidebar';
-import { Header, type SearchMode } from '@/components/Header';
+import { Header, WindowTitlebar, type SearchMode } from '@/components/Header';
 
 import { VideoGrid } from '@/components/VideoGrid';
 import { SettingsPanel } from '@/components/SettingsPanel';
@@ -17,6 +17,10 @@ import { FaMagnifyingGlass, FaArrowLeft, FaBrain } from 'react-icons/fa6';
 import { useSettings } from '@/lib/settings-context';
 import { AuroraBackground } from '@/components/AuroraBackground';
 import { generateChatResponse } from '@/lib/gemini';
+import { MOCK_ACTIVE_VIDEOS } from '@/lib/mock-data';
+import { useJobs } from '@/hooks/use-jobs';
+import { useProcessingSettings } from '@/hooks/use-processing-settings';
+import { ProcessingSetupModal } from '@/components/ProcessingSetupModal';
 import type { PageConfig, SortKey } from '@/components/PagePanel';
 import type { VideoData } from '@/types';
 
@@ -70,15 +74,25 @@ function loadPageConfig(): PageConfig {
 export default function Page() {
 
     const { settings } = useSettings();
+    const processingSetup = useProcessingSettings();
     const activeTheme = settings.theme || 'carbon';
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [activeVideoId, setActiveVideoId] = useState<number | null>(null);
-    const [allJobs, setAllJobs] = useState<any[]>([]);
+    const { jobs, pending, globalProgress, enqueueLinks, retryJob, retryPending } = useJobs();
     const [basePath, setBasePath] = useState('');
 
-    const completedJobs = allJobs.filter((j: any) => j.status === 'complete' || j.status === 'completed');
-    const jobCount = completedJobs.length > 0 ? completedJobs.length : allJobs.length;
-    const jobsLoaded = allJobs.length > 0;
+    const completedJobs = jobs.filter((j: any) =>
+        ['complete', 'completed', 'done'].includes(String(j.status).toLowerCase())
+        && (Boolean(j.video_path) || j.keep_status === 'online')
+    );
+    // Failed/queued records are not library videos. Counting them here made
+    // the header say "1 TikTok" while the gallery had no playable content.
+    const jobCount = completedJobs.length > 0
+        ? completedJobs.length
+        : jobs.length === 0
+            ? MOCK_ACTIVE_VIDEOS.length
+            : 0;
+    const jobsLoaded = jobs.length > 0 || MOCK_ACTIVE_VIDEOS.length > 0;
 
         const [searchResults, setSearchResults] = useState<SemanticSearchResult[] | null>(null);
     const [searchMode, setSearchMode] = useState<SearchMode>('literal');
@@ -256,7 +270,7 @@ export default function Page() {
     }, []);
 
     const handleSearchResultClick = useCallback((result: SemanticSearchResult) => {
-        const job = allJobs.find((candidate) => Number(candidate.id) === result.video_id);
+        const job = jobs.find((candidate) => Number(candidate.id) === result.video_id);
         if (!job) {
             toast.error('El video ya no está disponible', {
                 description: `No se encontró el job #${result.video_id} en la biblioteca local.`,
@@ -264,7 +278,7 @@ export default function Page() {
             return;
         }
         setActiveVideoId(result.video_id);
-    }, [allJobs]);
+    }, [jobs]);
 
     const [resolvedSearchVideo, setResolvedSearchVideo] = useState<VideoData | null>(null);
 
@@ -283,7 +297,7 @@ export default function Page() {
         let cancelled = false;
         async function resolveVideo() {
             const result = searchResults?.find((r) => r.video_id === activeVideoId);
-            const job = allJobs.find((j) => Number(j.id) === activeVideoId);
+            const job = jobs.find((j) => Number(j.id) === activeVideoId);
             if (!result || !job) {
                 if (!cancelled) setResolvedSearchVideo(null);
                 return;
@@ -307,11 +321,11 @@ export default function Page() {
         }
         resolveVideo();
         return () => { cancelled = true; };
-    }, [activeVideoId, allJobs, searchResults]);
+    }, [activeVideoId, jobs, searchResults]);
     return (
 
         <div
-            className="flex h-screen w-full font-sans overflow-auto relative"
+            className="flex h-screen w-full flex-col font-sans overflow-hidden relative"
             style={{ 
                 color: 'var(--text-strong)',
                 minWidth: '1000px',
@@ -394,14 +408,21 @@ export default function Page() {
                 </div>
             )}
 
-            {/* Sidebar Exclusivo Dashboard */}
-            <Sidebar
-                selectedPlaylistId={selectedPlaylistId}
-                onPlaylistSelect={handlePlaylistSelect}
-            />
+            <WindowTitlebar />
 
-            {/* Main Content Area */}
-            <main className="flex-1 h-full overflow-y-auto custom-scrollbar flex flex-col min-w-0 p-[5px] pl-0 relative z-10">
+            <div className="flex min-h-0 flex-1 w-full">
+                {/* Sidebar Exclusivo Dashboard */}
+                <Sidebar
+                    jobs={jobs}
+                    pending={pending}
+                    globalProgress={globalProgress}
+                    onSubmitLinks={enqueueLinks}
+                    onRetryJob={retryJob}
+                    onRetryPending={retryPending}
+                />
+
+                {/* Main Content Area */}
+                <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar flex flex-col min-w-0 relative z-10">
                 <Header
                     onOpenSettings={() => setSettingsOpen(true)}
                     activeCount={jobCount}
@@ -506,7 +527,7 @@ export default function Page() {
 
                                     <div className="w-24 h-36 rounded-xl overflow-hidden shrink-0 shadow-lg border border-white/10 relative bg-black">
                                                                                 <Image
-                                            src={result.thumbnail || 'https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?q=80&w=100&auto=format&fit=crop'}
+                                            src={result.thumbnail || '/demo/demo-01.jpg'}
                                             alt={result.title || 'Video'}
                                             fill
                                             unoptimized
@@ -588,18 +609,20 @@ export default function Page() {
                             showErrors={pageConfig.showErrors}
                             keepStatusFilter={pageConfig.keepStatusFilter}
                             platformFilter={pageConfig.platformFilter}
-                            onJobsChange={setAllJobs}
+                            jobs={jobs}
                         />
                     </>
                 )}
 
-            </main>
+                </main>
+            </div>
 
             {/* Settings Modal Backdrop & Panel */}
             <div
-                className="fixed inset-0 transition-all duration-300"
+                className="fixed inset-x-0 bottom-0 top-10 transition-all duration-300"
                 style={{
                     zIndex: 40,
+                    top: '40px',
                     background: settingsOpen ? 'rgba(0,0,0,0.6)' : 'transparent',
                     backdropFilter: settingsOpen ? 'blur(6px)' : 'none',
                     pointerEvents: settingsOpen ? 'auto' : 'none',
@@ -608,17 +631,28 @@ export default function Page() {
             />
 
             <div
-                className="fixed top-0 right-0 h-full w-[400px] xl:w-[440px] transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] overflow-hidden"
+                className="fixed right-0 bottom-0 top-10 w-[400px] xl:w-[440px] overflow-hidden transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
                 style={{
                     zIndex: 50,
+                    top: '40px',
                     transform: settingsOpen ? 'translateX(0)' : 'translateX(100%)',
                     boxShadow: settingsOpen ? '-15px 0 60px rgba(0,0,0,0.9)' : 'none',
                     background: '#0e1017',
                     borderLeft: '1px solid rgba(255,255,255,0.12)',
                 }}
             >
-                <SettingsPanel onClose={() => setSettingsOpen(false)} jobs={allJobs} />
+                            <SettingsPanel onClose={() => setSettingsOpen(false)} jobs={jobs} onPlaylistSelect={handlePlaylistSelect} />
             </div>
+
+            {processingSetup.needsSetup && processingSetup.hardware && processingSetup.processing && (
+                <ProcessingSetupModal
+                    hardware={processingSetup.hardware}
+                    processing={processingSetup.processing}
+                    onSave={async (quality) => {
+                        await processingSetup.save(quality, settings.videoFit);
+                    }}
+                />
+            )}
         </div>
     );
 }

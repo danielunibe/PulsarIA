@@ -51,11 +51,9 @@ pub mod infrastructure;
 pub mod maintenance;
 pub mod resilience;
 
-use std::sync::{Arc, Mutex as StdMutex};
-use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::Builder;
-use crate::commands::{AppState, WorkerConfig, SearchConfig, SystemMetrics};
+use crate::commands::{WorkerConfig, SystemMetrics};
 use crate::api::gateway;
 use crate::infrastructure::persistence::sqlite_repo;
 use crate::infrastructure::vector_shards;
@@ -75,6 +73,8 @@ async fn main() {
     commands::load_persisted_download_dir();
     commands::load_persisted_cookie_browser();
     commands::load_persisted_retention();
+    commands::load_persisted_formats();
+    let processing_settings = commands::load_persisted_processing_settings();
     let prometheus_handle = crate::infrastructure::observability::init_observability();
 
     tokio::spawn(async move {
@@ -82,26 +82,14 @@ async fn main() {
             .await;
     });
 
+    let data_dir = db::data_dir_path();
+    std::env::set_var("PULSAR_DATA_DIR", &data_dir);
     let conn = db::init_db().expect("Failed to initialize SQLite library.db");
     let std_db = Arc::new(std::sync::Mutex::new(conn));
     let job_repo =
         Arc::new(sqlite_repo::SqliteRepo::new(std_db.clone()));
 
-    let base_dir = std::env::current_dir().expect("Failed to get current dir");
-    let model_candidates = [
-        base_dir.join("assets").join("models").join("all-MiniLM-L6-v2"),
-        base_dir.join("src-tauri").join("assets").join("models").join("all-MiniLM-L6-v2"),
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .unwrap_or_else(|| base_dir.clone())
-            .join("resources").join("assets").join("models").join("all-MiniLM-L6-v2"),
-    ];
-    let model_dir = model_candidates
-        .iter()
-        .find(|c| c.join("model.onnx").exists() && c.join("tokenizer.json").exists())
-        .cloned()
-        .unwrap_or_else(|| model_candidates[0].clone());
+    let model_dir = commands::resolve_model_dir();
 
     let start_load = std::time::Instant::now();
     let onnx_manager = embedding::ONNXModelManager::new(
@@ -231,11 +219,13 @@ async fn main() {
                     .ok()
                     .and_then(|f| serde_json::from_str(&f).ok())
                     .unwrap_or_else(|| vec!["mp4".into(), "mp3".into(), "txt".into()]),
+                processing: processing_settings.clone(),
             })),
         })
         .invoke_handler(tauri::generate_handler![
             commands::add_job,
             commands::get_jobs,
+            commands::retry_job,
             commands::get_base_path,
             commands::search_literal_transcripts,
             commands::search_transcripts,
@@ -246,6 +236,9 @@ async fn main() {
             commands::get_db_status,
             commands::debug_search_transcripts,
             commands::get_system_metrics,
+            commands::get_hardware_profile,
+            commands::get_processing_settings,
+            commands::set_processing_settings,
             commands::rebuild_index,
             commands::vacuum_db,
             commands::recompute_embeddings,
@@ -257,6 +250,7 @@ async fn main() {
             commands::delete_playlist,
             commands::get_transcript,
             commands::auto_cluster_videos,
+            commands::replace_ai_playlists,
             commands::set_video_keep_status,
             commands::export_semantic,
             commands::import_semantic,

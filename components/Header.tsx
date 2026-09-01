@@ -6,7 +6,7 @@ import { TT_PINK, TT_CYAN, TIKTOK_LOGO_PATH } from '@/types';
 import { 
     FaMagnifyingGlass, 
     FaXmark, 
-    FaSliders, 
+    FaLayerGroup,
     FaGear, 
     FaClock, 
     FaCalendarDay, 
@@ -42,7 +42,7 @@ const TikTokIcon = ({ size = 28, className = "" }: { size?: number, className?: 
 
 const SearchIcon = () => <FaMagnifyingGlass size={14} />;
 const XIcon = () => <FaXmark size={12} />;
-const ViewSlidersIcon = () => <FaSliders size={14} />;
+const ViewOrganizationIcon = () => <FaLayerGroup size={14} />;
 const SettingsIcon = () => <FaGear size={15} />;
 const ClockFillIcon = () => <FaClock size={13} />;
 const CalendarFillIcon = () => <FaCalendarDay size={13} />;
@@ -122,7 +122,10 @@ function useWindowControls() {
         try {
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             const window = getCurrentWindow();
-            if (isMaximized) {
+            // Read the native state at click time. React state may still reflect
+            // the previous window size when the user clicks twice quickly.
+            const currentlyMaximized = await window.isMaximized();
+            if (currentlyMaximized) {
                 await window.unmaximize();
                 setIsMaximized(false);
             } else {
@@ -156,19 +159,76 @@ function useWindowControls() {
 
     // Listen for maximize/unmaximize events
     useEffect(() => {
-        let unlistenMaximized: (() => void) | undefined;
-        let unlistenUnmaximized: (() => void) | undefined;
-        import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
-            const window = getCurrentWindow();
-            import('@tauri-apps/api/event').then(({ listen }) => {
-                listen('tauri://maximized', () => setIsMaximized(true)).then(fn => { unlistenMaximized = fn; }).catch(() => {});
-                listen('tauri://unmaximized', () => setIsMaximized(false)).then(fn => { unlistenUnmaximized = fn; }).catch(() => {});
-            }).catch(() => {});
-        }).catch(() => {});
-        return () => { unlistenMaximized?.(); unlistenUnmaximized?.(); };
+        let unlistenResize: (() => void) | undefined;
+        let active = true;
+        void (async () => {
+            try {
+                const { getCurrentWindow } = await import('@tauri-apps/api/window');
+                const currentWindow = getCurrentWindow();
+                if (active) setIsMaximized(await currentWindow.isMaximized());
+                unlistenResize = await currentWindow.onResized(async () => {
+                    if (active) setIsMaximized(await currentWindow.isMaximized());
+                });
+            } catch {
+                // La ejecución web no tiene controles nativos.
+            }
+        })();
+        return () => {
+            active = false;
+            unlistenResize?.();
+        };
     }, []);
 
     return { isMaximized, minimize, maximize, close, startDragging };
+}
+
+/** Barra de título nativa sin decoraciones de Windows. Vive en el shell raíz. */
+export function WindowTitlebar() {
+    const dragRef = useRef<HTMLDivElement>(null);
+    const { isMaximized, minimize, maximize, close, startDragging } = useWindowControls();
+
+    return (
+        <div
+            ref={dragRef}
+            className="w-full h-10 shrink-0 flex items-center justify-between px-4 app-drag-region"
+            style={{
+                position: 'relative',
+                zIndex: 100,
+                background: 'rgba(10, 11, 16, 0.78)',
+                backdropFilter: 'blur(40px)',
+                WebkitBackdropFilter: 'blur(40px)',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                userSelect: 'none',
+            }}
+            onDoubleClick={(event) => {
+                if (event.target === event.currentTarget) void maximize();
+            }}
+            onMouseDown={(event) => {
+                // Only the empty titlebar surface drags. Without this guard,
+                // pressing a control also starts a drag and steals the click.
+                if (event.button === 0 && event.target === event.currentTarget) {
+                    void startDragging();
+                }
+            }}
+        >
+            <div className="flex items-center gap-2.5 pointer-events-none">
+                <TikTokIcon size={18} className="drop-shadow-[0_0_8px_rgba(254,44,85,0.5)]" />
+                <span className="font-black tracking-[0.15em] uppercase text-white/90 text-[11px]">PULSARIA</span>
+            </div>
+
+            <div className="flex items-center gap-1 pointer-events-auto app-no-drag">
+                <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void minimize(); }} title="Minimizar" aria-label="Minimizar" className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer app-no-drag">
+                    <MinimizeIcon />
+                </button>
+                <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void maximize(); }} title={isMaximized ? 'Restaurar' : 'Maximizar'} aria-label={isMaximized ? 'Restaurar ventana' : 'Maximizar ventana'} className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer app-no-drag">
+                    {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
+                </button>
+                <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void close(); }} title="Cerrar" aria-label="Cerrar" className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-[#fe2c55] hover:bg-[#fe2c55]/10 transition-colors cursor-pointer app-no-drag">
+                    <CloseIcon />
+                </button>
+            </div>
+        </div>
+    );
 }
 
 export function Header({
@@ -188,8 +248,6 @@ export function Header({
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const menuRef = useRef<HTMLDivElement>(null);
-    const dragRef = useRef<HTMLDivElement>(null);
-    const { isMaximized, minimize, maximize, close, startDragging } = useWindowControls();
 
     // Cerrar menú al hacer clic fuera
     useEffect(() => {
@@ -240,63 +298,8 @@ export function Header({
 
     return (
         <div className="w-full sticky top-0 z-50 pointer-events-none">
-            {/* Custom Window Titlebar — Drag Region + Window Controls */}
-            <div
-                ref={dragRef}
-                className="w-full flex items-center justify-between h-10 px-4 pointer-events-auto app-drag-region"
-                style={{
-                    background: 'rgba(10, 11, 16, 0.6)',
-                    backdropFilter: 'blur(40px)',
-                    WebkitBackdropFilter: 'blur(40px)',
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-                    userSelect: 'none',
-                }}
-                onDoubleClick={maximize}
-                onMouseDown={(e) => {
-                    if (e.button === 0 && dragRef.current === e.currentTarget) {
-                        startDragging();
-                    }
-                }}
-            >
-                {/* App Title / Brand */}
-                <div className="flex items-center gap-2.5 pointer-events-none app-no-drag">
-                    <TikTokIcon size={18} className="drop-shadow-[0_0_8px_rgba(254,44,85,0.5)]" />
-                    <span className="font-black tracking-[0.15em] uppercase text-white/90 text-[11px] drop-shadow-md">
-                        PULSARIA
-                    </span>
-                </div>
-
-                {/* Window Controls — Minimize, Maximize, Close */}
-                <div className="flex items-center gap-1 pointer-events-auto app-no-drag">
-                    <button
-                        type="button"
-                        onClick={minimize}
-                        title="Minimizar"
-                        className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all cursor-pointer app-no-drag"
-                    >
-                        <MinimizeIcon />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={maximize}
-                        title={isMaximized ? 'Restaurar' : 'Maximizar'}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all cursor-pointer app-no-drag"
-                    >
-                        {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={close}
-                        title="Cerrar"
-                        className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-[#fe2c55] hover:bg-[#fe2c55]/10 transition-all cursor-pointer app-no-drag"
-                    >
-                        <CloseIcon />
-                    </button>
-                </div>
-            </div>
-
             {/* Header Content — Search, View/Sort, Settings */}
-            <div className="w-full px-8 pt-4 pb-3 flex items-center justify-between sticky top-10 z-40 self-start pointer-events-none">
+            <div className="w-full px-8 pt-4 pb-3 flex items-center justify-between sticky top-0 z-40 self-start pointer-events-none">
                 {/* 1. Contador de Tiktoks */}
                 <div
                     onClick={() => {
@@ -335,18 +338,18 @@ export function Header({
                 <div className="flex items-center gap-3 pointer-events-auto">
                     {/* Search Bar TikTok Pink Estilizada y Simple */}
                     <div 
-                        className="relative flex items-center h-10 px-3.5 rounded-[14px] transition-all duration-300 w-64 sm:w-80 md:w-96 focus-within:w-72 sm:focus-within:w-96 md:focus-within:w-[440px] cursor-text"
+                        className="group/search relative flex items-center h-10 px-3 rounded-[14px] transition-[width] duration-300 w-10 hover:w-80 focus-within:w-80 cursor-text overflow-hidden"
                         style={{
-                            ...btnBase,
+                            height: '40px',
                             justifyContent: 'flex-start',
                             gap: '10px',
-                            border: '1px solid rgba(254, 44, 85, 0.35)',
-                            background: 'linear-gradient(135deg, rgba(254, 44, 85, 0.08) 0%, rgba(10, 11, 16, 0.75) 100%)',
-                            boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.15), 0 8px 20px rgba(0,0,0,0.5)',
+                            border: 'none',
+                            background: '#fe2c55',
+                            boxShadow: 'none',
                         }}
                         onClick={() => inputRef.current?.focus()}
                     >
-                        <span className="flex-shrink-0 flex items-center text-[#fe2c55] drop-shadow-[0_0_8px_rgba(254,44,85,0.6)]">
+                        <span className="flex-shrink-0 flex items-center text-white">
                             <SearchIcon />
                         </span>
                         <input
@@ -361,7 +364,7 @@ export function Header({
                                 }
                             }}
                             placeholder="Buscar por contenido, autor, tema o transcripción..."
-                            className="flex-1 bg-transparent outline-none font-medium text-xs text-white placeholder-white/45 min-w-0"
+                            className="min-w-0 flex-1 bg-transparent text-xs font-medium text-white placeholder-white/75 outline-none opacity-0 pointer-events-none transition-opacity duration-200 group-hover/search:opacity-100 group-hover/search:pointer-events-auto group-focus-within/search:opacity-100 group-focus-within/search:pointer-events-auto"
                         />
                         {query.trim().length > 0 && (
                             <button
@@ -371,7 +374,7 @@ export function Header({
                                     setQuery('');
                                     if (onSearchClear) onSearchClear();
                                 }}
-                                className="text-white/40 hover:text-[#fe2c55] transition-colors cursor-pointer bg-transparent border-none p-1 flex-shrink-0"
+                                className="flex-shrink-0 cursor-pointer border-none bg-transparent p-1 text-white/80 transition-colors hover:text-white"
                                 title="Limpiar búsqueda"
                             >
                                 <XIcon />
@@ -401,11 +404,11 @@ export function Header({
                             className="group"
                         >
                             <motion.span
-                                animate={{ rotate: viewMenuOpen ? 90 : 0, color: viewMenuOpen ? '#25f4ee' : 'rgba(255,255,255,0.6)' }}
-                                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                                animate={{ rotate: 0, color: viewMenuOpen ? '#25f4ee' : 'rgba(255,255,255,0.6)' }}
+                                transition={{ duration: 0.2 }}
                                 style={{ display: 'flex', filter: viewMenuOpen ? 'drop-shadow(0 0 8px rgba(37,244,238,0.6))' : 'none' }}
                             >
-                                <ViewSlidersIcon />
+                                <ViewOrganizationIcon />
                             </motion.span>
                         </motion.button>
 
@@ -428,7 +431,7 @@ export function Header({
                                 {/* Cabecera del Menú */}
                                 <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
                                     <div className="flex items-center gap-2">
-                                        <FaSliders size={11} className="text-[#25f4ee]" />
+                                        <ViewOrganizationIcon />
                                         <span className="font-bold uppercase tracking-[0.2em] text-white/50 text-[10px]">
                                             Vista y Ordenamiento
                                         </span>

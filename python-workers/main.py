@@ -132,13 +132,22 @@ def process_single_job(job_id: int, url: str) -> None:
             name="transcription_complete",
             job_id=job_id,
             step="transcription_complete",
-            progress=90,
+            progress=88,
             metadata=media_metadata,
             text=transcript_text,
             segments=segments
         )
 
         # ------------------- 4. VISUAL ANALYSIS PHASE -------------------
+        emit_event(
+            name="visual_analysis_started",
+            job_id=job_id,
+            step="visual_analysis",
+            progress=90,
+            metadata=media_metadata,
+            text=transcript_text,
+            segments=segments,
+        )
         try:
             visual_result = analyze_video(
                 video_path=video_path,
@@ -153,7 +162,7 @@ def process_single_job(job_id: int, url: str) -> None:
                 name="visual_analysis",
                 job_id=job_id,
                 step="visual_analysis",
-                progress=95,
+                progress=97,
                 metadata=media_metadata,
                 text=transcript_text,
                 segments=segments,
@@ -177,7 +186,7 @@ def process_single_job(job_id: int, url: str) -> None:
                 name="visual_analysis",
                 job_id=job_id,
                 step="visual_analysis",
-                progress=95,
+                progress=97,
                 metadata=media_metadata,
                 text=transcript_text,
                 segments=segments,

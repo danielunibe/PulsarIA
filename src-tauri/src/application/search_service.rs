@@ -143,10 +143,12 @@ impl SearchService {
     }
 
     pub fn snapshot_index(&self) -> Result<(), String> {
-        self.query_coordinator.save_index("data/vector_index.hnsw")
+        let path = crate::db::data_dir_path().join("vector_index.hnsw");
+        self.query_coordinator.save_index(&path.to_string_lossy())
     }
 
     pub fn load_index(&self) -> Result<(), String> {
-        self.query_coordinator.load_index("data/vector_index.hnsw")
+        let path = crate::db::data_dir_path().join("vector_index.hnsw");
+        self.query_coordinator.load_index(&path.to_string_lossy())
     }
 }

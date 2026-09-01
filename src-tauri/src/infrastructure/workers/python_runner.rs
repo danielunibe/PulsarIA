@@ -85,14 +85,18 @@ impl PythonWorker {
         );
         let script = Path::new(script_path);
         let worker_dir = script.parent().unwrap_or_else(|| Path::new("."));
-        let mut child = Command::new(python_path)
+        let mut command = Command::new(python_path);
+        command
             .arg(script_path)
             .current_dir(worker_dir)
             .env("PYTHONPATH", worker_dir)
             .env("PYTHONUNBUFFERED", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        command.creation_flags(0x08000000);
+        let mut child = command
             .spawn()
             .map_err(|error| PythonRunnerError::ProcessSpawnError(error.to_string()))?;
 

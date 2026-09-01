@@ -83,7 +83,7 @@ export function useSemanticConfig() {
   }, []);
 
   useEffect(() => {
-    fetchAllStates();
+    queueMicrotask(() => { void fetchAllStates(); });
 
     let unlistenFn: (() => void) | undefined;
     import('@tauri-apps/api/event').then(({ listen: tauriListen }) => {

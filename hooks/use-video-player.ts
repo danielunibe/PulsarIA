@@ -114,8 +114,10 @@ export function useVideoPlayer({
             e.stopPropagation();
             onPlayStop?.();
             videoRef.current?.pause();
+            return;
         }
-    }, [isActive, isFullPlaying, onPlayStop]);
+        onPlayStart?.();
+    }, [isActive, isFullPlaying, onPlayStart, onPlayStop]);
 
     const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();

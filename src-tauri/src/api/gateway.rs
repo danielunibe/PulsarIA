@@ -289,14 +289,74 @@ async fn get_transcript_handler(
 async fn get_jobs_handler(
     State(state): State<ApiState>,
 ) -> Result<Json<Vec<crate::domain::models::JobRecord>>, (StatusCode, String)> {
-    let jobs = state.job_repo.get_all_jobs().map_err(|e| {
+    let mut jobs = state.job_repo.get_all_jobs().map_err(|e| {
         warn!("API Get Jobs failed: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to retrieve jobs".to_string(),
         )
     })?;
+    for job in &mut jobs {
+        if job
+            .video_path
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .is_some_and(|path| !path.is_file())
+        {
+            job.video_path = None;
+        }
+    }
     Ok(Json(jobs))
+}
+
+async fn retry_job_handler(
+    State(state): State<ApiState>,
+    Path(job_id): Path<i64>,
+) -> Result<Json<IngestResponse>, (StatusCode, String)> {
+    let job_url = {
+        let connection = state
+            .job_repo
+            .get_connection()
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
+        let connection = connection.lock().map_err(|_| {
+            (StatusCode::INTERNAL_SERVER_ERROR, "Database mutex poisoned".to_string())
+        })?;
+        let job = crate::db::get_job_by_id(&connection, job_id)
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "Job not found".to_string()))?;
+        if !matches!(
+            job.status.to_lowercase().as_str(),
+            "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
+        ) {
+            return Err((
+                StatusCode::CONFLICT,
+                "Job is not available for retry".to_string(),
+            ));
+        }
+        let processing_root = std::env::var_os("PULSAR_DOWNLOAD_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(crate::db::data_dir_path)
+            .join("processing");
+        crate::db::cleanup_media_files(&connection, job_id, &processing_root)
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+        crate::db::reset_job_for_retry(&connection, job_id)
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+        job.url
+    };
+
+    if let Err(error) = state.queue_service.dispatch(job_id, job_url).await {
+        // El retry debe ser transaccional desde la perspectiva del usuario:
+        // si la cola rechaza el despacho, no dejamos el registro atascado en
+        // queued ni obligamos a esperar al scheduler de mantenimiento.
+        if let Ok(connection) = state.job_repo.get_connection() {
+            if let Ok(connection) = connection.lock() {
+                let _ = crate::db::update_job_error(&connection, job_id, "error", &error);
+            }
+        }
+        return Err((StatusCode::SERVICE_UNAVAILABLE, error));
+    }
+
+    Ok(Json(IngestResponse { job_id, status: "queued".to_string() }))
 }
 
 async fn get_playlists_handler(
@@ -461,6 +521,8 @@ async fn get_julia_pending_handler(
             thumbnail: j.thumbnail,
             duration: j.duration,
             video_path: j.video_path,
+            keep_status: j.keep_status,
+            platform: j.platform,
             error_message: j.error_message,
             visual_analysis: j.visual_analysis,
             instructional_guide: j.instructional_guide,
@@ -492,11 +554,13 @@ async fn julia_ack_handler(
 }
 
 pub async fn start_api_server(port: u16, state: ApiState) {
-    // Configurar CORS para permitir requests desde el frontend Next.js (localhost:3000)
+    // Configurar CORS para desarrollo Next.js y el servidor estático de producción.
     let cors = CorsLayer::new()
         .allow_origin([
             "http://localhost:3000".parse::<HeaderValue>().unwrap(),
             "http://127.0.0.1:3000".parse::<HeaderValue>().unwrap(),
+            "http://localhost:3344".parse::<HeaderValue>().unwrap(),
+            "http://127.0.0.1:3344".parse::<HeaderValue>().unwrap(),
         ])
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS, Method::DELETE])
         .allow_headers([
@@ -507,6 +571,7 @@ pub async fn start_api_server(port: u16, state: ApiState) {
     let app = Router::new()
         .route("/api/v1/ingest", post(ingest_handler))
         .route("/api/v1/jobs", get(get_jobs_handler))
+        .route("/api/v1/jobs/:job_id/retry", post(retry_job_handler))
         .route(
             "/api/v1/jobs/:job_id/transcript",
             get(get_transcript_handler),
@@ -542,7 +607,7 @@ pub async fn start_api_server(port: u16, state: ApiState) {
         .route("/api/v1/health", get(health_handler))
         .route("/api/v1/julia/pending", get(get_julia_pending_handler))
         .route("/api/v1/julia/ack", post(julia_ack_handler))
-        // CORS layer - permite al frontend (3000) hablar con el backend (8080)
+        // CORS layer - permite al frontend hablar con el backend (8080)
         .layer(cors)
         .with_state(state);
 

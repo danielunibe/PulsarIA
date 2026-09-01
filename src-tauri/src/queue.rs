@@ -54,10 +54,18 @@ use tokio::process::Command;
 /// `step` (o `event`) indica la fase del pipeline: `download_started`,
 /// `metadata`, `transcribing`, `visual_analysis`, `complete`, `error`, etc.
 pub struct ProgressEvent {
-    #[serde(alias = "job_id")]
+    #[serde(default)]
     pub job: i64,
-    #[serde(alias = "event")]
+    /// Compatibilidad con workers que solo envían `job_id`.
+    #[serde(default, skip_serializing)]
+    pub job_id: Option<i64>,
+    #[serde(default)]
     pub step: String,
+    /// Los workers actuales envían `event` y `step` para mantener compatibilidad
+    /// con los dos consumidores del pipeline. Se normaliza a `step` después de
+    /// deserializar para evitar que Serde trate ambos como un campo duplicado.
+    #[serde(default, skip_serializing)]
+    pub event: Option<String>,
     #[serde(default)]
     pub progress: i32,
     #[serde(default)]
@@ -70,6 +78,17 @@ pub struct ProgressEvent {
     pub visual_analysis: Option<serde_json::Value>,
     #[serde(default)]
     pub instructional_guide: Option<String>,
+}
+
+impl ProgressEvent {
+    fn normalize_compatibility(&mut self) {
+        if self.step.trim().is_empty() {
+            self.step = self.event.take().unwrap_or_default();
+        }
+        if self.job == 0 {
+            self.job = self.job_id.unwrap_or_default();
+        }
+    }
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
@@ -179,14 +198,18 @@ impl QueueManager {
     /// Lista de URLs de videos individuales, deduplicadas y validadas
     /// contra `is_valid_sandbox_url`.
     pub async fn expand_collection(&self, url: &str) -> Result<Vec<String>, String> {
+        let mut command = Command::new(Self::resolve_python_exe());
+        command
+            .arg(Self::resolve_script_path())
+            .arg("--expand-url")
+            .arg(url)
+            .env("PYTHONUNBUFFERED", "1");
+        #[cfg(windows)]
+        command.creation_flags(0x08000000);
+
         let output = tokio::time::timeout(
             Duration::from_secs(120),
-            Command::new(Self::resolve_python_exe())
-                .arg(Self::resolve_script_path())
-                .arg("--expand-url")
-                .arg(url)
-                .env("PYTHONUNBUFFERED", "1")
-                .output(),
+            command.output(),
         )
         .await
         .map_err(|_| "Timed out expanding TikTok collection".to_string())?
@@ -255,7 +278,9 @@ impl QueueManager {
             "job_progress",
             ProgressEvent {
                 job: job_id,
+                job_id: Some(job_id),
                 step: "error".to_string(),
+                event: Some("error".to_string()),
                 progress: 0,
                 metadata: None,
                 text: Some(message.to_string()),
@@ -282,8 +307,85 @@ impl QueueManager {
         self.dispatch_worker_with_config(job_id, url, app, None).await
     }
 
-    /// Bug #40/#45: Worker receives immutable config snapshot at spawn time.
+    /// Despacha el worker nativo con reintentos y backoff observables.
+    ///
+    /// La ventana Tauri usa este gestor directamente, por lo que debe tener
+    /// la misma tolerancia a fallos que el gateway REST. Cada intento se
+    /// espera hasta que SQLite refleje un estado terminal antes de decidir si
+    /// hace backoff, evitando dejar la interfaz en "procesamiento detenido"
+    /// después de un fallo transitorio o un apagado.
     pub async fn dispatch_worker_with_config(
+        &self,
+        job_id: i64,
+        url: String,
+        app: AppHandle,
+        worker_config: Option<crate::WorkerConfig>,
+    ) {
+        let manager = Self {
+            db: self.db.clone(),
+            onnx: self.onnx.clone(),
+            search: self.search.clone(),
+        };
+
+        tokio::spawn(async move {
+            const MAX_ATTEMPTS: u8 = 3;
+            for attempt in 0..MAX_ATTEMPTS {
+                manager
+                    .dispatch_worker_once_with_config(
+                        job_id,
+                        url.clone(),
+                        app.clone(),
+                        worker_config.clone(),
+                    )
+                    .await;
+
+                let completed = loop {
+                    let status = manager
+                        .db
+                        .lock()
+                        .ok()
+                        .and_then(|connection| {
+                            crate::db::get_job_by_id(&connection, job_id)
+                                .ok()
+                                .flatten()
+                                .map(|job| job.status.to_lowercase())
+                        });
+
+                    match status.as_deref() {
+                        Some("complete") | Some("completed") | Some("done") => break true,
+                        Some("error")
+                        | Some("error_dlq")
+                        | Some("failed")
+                        | Some("failure")
+                        | Some("cancelled")
+                        | Some("canceled") => break false,
+                        Some(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+                        None => break false,
+                    }
+                };
+
+                if completed || attempt + 1 >= MAX_ATTEMPTS {
+                    return;
+                }
+
+                if let Ok(connection) = manager.db.lock() {
+                    let _ = crate::db::cleanup_media_files(
+                        &connection,
+                        job_id,
+                        &Self::processing_root(),
+                    );
+                    let _ = crate::db::reset_job_for_retry(&connection, job_id);
+                }
+
+                let backoff_seconds = 2_u64.pow((attempt as u32 + 1).min(5));
+                tokio::time::sleep(Duration::from_secs(backoff_seconds)).await;
+            }
+        });
+    }
+
+    /// Ejecuta un único intento. El supervisor anterior se encarga de
+    /// observar el estado y repetirlo cuando corresponde.
+    async fn dispatch_worker_once_with_config(
         &self,
         job_id: i64,
         url: String,
@@ -297,7 +399,7 @@ impl QueueManager {
         // ── INSTRUMENTACIÓN: log de cada frontera crítica ──
         eprintln!("[DISPATCH] job_id={} DISPATCH_ENTER url={}", job_id, url);
 
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             let python_exe = Self::resolve_python_exe();
             let script_path = Self::resolve_script_path();
             let worker_dir = script_path
@@ -316,18 +418,18 @@ impl QueueManager {
 
             eprintln!("[DISPATCH] job_id={} SPAWN_ATTEMPT", job_id);
             // Bug #40/#45 FIX: Use config snapshot if provided, else fall back to env vars
-            let (formats_json, download_dir, cookies_browser) = match &worker_config {
+            let (formats_json, download_dir, cookies_browser, processing) = match &worker_config {
                 Some(cfg) => {
                     let fmt = serde_json::to_string(&cfg.formats)
                         .unwrap_or_else(|_| "[\"mp4\",\"mp3\",\"txt\"]".to_string());
-                    (fmt, cfg.download_dir.clone(), cfg.cookies_browser.clone())
+                    (fmt, cfg.download_dir.clone(), cfg.cookies_browser.clone(), cfg.processing.clone())
                 }
                 None => {
                     let fmt = std::env::var("PULSAR_FORMATS")
                         .unwrap_or_else(|_| "[\"mp4\",\"mp3\",\"txt\"]".to_string());
                     let dl = std::env::var("PULSAR_DOWNLOAD_DIR").unwrap_or_default();
                     let cb = std::env::var("PULSAR_COOKIES_FROM_BROWSER").unwrap_or_default();
-                    (fmt, dl, cb)
+                    (fmt, dl, cb, crate::commands::ProcessingSettings::default())
                 }
             };
 
@@ -342,7 +444,13 @@ impl QueueManager {
                 .env("PYTHONUNBUFFERED", "1")
                 .env("PULSAR_FORMATS", &formats_json)
                 .env("PULSAR_DOWNLOAD_DIR", &download_dir)
-                .env("PULSAR_COOKIES_FROM_BROWSER", &cookies_browser);
+                .env("PULSAR_COOKIES_FROM_BROWSER", &cookies_browser)
+                .env("PULSAR_PROCESSING_QUALITY", processing.quality.to_string())
+                .env("WHISPER_MODEL", &processing.whisper_model)
+                .env("WHISPER_DEVICE", &processing.device)
+                .env("WHISPER_COMPUTE_TYPE", &processing.compute_type);
+            #[cfg(windows)]
+            cmd.creation_flags(0x08000000);
 
             let spawn_result = cmd
                 .stdin(Stdio::null())
@@ -432,13 +540,15 @@ impl QueueManager {
 
                 eprintln!("[DISPATCH] job_id={} RAW_EVENT: {}", job_id, &trimmed[..trimmed.len().min(200)]);
 
-                let event = match serde_json::from_str::<ProgressEvent>(trimmed) {
+                let mut event = match serde_json::from_str::<ProgressEvent>(trimmed) {
                     Ok(event) => event,
                     Err(error) => {
                         eprintln!("[DISPATCH] job_id={} PARSE_ERROR: {} raw={}", job_id, error, &trimmed[..trimmed.len().min(100)]);
                         continue;
                     }
                 };
+
+                event.normalize_compatibility();
 
                 if event.job != job_id {
                     eprintln!("[DISPATCH] job_id={} JOB_MISMATCH expected={} got={}", job_id, job_id, event.job);
@@ -581,7 +691,9 @@ impl QueueManager {
                 Self::set_job_error(&db_ref, job_id, &message);
                 let _ = app.emit("job_progress", ProgressEvent {
                     job: job_id,
+                    job_id: Some(job_id),
                     step: "error".to_string(),
+                    event: Some("error".to_string()),
                     progress: 0,
                     metadata: None,
                     text: Some(message.clone()),
@@ -732,18 +844,20 @@ impl QueueManager {
                 return;
             }
 
-            if let Some(search) = &search_ref {
-                if let Err(error) = search.index_document(job_id, &full_text) {
-                    let message = format!("Failed indexing transcript in HNSW: {}", error);
-                    Self::set_job_error(&db_ref, job_id, &message);
-                    Self::emit_error(&app, job_id, &message).await;
-                    return;
-                }
-                if let Err(error) = search.snapshot_index() {
-                    let message = format!("Failed snapshotting transcript HNSW index: {}", error);
-                    Self::set_job_error(&db_ref, job_id, &message);
-                    Self::emit_error(&app, job_id, &message).await;
-                    return;
+            if !full_text.trim().is_empty() {
+                if let Some(search) = &search_ref {
+                    if let Err(error) = search.index_document(job_id, &full_text) {
+                        let message = format!("Failed indexing transcript in HNSW: {}", error);
+                        Self::set_job_error(&db_ref, job_id, &message);
+                        Self::emit_error(&app, job_id, &message).await;
+                        return;
+                    }
+                    if let Err(error) = search.snapshot_index() {
+                        let message = format!("Failed snapshotting transcript HNSW index: {}", error);
+                        Self::set_job_error(&db_ref, job_id, &message);
+                        Self::emit_error(&app, job_id, &message).await;
+                        return;
+                    }
                 }
             }
 
@@ -782,17 +896,36 @@ impl QueueManager {
             let _ = child.wait().await;
             eprintln!("[DISPATCH] job_id={} WORKER_EXIT", job_id);
         });
+    }
+}
 
-        // ── INSTRUMENTACIÓN: capturar resultado del JoinHandle ──
-        match handle.await {
-            Ok(()) => eprintln!("[DISPATCH] job_id={} WORKER_TASK_COMPLETED", job_id),
-            Err(e) => {
-                if e.is_panic() {
-                    eprintln!("[DISPATCH] job_id={} WORKER_TASK_PANIC: {:?}", job_id, e);
-                } else {
-                    eprintln!("[DISPATCH] job_id={} WORKER_TASK_CANCELLED: {:?}", job_id, e);
-                }
-            }
-        }
+#[cfg(test)]
+mod tests {
+    use super::ProgressEvent;
+
+    #[test]
+    fn accepts_worker_events_with_legacy_and_current_keys() {
+        let event: ProgressEvent = serde_json::from_str(
+            r#"{"event":"download_started","step":"downloading","job":42,"job_id":42,"progress":15}"#,
+        )
+        .expect("worker event should deserialize");
+        let mut event = event;
+        event.normalize_compatibility();
+
+        assert_eq!(event.job, 42);
+        assert_eq!(event.step, "downloading");
+    }
+
+    #[test]
+    fn accepts_legacy_event_without_current_keys() {
+        let event: ProgressEvent = serde_json::from_str(
+            r#"{"event":"completed","job_id":7,"progress":100}"#,
+        )
+        .expect("legacy worker event should deserialize");
+        let mut event = event;
+        event.normalize_compatibility();
+
+        assert_eq!(event.job, 7);
+        assert_eq!(event.step, "completed");
     }
 }

@@ -40,6 +40,8 @@ impl JobRepository for SqliteRepo {
                 thumbnail: j.thumbnail,
                 duration: j.duration,
                 video_path: j.video_path,
+                keep_status: j.keep_status,
+                platform: j.platform,
                 error_message: j.error_message,
                 visual_analysis: j.visual_analysis,
                 instructional_guide: j.instructional_guide,

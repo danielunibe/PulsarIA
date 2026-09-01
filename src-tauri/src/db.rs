@@ -1,5 +1,4 @@
-use rusqlite::{params, Connection, OptionalExtension, Result};
-use std::path::Path;
+use rusqlite::{params, Connection, OptionalExtension, Result, Row};
 use std::fs;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -57,13 +56,15 @@ pub struct PlaylistRecord {
 }
 
 pub fn init_db() -> Result<Connection> {
-    // 1. Verify folder structure for the DB
-    let data_dir = Path::new("../data");
-    if !data_dir.exists() {
-        fs::create_dir_all(data_dir).expect("Failed to create data directory");
-    }
+    // Keep all writable application data in one configurable location. In
+    // development this resolves to the repository's data/ directory; in an
+    // installed build it falls back to the user's application data folder.
+    let data_dir = data_dir_path();
+    fs::create_dir_all(&data_dir)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
 
     let conn = Connection::open(data_dir.join("library.db"))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     
     conn.execute(
         "CREATE TABLE IF NOT EXISTS jobs (
@@ -71,6 +72,7 @@ pub fn init_db() -> Result<Connection> {
             url TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'queued',
             progress INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
         [],
@@ -90,6 +92,9 @@ pub fn init_db() -> Result<Connection> {
             upload_date TEXT,
             keep_status TEXT DEFAULT 'none',
             platform TEXT,
+            julia_exported BOOLEAN DEFAULT 0,
+            visual_analysis TEXT,
+            instructional_guide TEXT,
             FOREIGN KEY(job_id) REFERENCES jobs(id)
         )",
         [],
@@ -98,6 +103,10 @@ pub fn init_db() -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE media ADD COLUMN keep_status TEXT DEFAULT 'none'", []);
     let _ = conn.execute("ALTER TABLE media ADD COLUMN platform TEXT", []);
     let _ = conn.execute("ALTER TABLE media ADD COLUMN julia_exported BOOLEAN DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE media ADD COLUMN visual_analysis TEXT", []);
+    let _ = conn.execute("ALTER TABLE media ADD COLUMN instructional_guide TEXT", []);
+
+    let _ = conn.execute("ALTER TABLE jobs ADD COLUMN error_message TEXT", []);
 
     conn.execute("CREATE TABLE IF NOT EXISTS transcript_embeddings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,6 +133,8 @@ pub fn init_db() -> Result<Connection> {
     )?;
 
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_segments_job_id ON transcript_segments(job_id)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_job_id ON transcript_embeddings(job_id)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_media_job_id ON media(job_id)", []);
 
 
     conn.execute(
@@ -157,8 +168,43 @@ pub fn init_db() -> Result<Connection> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS collection_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            url TEXT NOT NULL UNIQUE,
+            last_synced_at DATETIME,
+            active BOOLEAN NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
     Ok(conn)
 }
+
+fn job_record_from_row(row: &Row<'_>) -> rusqlite::Result<JobRecord> {
+    Ok(JobRecord {
+        id: row.get(0)?,
+        url: row.get(1)?,
+        status: row.get(2)?,
+        progress: row.get(3)?,
+        created_at: row.get(4)?,
+        error_message: row.get(5)?,
+        title: row.get(6)?,
+        author: row.get(7)?,
+        thumbnail: row.get(8)?,
+        duration: row.get(9)?,
+        video_path: row.get(10)?,
+        keep_status: row.get(11)?,
+        platform: row.get(12)?,
+        visual_analysis: row.get(13)?,
+        instructional_guide: row.get(14)?,
+    })
+}
+
+const JOB_SELECT_COLUMNS: &str = "j.id, j.url, j.status, j.progress, j.created_at,
+    j.error_message, m.title, m.author, m.thumbnail, m.duration, m.video_path,
+    m.keep_status, m.platform, m.visual_analysis, m.instructional_guide";
 
 pub fn insert_job(conn: &Connection, url: &str) -> Result<i64> {
     conn.execute(
@@ -169,33 +215,14 @@ pub fn insert_job(conn: &Connection, url: &str) -> Result<i64> {
 }
 
 pub fn get_all_jobs(conn: &Connection) -> Result<Vec<JobRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT j.id, j.url, j.status, j.progress, j.created_at,
-                m.title, m.author, m.thumbnail, m.duration, m.video_path, m.keep_status, m.platform
-         FROM jobs j
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM jobs j
          LEFT JOIN media m ON j.id = m.job_id
-         ORDER BY j.id DESC"
-    )?;
+         ORDER BY j.id DESC",
+        JOB_SELECT_COLUMNS
+    ))?;
     
-    let job_iter = stmt.query_map([], |row| {
-        Ok(JobRecord {
-            id: row.get(0)?,
-            url: row.get(1)?,
-            status: row.get(2)?,
-            progress: row.get(3)?,
-            created_at: row.get(4)?,
-            title: row.get(5)?,
-            author: row.get(6)?,
-            thumbnail: row.get(7)?,
-            duration: row.get(8)?,
-            video_path: row.get(9)?,
-            keep_status: row.get(10)?,
-            platform: row.get(11)?,
-            error_message: None,
-            visual_analysis: None,
-            instructional_guide: None,
-        })
-    })?;
+    let job_iter = stmt.query_map([], job_record_from_row)?;
 
     let mut jobs = Vec::new();
     for job in job_iter {
@@ -206,7 +233,9 @@ pub fn get_all_jobs(conn: &Connection) -> Result<Vec<JobRecord>> {
 
 pub fn update_job_status(conn: &Connection, id: i64, status: &str, progress: i32) -> Result<()> {
     conn.execute(
-        "UPDATE jobs SET status = ?1, progress = ?2 WHERE id = ?3",
+        "UPDATE jobs SET status = ?1, progress = ?2,
+            error_message = CASE WHEN ?1 IN ('error', 'error_dlq') THEN error_message ELSE NULL END
+         WHERE id = ?3",
         params![status, progress, id],
     )?;
     Ok(())
@@ -248,10 +277,10 @@ pub fn insert_or_update_media_metadata(
             thumbnail = excluded.thumbnail,
             duration = excluded.duration,
             upload_date = excluded.upload_date,
-            video_path = excluded.video_path,
-            audio_path = excluded.audio_path,
-            transcript_path = excluded.transcript_path,
-            platform = excluded.platform",
+            video_path = COALESCE(NULLIF(excluded.video_path, ''), media.video_path),
+            audio_path = COALESCE(NULLIF(excluded.audio_path, ''), media.audio_path),
+            transcript_path = COALESCE(NULLIF(excluded.transcript_path, ''), media.transcript_path),
+            platform = COALESCE(NULLIF(excluded.platform, ''), media.platform)",
         params![job_id, title, author, thumbnail, duration, upload_date, video_path, audio_path, transcript_path, platform],
     )?;
     Ok(())
@@ -349,27 +378,53 @@ pub fn search_embeddings(conn: &Connection, query_vec: &[f32], limit: usize, min
 
 pub fn cluster_videos_by_similarity(conn: &Connection, threshold: f32, min_cluster_size: usize) -> Result<Vec<Vec<i64>>> {
     let mut stmt = conn.prepare(
-        "SELECT te.job_id, AVG(te.embedding_vector) as avg_emb FROM transcript_embeddings te
+        "SELECT te.job_id, te.embedding_vector FROM transcript_embeddings te
          JOIN jobs j ON j.id = te.job_id
          WHERE j.status = 'complete'
-         GROUP BY te.job_id"
+         ORDER BY te.job_id, te.chunk_index"
     )?;
     
-    let mut job_embeddings: Vec<(i64, Vec<f32>)> = Vec::new();
+    let mut grouped_embeddings: std::collections::BTreeMap<i64, Vec<Vec<f32>>> =
+        std::collections::BTreeMap::new();
     let rows = stmt.query_map([], |row| {
         let job_id: i64 = row.get(0)?;
         let blob: Vec<u8> = row.get(1)?;
-        let mut embedding = Vec::with_capacity(blob.len() / 4);
-        for chunk in blob.chunks_exact(4) {
-            embedding.push(f32::from_ne_bytes(chunk.try_into().unwrap()));
+        if blob.len() % 4 != 0 {
+            return Err(rusqlite::Error::InvalidColumnType(
+                1,
+                "embedding_vector".to_string(),
+                rusqlite::types::Type::Blob,
+            ));
         }
+        let embedding = blob
+            .chunks_exact(4)
+            .map(|chunk| f32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .collect::<Vec<_>>();
         Ok((job_id, embedding))
     })?;
     
     for row in rows {
-        if let Ok((job_id, embedding)) = row {
-            job_embeddings.push((job_id, embedding));
+        let (job_id, embedding) = row?;
+        grouped_embeddings.entry(job_id).or_default().push(embedding);
+    }
+
+    let mut job_embeddings: Vec<(i64, Vec<f32>)> = Vec::with_capacity(grouped_embeddings.len());
+    for (job_id, embeddings) in grouped_embeddings {
+        let Some(first) = embeddings.first() else { continue };
+        if first.is_empty() || embeddings.iter().any(|embedding| embedding.len() != first.len()) {
+            continue;
         }
+        let mut centroid = vec![0.0f32; first.len()];
+        for embedding in &embeddings {
+            for (index, value) in embedding.iter().enumerate() {
+                centroid[index] += *value;
+            }
+        }
+        let count = embeddings.len() as f32;
+        for value in &mut centroid {
+            *value /= count;
+        }
+        job_embeddings.push((job_id, centroid));
     }
     
     let mut clusters: Vec<Vec<i64>> = Vec::new();
@@ -482,35 +537,17 @@ pub fn remove_job_from_playlist(conn: &Connection, playlist_id: i64, job_id: i64
 }
 
 pub fn get_playlist_jobs(conn: &Connection, playlist_id: i64) -> Result<Vec<JobRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT j.id, j.url, j.status, j.progress, j.created_at,
-                m.title, m.author, m.thumbnail, m.duration, m.video_path, m.keep_status, m.platform
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {}
          FROM playlist_items pi
          JOIN jobs j ON pi.job_id = j.id
          LEFT JOIN media m ON j.id = m.job_id
          WHERE pi.playlist_id = ?1
-         ORDER BY pi.added_at DESC"
-    )?;
+         ORDER BY pi.added_at DESC",
+        JOB_SELECT_COLUMNS
+    ))?;
 
-    let job_iter = stmt.query_map(params![playlist_id], |row| {
-        Ok(JobRecord {
-            id: row.get(0)?,
-            url: row.get(1)?,
-            status: row.get(2)?,
-            progress: row.get(3)?,
-            created_at: row.get(4)?,
-            title: row.get(5)?,
-            author: row.get(6)?,
-            thumbnail: row.get(7)?,
-            duration: row.get(8)?,
-            video_path: row.get(9)?,
-            keep_status: row.get(10)?,
-            platform: row.get(11)?,
-            error_message: None,
-            visual_analysis: None,
-            instructional_guide: None,
-        })
-    })?;
+    let job_iter = stmt.query_map(params![playlist_id], job_record_from_row)?;
 
     let mut jobs = Vec::new();
     for job in job_iter {
@@ -528,36 +565,18 @@ pub fn delete_playlist(conn: &Connection, playlist_id: i64) -> Result<()> {
 
 
 pub fn get_julia_ready_jobs(conn: &Connection) -> Result<Vec<JobRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT j.id, j.url, j.status, j.progress, j.created_at,
-                m.title, m.author, m.thumbnail, m.duration, m.video_path, m.keep_status, m.platform
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {}
          FROM jobs j
          JOIN media m ON j.id = m.job_id
          LEFT JOIN transcript_embeddings te ON j.id = te.job_id
          WHERE m.julia_exported = 0 AND j.status = 'complete'
          GROUP BY j.id
-         HAVING COUNT(te.id) > 0"
-    )?;
+         HAVING COUNT(te.id) > 0",
+        JOB_SELECT_COLUMNS
+    ))?;
     
-    let job_iter = stmt.query_map([], |row| {
-        Ok(JobRecord {
-            id: row.get(0)?,
-            url: row.get(1)?,
-            status: row.get(2)?,
-            progress: row.get(3)?,
-            created_at: row.get(4)?,
-            title: row.get(5)?,
-            author: row.get(6)?,
-            thumbnail: row.get(7)?,
-            duration: row.get(8)?,
-            video_path: row.get(9)?,
-            keep_status: row.get(10)?,
-            platform: row.get(11)?,
-            error_message: None,
-            visual_analysis: None,
-            instructional_guide: None,
-        })
-    })?;
+    let job_iter = stmt.query_map([], job_record_from_row)?;
 
     let mut jobs = Vec::new();
     for job in job_iter {
@@ -575,9 +594,36 @@ pub fn mark_julia_exported(conn: &Connection, job_id: i64) -> Result<()> {
 }
 
 pub fn data_dir_path() -> std::path::PathBuf {
-    std::env::var_os("PULSAR_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("../data"))
+    if let Some(configured) = std::env::var_os("PULSAR_DATA_DIR") {
+        return std::path::PathBuf::from(configured);
+    }
+
+    // Keep the repository layout convenient during development without
+    // writing beside an installed executable in a protected directory.
+    if let Ok(current_dir) = std::env::current_dir() {
+        if current_dir.join("package.json").exists()
+            && current_dir.join("src-tauri").is_dir()
+        {
+            return current_dir.join("data");
+        }
+    }
+
+    #[cfg(windows)]
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        return std::path::PathBuf::from(app_data).join("Pulsar Eventide");
+    }
+
+    if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+        return std::path::PathBuf::from(data_home).join("pulsar-eventide");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return std::path::PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("pulsar-eventide");
+    }
+
+    std::path::PathBuf::from("data")
 }
 
 pub fn find_job_id_by_url(conn: &Connection, url: &str) -> Result<Option<i64>> {
@@ -591,32 +637,14 @@ pub fn find_job_id_by_url(conn: &Connection, url: &str) -> Result<Option<i64>> {
 }
 
 pub fn get_job_by_id(conn: &Connection, id: i64) -> Result<Option<JobRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT j.id, j.url, j.status, j.progress, j.created_at,
-                m.title, m.author, m.thumbnail, m.duration, m.video_path, m.keep_status, m.platform
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {}
          FROM jobs j
          LEFT JOIN media m ON j.id = m.job_id
          WHERE j.id = ?1"
-    )?;
-    stmt.query_row(params![id], |row| {
-        Ok(JobRecord {
-            id: row.get(0)?,
-            url: row.get(1)?,
-            status: row.get(2)?,
-            progress: row.get(3)?,
-            created_at: row.get(4)?,
-            title: row.get(5)?,
-            author: row.get(6)?,
-            thumbnail: row.get(7)?,
-            duration: row.get(8)?,
-            video_path: row.get(9)?,
-            keep_status: row.get(10)?,
-            platform: row.get(11)?,
-            error_message: None,
-            visual_analysis: None,
-            instructional_guide: None,
-        })
-    }).optional()
+        , JOB_SELECT_COLUMNS
+    ))?;
+    stmt.query_row(params![id], job_record_from_row).optional()
 }
 
 pub fn get_all_job_ids(conn: &Connection) -> Result<Vec<i64>> {
@@ -649,10 +677,10 @@ pub fn get_job_title(conn: &Connection, job_id: i64) -> Result<Option<String>> {
     ).optional()
 }
 
-pub fn update_job_error(conn: &Connection, id: i64, status: &str, _message: &str) -> Result<()> {
+pub fn update_job_error(conn: &Connection, id: i64, status: &str, message: &str) -> Result<()> {
     conn.execute(
-        "UPDATE jobs SET status = ?1 WHERE id = ?2",
-        params![status, id],
+        "UPDATE jobs SET status = ?1, error_message = ?2 WHERE id = ?3",
+        params![status, message, id],
     )?;
     Ok(())
 }
@@ -663,15 +691,107 @@ pub fn clear_transcript_data(conn: &Connection, job_id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn update_media_analysis(_conn: &Connection, _job_id: i64, _visual_analysis: Option<&str>, _instructional_guide: Option<&str>) -> Result<()> {
+pub fn update_media_analysis(
+    conn: &Connection,
+    job_id: i64,
+    visual_analysis: Option<&str>,
+    instructional_guide: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE media SET
+            visual_analysis = COALESCE(?1, visual_analysis),
+            instructional_guide = COALESCE(?2, instructional_guide)
+         WHERE job_id = ?3",
+        params![visual_analysis, instructional_guide, job_id],
+    )?;
     Ok(())
 }
 
-pub fn cleanup_media_files(_conn: &Connection, _job_id: i64, _processing_root: &std::path::Path) -> Result<()> {
+pub struct AutoPlaylistInput<'a> {
+    pub name: &'a str,
+    pub description: Option<&'a str>,
+    pub color: &'a str,
+    pub cover_job_id: Option<i64>,
+    pub topic_keywords: &'a str,
+    pub job_ids: &'a [i64],
+}
+
+pub fn replace_auto_playlists(conn: &Connection, groups: &[AutoPlaylistInput<'_>]) -> Result<Vec<i64>> {
+    conn.execute("DELETE FROM playlists WHERE auto_generated = 1", [])?;
+    let mut ids = Vec::with_capacity(groups.len());
+    for group in groups {
+        conn.execute(
+            "INSERT INTO playlists (name, description, color, auto_generated, cover_job_id, topic_keywords)
+             VALUES (?1, ?2, ?3, 1, ?4, ?5)",
+            params![group.name, group.description, group.color, group.cover_job_id, group.topic_keywords],
+        )?;
+        let playlist_id = conn.last_insert_rowid();
+        for job_id in group.job_ids {
+            conn.execute(
+                "INSERT OR IGNORE INTO playlist_items (playlist_id, job_id) VALUES (?1, ?2)",
+                params![playlist_id, job_id],
+            )?;
+        }
+        ids.push(playlist_id);
+    }
+    Ok(ids)
+}
+
+pub fn reset_job_for_retry(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE jobs SET status = 'queued', progress = 0, error_message = NULL WHERE id = ?1",
+        params![id],
+    )?;
     Ok(())
 }
 
-pub fn register_collection_source(_conn: &Connection, _url: &str) -> Result<()> {
+pub fn cleanup_media_files(
+    conn: &Connection,
+    job_id: i64,
+    processing_root: &std::path::Path,
+) -> Result<()> {
+    let job_dir = processing_root.join(job_id.to_string());
+    match fs::remove_dir_all(&job_dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(error)));
+        }
+    }
+    conn.execute(
+        "UPDATE media SET video_path = NULL, audio_path = NULL, transcript_path = NULL
+         WHERE job_id = ?1",
+        params![job_id],
+    )?;
+    Ok(())
+}
+
+pub fn register_collection_source(conn: &Connection, url: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO collection_sources (url, last_synced_at, active)
+         VALUES (?1, CURRENT_TIMESTAMP, 1)
+         ON CONFLICT(url) DO UPDATE SET last_synced_at = CURRENT_TIMESTAMP, active = 1",
+        params![url],
+    )?;
+    Ok(())
+}
+
+pub fn get_collection_sources_to_sync(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT url FROM collection_sources
+         WHERE active = 1
+           AND (last_synced_at IS NULL OR last_synced_at < datetime('now', '-15 minutes'))
+         ORDER BY id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    rows.collect()
+}
+
+pub fn mark_collection_source_synced(conn: &Connection, url: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE collection_sources SET last_synced_at = CURRENT_TIMESTAMP WHERE url = ?1",
+        params![url],
+    )?;
     Ok(())
 }
 
@@ -726,6 +846,53 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    fn memory_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("Failed to open in-memory SQLite");
+        conn.execute_batch(
+            "CREATE TABLE jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                progress INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE media (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL UNIQUE,
+                video_path TEXT,
+                audio_path TEXT,
+                transcript_path TEXT,
+                title TEXT,
+                author TEXT,
+                thumbnail TEXT,
+                duration INTEGER,
+                upload_date TEXT,
+                keep_status TEXT DEFAULT 'none',
+                platform TEXT,
+                visual_analysis TEXT,
+                instructional_guide TEXT
+            );
+            CREATE TABLE transcript_embeddings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text TEXT NOT NULL,
+                embedding_vector BLOB NOT NULL
+            );
+            CREATE TABLE transcript_segments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                segment_index INTEGER NOT NULL,
+                start_time REAL NOT NULL,
+                end_time REAL NOT NULL,
+                text TEXT NOT NULL
+            );",
+        )
+        .expect("Failed to create test schema");
+        conn
+    }
+
     #[test]
     fn test_real_db_search() {
         let queries = ["video sobre marketing", "como crecer en tiktok", "ideas de contenido viral"];
@@ -733,8 +900,7 @@ mod tests {
         let conn = init_db().expect("Failed to init DB");
         
         // Initialize ONNX Manager
-        let base_dir = std::env::current_dir().expect("Failed to get directroy").parent().unwrap().to_path_buf();
-        let model_dir = base_dir.join("src-tauri").join("assets").join("models").join("all-MiniLM-L6-v2");
+        let model_dir = crate::commands::resolve_model_dir();
         
         let mut onnx_manager = crate::embedding::ONNXModelManager::new(
             &model_dir.join("model.onnx"),
@@ -767,6 +933,75 @@ mod tests {
                 println!("#{}: [Score {:.4}] (Job ID: {}) -> {}", i + 1, r.similarity_score, r.job_id, r.chunk_text);
             }
         }
+    }
+
+    #[test]
+    fn persists_analysis_errors_and_preserves_media_paths() {
+        let conn = memory_db();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/1").unwrap();
+        insert_or_update_media_metadata(
+            &conn,
+            job_id,
+            "Título",
+            "Autor",
+            "https://example.com/thumb.jpg",
+            12,
+            "20260830",
+            "video.mp4",
+            "audio.mp3",
+            "transcript.txt",
+            "tiktok",
+        )
+        .unwrap();
+        update_media_analysis(&conn, job_id, Some("{\"frames\":5}"), Some("Guía")).unwrap();
+
+        // Metadata events after download carry empty paths; they must not
+        // erase the paths already persisted by the pipeline.
+        insert_or_update_media_metadata(
+            &conn,
+            job_id,
+            "Título actualizado",
+            "Autor",
+            "",
+            13,
+            "",
+            "",
+            "",
+            "",
+            "",
+        )
+        .unwrap();
+        update_job_error(&conn, job_id, "error", "worker failed").unwrap();
+
+        let job = get_job_by_id(&conn, job_id).unwrap().unwrap();
+        assert_eq!(job.video_path.as_deref(), Some("video.mp4"));
+        assert_eq!(job.error_message.as_deref(), Some("worker failed"));
+        assert_eq!(job.visual_analysis.as_deref(), Some("{\"frames\":5}"));
+        assert_eq!(job.instructional_guide.as_deref(), Some("Guía"));
+
+        update_job_status(&conn, job_id, "complete", 100).unwrap();
+        let completed = get_job_by_id(&conn, job_id).unwrap().unwrap();
+        assert!(completed.error_message.is_none());
+    }
+
+    #[test]
+    fn clusters_jobs_using_centroid_embeddings() {
+        let conn = memory_db();
+        let first = insert_job(&conn, "https://www.tiktok.com/@test/video/11").unwrap();
+        let second = insert_job(&conn, "https://www.tiktok.com/@test/video/12").unwrap();
+        let third = insert_job(&conn, "https://www.tiktok.com/@test/video/13").unwrap();
+        for job_id in [first, second, third] {
+            update_job_status(&conn, job_id, "complete", 100).unwrap();
+        }
+        insert_transcript_chunk(&conn, first, 0, "uno", &[1.0, 0.0]).unwrap();
+        insert_transcript_chunk(&conn, first, 1, "dos", &[0.9, 0.1]).unwrap();
+        insert_transcript_chunk(&conn, second, 0, "tres", &[0.0, 1.0]).unwrap();
+        insert_transcript_chunk(&conn, third, 0, "cuatro", &[1.0, 0.0]).unwrap();
+
+        let clusters = cluster_videos_by_similarity(&conn, 0.8, 2).unwrap();
+        assert!(clusters.iter().any(|cluster| {
+            cluster.contains(&first) && cluster.contains(&third) && !cluster.contains(&second)
+        }));
     }
 }
 

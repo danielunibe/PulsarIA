@@ -7,7 +7,7 @@ use tracing::{error, info};
 
 pub async fn start_maintenance_scheduler(
     search_service: Arc<SearchService>,
-    _job_repo: Arc<dyn JobRepository>,
+    job_repo: Arc<dyn JobRepository>,
 ) -> Result<(), String> {
     let sched = JobScheduler::new()
         .await
@@ -40,15 +40,47 @@ pub async fn start_maintenance_scheduler(
         .map_err(|e| e.to_string())?;
 
     // 2. Limpieza de jobs huérfanos (cada 30 min)
+    let stale_job_repo = job_repo.clone();
     sched
         .add(
             Job::new_async("0 15/30 * * * *", move |_uuid, _l| {
+                let repo = stale_job_repo.clone();
                 Box::pin(async move {
                     let start = std::time::Instant::now();
                     info!("Ejecutando tarea programada: cleanup_orphan_jobs");
                     counter!("scheduler_jobs_total").increment(1);
 
-                    // TODO: Llamar a DB update statuses "processing" -> "error" (timeout) si aplica
+                    match repo.get_connection() {
+                        Ok(connection) => match connection.lock() {
+                            Ok(connection) => {
+                                match connection.execute(
+                                    "UPDATE jobs
+                                     SET status = 'error', progress = 0,
+                                         error_message = 'Job abandoned after exceeding the processing timeout'
+                                     WHERE status IN ('queued', 'processing', 'downloading', 'transcribing', 'indexing')
+                                       AND datetime(created_at) < datetime('now', '-2 hours')",
+                                    [],
+                                ) {
+                                    Ok(updated) if updated > 0 => {
+                                        info!("Marked {} stale jobs as failed", updated);
+                                    }
+                                    Ok(_) => {}
+                                    Err(error) => {
+                                        error!("Error cleaning stale jobs: {}", error);
+                                        counter!("scheduler_job_failures").increment(1);
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                error!("Database mutex poisoned during stale job cleanup");
+                                counter!("scheduler_job_failures").increment(1);
+                            }
+                        },
+                        Err(error) => {
+                            error!("Could not open repository during stale job cleanup: {}", error);
+                            counter!("scheduler_job_failures").increment(1);
+                        }
+                    }
 
                     histogram!("scheduler_job_latency_seconds")
                         .record(start.elapsed().as_secs_f64());
@@ -60,15 +92,22 @@ pub async fn start_maintenance_scheduler(
         .map_err(|e| e.to_string())?;
 
     // 3. Compactación de embeddings (cada 1h)
+    let compact_search = search_service.clone();
     sched
         .add(
             Job::new_async("0 0 * * * *", move |_uuid, _l| {
+                let search = compact_search.clone();
                 Box::pin(async move {
                     let start = std::time::Instant::now();
                     info!("Ejecutando tarea programada: vector_index_compacting");
                     counter!("scheduler_jobs_total").increment(1);
 
-                    // Stub para futuras implementaciones de reconstrucción total del índice HNSW
+                    // HNSW snapshots are atomic and already compact the serialized
+                    // graph; refresh the durable snapshot on the hourly cadence.
+                    if let Err(error) = search.snapshot_index() {
+                        error!("Error en hourly vector snapshot: {}", error);
+                        counter!("scheduler_job_failures").increment(1);
+                    }
 
                     histogram!("scheduler_job_latency_seconds")
                         .record(start.elapsed().as_secs_f64());

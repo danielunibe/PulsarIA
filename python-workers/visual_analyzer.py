@@ -42,7 +42,10 @@ def _resolve_tesseract_path() -> str | None:
     return shutil.which("tesseract")
 
 
-def _sample_times(duration_seconds: float | int | None, frame_count: int = 5) -> list[float]:
+def _sample_times(duration_seconds: float | int | None, frame_count: int | None = None) -> list[float]:
+    if frame_count is None:
+        quality = int(os.environ.get("PULSAR_PROCESSING_QUALITY", "78"))
+        frame_count = 5 if quality < 35 else 12 if quality < 72 else 24
     duration = max(0.0, float(duration_seconds or 0.0))
     if duration <= 0:
         return [0.0]
@@ -183,9 +186,22 @@ def analyze_video(video_path: str, duration_seconds: float | int | None, transcr
             )
 
     successful_frames = [frame for frame in frames if frame.get("status") == "ok"]
+    previous_mean: list[float] | None = None
+    for frame in successful_frames:
+        current_mean = frame.get("mean_rgb")
+        if isinstance(current_mean, list) and len(current_mean) == 3 and previous_mean is not None:
+            frame["scene_change_score"] = round(
+                sum(abs(float(current_mean[index]) - previous_mean[index]) for index in range(3)) / (3 * 255),
+                4,
+            )
+        else:
+            frame["scene_change_score"] = 0.0
+        if isinstance(current_mean, list) and len(current_mean) == 3:
+            previous_mean = [float(value) for value in current_mean]
+
     result = {
         "schema_version": 1,
-        "analysis_mode": "keyframe-statistics+ocr-optional",
+        "analysis_mode": "dense-keyframes+scene-change+ocr-optional",
         "frame_count": len(frames),
         "successful_frame_count": len(successful_frames),
         "frames": frames,

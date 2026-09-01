@@ -20,11 +20,12 @@ impl VectorShardManager {
     pub fn new(shard_count: usize) -> Self {
         let shard_count = shard_count.max(1);
         let mut shards = Vec::with_capacity(shard_count);
+        let data_dir = crate::db::data_dir_path();
 
         for index in 0..shard_count {
             let shard = Arc::new(HnswVectorIndex::new());
-            let file_name = format!("data/vector_index_shard_{}.hnsw", index);
-            if let Err(error) = shard.load_index(&file_name) {
+            let file_name = data_dir.join(format!("vector_index_shard_{}.hnsw", index));
+            if let Err(error) = shard.load_index(&file_name.to_string_lossy()) {
                 tracing::warn!("HNSW shard {} load failed: {}", index, error);
             }
             shards.push(shard);

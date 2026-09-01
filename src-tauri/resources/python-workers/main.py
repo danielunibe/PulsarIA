@@ -1,3 +1,29 @@
+"""
+Pulsar Eventide — Worker Orchestrator (main.py)
+=============================================
+
+Orquestador principal del pipeline de procesamiento de videos.
+Ejecuta el ciclo completo para cada job:
+
+1. **Descarga** (downloader.py): yt-dlp extrae video + metadata
+2. **Extracción de audio** (audio_extractor.py): ffmpeg convierte a WAV 16kHz mono
+3. **Transcripción** (transcriber.py): faster-whisper genera texto + timestamps
+4. **Análisis visual** (visual_analyzer.py): Pillow extrae keyframes y estadísticas
+5. **Indexación** (Rust core): ONNX genera embeddings, HNSW indexa
+
+Uso CLI:
+    python main.py --job_id 123 --url "https://tiktok.com/..."
+    python main.py --expand-url "https://tiktok.com/@user"
+
+Los eventos de progreso se emiten por stdout como JSON line-delimited.
+El backend Rust parsea estos eventos para actualizar el estado en SQLite
+y notificar al frontend via Tauri Events.
+
+Seguridad:
+    - Cada job se ejecuta como invocación independiente
+    - No hay acceso directo a SQLite desde Python
+    - Las rutas se resuelven de forma relativa (no hardcodeadas)
+"""
 import argparse
 import json
 import os
@@ -23,12 +49,40 @@ from visual_analyzer import analyze_video
 def processing_base_dir() -> Path:
     configured_dir = os.environ.get("PULSAR_DOWNLOAD_DIR")
     if configured_dir:
-        return Path(configured_dir).expanduser() / "processing"
-    return Path(__file__).resolve().parent.parent / "data" / "processing"
+        base = Path(configured_dir).expanduser() / "processing"
+    else:
+        base = Path(__file__).resolve().parent.parent / "data" / "processing"
+    # Bug #69 FIX: Validate directory early for clear error messages
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except PermissionError as e:
+        print(f"ERROR: Cannot create processing directory {base}: {e}", file=sys.stderr, flush=True)
+        raise
+    except OSError as e:
+        print(f"ERROR: Cannot access processing directory {base}: {e}", file=sys.stderr, flush=True)
+        raise
+    return base
 
 
 def process_single_job(job_id: int, url: str) -> None:
-    """Ejecuta el pipeline completo para un job_id y url dados."""
+    """
+    Ejecuta el pipeline completo de procesamiento para un job individual.
+
+    Flujo:
+        1. Extrae metadata del video (yt-dlp --dump-json)
+        2. Descarga el video en formato MP4
+        3. Extrae audio a WAV 16kHz mono (ffmpeg)
+        4. Transcribe el audio (faster-whisper)
+        5. Analiza keyframes y estadísticas visuales (Pillow)
+        6. Emite evento 'complete' con todos los resultados
+
+    Args:
+        job_id: ID del job en la base de datos SQLite.
+        url: URL del video a procesar.
+
+    Raises:
+        Emite evento 'error' en stdout si falla cualquier paso.
+    """
     base_dir = processing_base_dir()
 
     try:
@@ -78,13 +132,22 @@ def process_single_job(job_id: int, url: str) -> None:
             name="transcription_complete",
             job_id=job_id,
             step="transcription_complete",
-            progress=90,
+            progress=88,
             metadata=media_metadata,
             text=transcript_text,
             segments=segments
         )
 
         # ------------------- 4. VISUAL ANALYSIS PHASE -------------------
+        emit_event(
+            name="visual_analysis_started",
+            job_id=job_id,
+            step="visual_analysis",
+            progress=90,
+            metadata=media_metadata,
+            text=transcript_text,
+            segments=segments,
+        )
         try:
             visual_result = analyze_video(
                 video_path=video_path,
@@ -99,7 +162,7 @@ def process_single_job(job_id: int, url: str) -> None:
                 name="visual_analysis",
                 job_id=job_id,
                 step="visual_analysis",
-                progress=95,
+                progress=97,
                 metadata=media_metadata,
                 text=transcript_text,
                 segments=segments,
@@ -123,7 +186,7 @@ def process_single_job(job_id: int, url: str) -> None:
                 name="visual_analysis",
                 job_id=job_id,
                 step="visual_analysis",
-                progress=95,
+                progress=97,
                 metadata=media_metadata,
                 text=transcript_text,
                 segments=segments,

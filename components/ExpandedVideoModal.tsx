@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useSemanticIO } from '@/hooks/useSemanticIO';
+import { useSettings } from '@/lib/settings-context';
 
 // ============================================================
 // ExpandedVideoModal — AAA Multimodal Knowledge Hub
@@ -52,6 +53,7 @@ interface TranscriptChunk {
  * - Búsqueda semántica inline sobre la transcripción
  */
 export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) {
+    const { settings } = useSettings();
     const videoRef = useRef<HTMLVideoElement>(null);
     const semanticInputRef = useRef<HTMLInputElement>(null);
     const [mounted, setMounted] = useState(false);
@@ -63,13 +65,14 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
     const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
 
     // Playback state
-    const [isPlaying, setIsPlaying] = useState(true);
+    const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
     const [currentTime, setCurrentTime] = useState('00:00.000');
     const [duration, setDuration] = useState('00:00.000');
     const [rawDuration, setRawDuration] = useState(0);
     const [rawCurrentTime, setRawCurrentTime] = useState(0);
-    const [isMuted, setIsMuted] = useState(false);
+    const [isMuted, setIsMuted] = useState(true);
+    const [playbackError, setPlaybackError] = useState(false);
     const [playbackRate, setPlaybackRate] = useState(1);
 
     const { exportSemantic, importSemantic, downloadUnib, exporting, importing, error: semanticError, exportedContent } = useSemanticIO();
@@ -138,16 +141,33 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
         };
     }, [video.id]);
 
+    const playVideo = useCallback((forceMute = false) => {
+        const element = videoRef.current;
+        if (!element) return;
+        if (forceMute) {
+            element.muted = true;
+            setIsMuted(true);
+        }
+        void element.play()
+            .then(() => {
+                setPlaybackError(false);
+                setIsPlaying(true);
+            })
+            .catch(() => setIsPlaying(false));
+    }, []);
+
     useEffect(() => {
         const element = videoRef.current;
         if (!element || !video.videoSrc) {
             setIsPlaying(false);
             return;
         }
-        element.muted = false;
-        void element.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+        setPlaybackError(false);
+        element.muted = true;
+        setIsMuted(true);
+        playVideo(true);
         return () => element.pause();
-    }, [video.videoSrc]);
+    }, [playVideo, video.videoSrc]);
 
     const togglePlay = useCallback(() => {
         const element = videoRef.current;
@@ -379,10 +399,11 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
             }}
         >
             <motion.div
+                layoutId={`video-card-${video.id}`}
                 className="w-full max-w-[1240px] h-[88vh] min-h-[600px] max-h-[920px] rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-[0_25px_80px_rgba(0,0,0,0.9)] border border-white/10 relative"
                 style={{
                     background: 'linear-gradient(145deg, rgba(16,18,27,0.98) 0%, rgba(8,10,15,0.99) 100%)',
-                    boxShadow: '0 0 0 1px rgba(255,255,255,0.08), 0 30px 90px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.15)'
+                    boxShadow: '0 30px 90px rgba(0,0,0,0.9)'
                 }}
                 initial={{ scale: 0.95, y: 20, opacity: 0 }}
                 animate={{ scale: 1, y: 0, opacity: 1 }}
@@ -391,14 +412,8 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
             >
                 {/* ── Left Column: Video Cinema Player ── */}
                 <div className="w-full md:w-[48%] h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
-                    {/* Top Meta Header */}
-                    <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
-                        <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-[#fe2c55] shadow-[0_0_8px_#fe2c55]" />
-                            <span className="text-[11px] font-black tracking-widest text-[#fe2c55] uppercase">
-                                PULSAR MULTIMODAL
-                            </span>
-                        </div>
+                    {/* Compact metadata header; the product identity already lives in the main window. */}
+                    <div className="flex items-center justify-end gap-3 mb-4 shrink-0">
                         <div className="flex items-center gap-2">
                             <span className="text-xs font-mono font-bold text-white/50 bg-white/5 px-2.5 py-1 rounded-lg border border-white/5">
                                 #{video.id}
@@ -407,18 +422,24 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                     </div>
 
                     {/* Video Player Shell */}
-                    <div className="flex-1 rounded-2xl overflow-hidden relative bg-black flex items-center justify-center border border-white/10 shadow-2xl group">
+                    <div className="flex-1 rounded-2xl overflow-hidden relative bg-black flex items-center justify-center shadow-2xl group">
                         {video.videoSrc ? (
                             <video
                                 ref={videoRef}
                                 src={video.videoSrc}
                                 poster={video.thumb}
-                                className="w-full h-full object-contain"
+                                className={`w-full h-full ${settings.videoFit === 'cover' ? 'object-cover' : 'object-contain'}`}
                                 playsInline
                                 loop
                                 autoPlay
+                                muted={isMuted}
                                 onTimeUpdate={handleTimeUpdate}
                                 onLoadedMetadata={handleLoadedMetadata}
+                                onCanPlay={() => playVideo(true)}
+                                onError={() => {
+                                    setPlaybackError(true);
+                                    setIsPlaying(false);
+                                }}
                                 onPlay={() => setIsPlaying(true)}
                                 onPause={() => setIsPlaying(false)}
                                 onClick={togglePlay}
@@ -439,20 +460,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                             </div>
                         )}
 
-                        {/* Central Play/Pause Watermark indicator */}
-                        {video.videoSrc && <>
-                            {!isPlaying && (
-                                <motion.div
-                                    initial={{ scale: 0.5, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    exit={{ scale: 0.5, opacity: 0 }}
-                                    className="absolute w-16 h-16 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-white cursor-pointer shadow-2xl hover:scale-110 transition-transform"
-                                    onClick={togglePlay}
-                                >
-                                    <FaPlay size={20} className="ml-1 text-[#25f4ee]" />
-                                </motion.div>
-                            )}
-                        </>}
+                        {playbackError && video.videoSrc && <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center"><span className="rounded-lg border border-white/10 bg-black/55 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-white/55">Video no disponible</span></div>}
 
                         {/* Bottom Overlay Controls */}
                         {video.videoSrc && <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent flex flex-col gap-2.5 opacity-90 group-hover:opacity-100 transition-opacity">

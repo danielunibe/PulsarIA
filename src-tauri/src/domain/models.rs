@@ -77,6 +77,8 @@ pub struct JobRecord {
     pub thumbnail: Option<String>,
     pub duration: Option<i32>,
     pub video_path: Option<String>,
+    pub keep_status: Option<String>,
+    pub platform: Option<String>,
     pub error_message: Option<String>,
     pub visual_analysis: Option<String>,
     pub instructional_guide: Option<String>,

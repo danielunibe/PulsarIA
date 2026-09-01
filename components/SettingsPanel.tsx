@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { SHADOW, SURFACE, ACCENT } from '@/lib/design-tokens';
 import { useSettings, AppTheme, RetentionPolicy } from '@/lib/settings-context';
+import { useProcessingSettings } from '@/hooks/use-processing-settings';
 
 import { 
     FaXmark, 
@@ -160,10 +161,12 @@ type SettingsTab = 'general' | 'stats' | 'engine' | 'ai';
 interface SettingsPanelProps {
     onClose: () => void;
     jobs?: any[];
+    onPlaylistSelect?: (id: number | null) => void;
 }
 
-export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
+export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: SettingsPanelProps) {
     const { settings, updateSettings } = useSettings();
+    const processingSetup = useProcessingSettings();
 
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [formats, setFormats] = useState<string[]>(settings.formats);
@@ -171,6 +174,15 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
     const [selectedTheme, setSelectedTheme] = useState<AppTheme>(settings.theme || 'carbon');
     const [retention, setRetention] = useState<RetentionPolicy>(settings.retention || 'keep');
     const [cookiesBrowser, setCookiesBrowser] = useState<typeof settings.cookiesBrowser>(settings.cookiesBrowser || '');
+    const [processingQuality, setProcessingQuality] = useState(settings.processingQuality);
+    const [videoFit, setVideoFit] = useState(settings.videoFit);
+    const selectedWhisperModel = processingQuality < 35
+        ? 'tiny'
+        : processingQuality < 72
+            ? 'small'
+            : processingSetup.hardware?.whisper_gpu_supported
+                ? 'medium'
+                : 'small';
 
     // Engine & Model State
     const [modelOnline, setModelOnline] = useState<boolean | null>(null);
@@ -181,9 +193,10 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
     // AI Cluster State
     const [clusterThreshold, setClusterThreshold] = useState(0.70);
     const [clusterMinSize, setClusterMinSize] = useState(2);
-        const [clustersList, setClustersList] = useState<any[]>([]);
+    const [clustersList, setClustersList] = useState<Array<{ count: number; jobs: any[]; playlistId?: number; name: string; keywords: string[] }>>([]);
     const [clusteringLoading, setClusteringLoading] = useState(false);
     const [clusteringError, setClusteringError] = useState<string | null>(null);
+    const [organizationCondition, setOrganizationCondition] = useState('');
 
     const [now] = useState(() => Date.now());
 
@@ -197,6 +210,8 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
             setSelectedTheme(settings.theme || 'carbon');
             setRetention(settings.retention || 'keep');
             setCookiesBrowser(settings.cookiesBrowser || '');
+            setProcessingQuality(settings.processingQuality);
+            setVideoFit(settings.videoFit);
         });
         return () => {
             active = false;
@@ -284,15 +299,47 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                 return;
             }
             const { invoke } = await import('@tauri-apps/api/core');
-            const result: number[][] = await invoke('auto_cluster_videos', {
-                threshold: clusterThreshold,
-                minClusterSize: clusterMinSize,
-            });
-            const groups = result.map(jobIds => {
+            let result: number[][];
+            if (organizationCondition.trim()) {
+                const matches: Array<{ video_id: number }> = await invoke('search_transcripts', {
+                    query: organizationCondition.trim(),
+                    limit: 100,
+                });
+                const jobIds = [...new Set(matches.map((match) => match.video_id))];
+                result = jobIds.length >= clusterMinSize ? [jobIds] : [];
+            } else {
+                result = await invoke('auto_cluster_videos', {
+                    threshold: clusterThreshold,
+                    minClusterSize: clusterMinSize,
+                });
+            }
+
+            const stopWords = new Set(['para', 'sobre', 'como', 'con', 'una', 'los', 'las', 'del', 'por', 'video', 'the', 'and', 'this', 'from']);
+            const groups = result.map((jobIds, idx) => {
                 const matched = jobIds.map(id => jobs.find(j => j.id === id)).filter(Boolean);
-                return { count: matched.length, jobs: matched };
+                const wordCounts = new Map<string, number>();
+                matched.forEach((job) => String(job.title || '').toLowerCase().split(/[^a-záéíóúñ0-9]+/i).filter((word) => word.length > 3 && !stopWords.has(word)).forEach((word) => wordCounts.set(word, (wordCounts.get(word) || 0) + 1)));
+                const keywords = [...wordCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([word]) => word);
+                const name = keywords.length > 0 ? `Colección IA · ${keywords.join(' / ')}` : `Colección IA ${idx + 1}`;
+                return { count: matched.length, jobs: matched, name, keywords, jobIds };
             }).filter(g => g.jobs.length > 0);
-            setClustersList(groups);
+
+            if (groups.length > 0) {
+                const persisted: Array<{ id: number; name: string; auto_generated: boolean }> = await invoke('replace_ai_playlists', {
+                    groups: groups.map((group, idx) => ({
+                        name: group.name,
+                        description: organizationCondition.trim() || 'Organizada por similitud semántica y transcripción.',
+                        color: ['#8a5cff', '#25f4ee', '#fe2c55'][idx % 3],
+                        cover_job_id: group.jobIds[0] ?? null,
+                        topic_keywords: group.keywords,
+                        job_ids: group.jobIds,
+                    })),
+                });
+                const playlistByName = new Map(persisted.filter((playlist) => playlist.auto_generated).map((playlist) => [playlist.name, playlist.id]));
+                setClustersList(groups.map((group) => ({ ...group, playlistId: playlistByName.get(group.name) })));
+            } else {
+                setClustersList([]);
+            }
         } catch (error) {
             setClustersList([]);
             setClusteringError(error instanceof Error ? error.message : String(error));
@@ -320,6 +367,7 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                             chunkSize: 150,
                             chunkOverlap: 50,
                         }),
+                        processingSetup.save(processingQuality, videoFit),
                     ]);
                     tauriAvailable = true;
                 }
@@ -328,7 +376,7 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
             }
 
             // Always save settings locally (works in both Tauri and browser mode)
-            updateSettings({ formats, folder, theme: selectedTheme, retention, cookiesBrowser });
+            updateSettings({ formats, folder, theme: selectedTheme, retention, cookiesBrowser, processingQuality, videoFit });
             onClose();
         } catch (error) {
             setSettingsError(error instanceof Error ? error.message : String(error));
@@ -344,7 +392,6 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
             <div className="flex items-center justify-between px-5 pt-4 pb-3">
                 <div className="flex flex-col">
                     <div className="flex items-center gap-1.5 font-bold uppercase tracking-widest text-[9px] text-white/40">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary)] shadow-[0_0_6px_rgba(249,42,78,0.8)]" />
                         <span>PANEL DE CONTROL</span>
                     </div>
                     <h2 className="text-base font-black tracking-tight leading-tight text-white">
@@ -608,7 +655,7 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                             })}
                         </SectionCard>
 
-                                                <SectionCard>
+                        <SectionCard>
                             <SectionTitle icon={SolidDownloadIcon} label="Retención de Archivos" />
                             <div className="grid grid-cols-2 gap-2">
                                 {([
@@ -638,6 +685,51 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                             </div>
                             <p className="mt-2 px-1 text-[10px] text-white/40 leading-relaxed">
                                 La opción «Solo online» mantiene metadata, transcripción y búsqueda, pero elimina los archivos pesados después de que el job termina.
+                            </p>
+                        </SectionCard>
+
+                        <SectionCard className="flex flex-col gap-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <SectionTitle icon={FaMicrochip} label="Análisis Local" />
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-[#25f4ee]/70">
+                                    {selectedWhisperModel}
+                                </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-white/55">
+                                <span>Rapidez</span>
+                                <span className="font-bold text-white/80">{processingQuality < 35 ? 'Rápido' : processingQuality < 72 ? 'Equilibrado' : 'Alta calidad'}</span>
+                                <span>Precisión</span>
+                            </div>
+                            <input
+                                aria-label="Rapidez y calidad del procesamiento"
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={processingQuality}
+                                onChange={(event) => setProcessingQuality(Number(event.target.value))}
+                                className="w-full accent-[#25f4ee] cursor-pointer"
+                            />
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    aria-pressed={videoFit === 'cover'}
+                                    onClick={() => setVideoFit('cover')}
+                                    className={`rounded-[12px] px-3 py-2 text-[10px] font-bold transition-colors ${videoFit === 'cover' ? 'bg-[#25f4ee]/15 text-[#25f4ee]' : 'bg-white/[.03] text-white/45 hover:text-white/75'}`}
+                                >
+                                    Rellenar video
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-pressed={videoFit === 'contain'}
+                                    onClick={() => setVideoFit('contain')}
+                                    className={`rounded-[12px] px-3 py-2 text-[10px] font-bold transition-colors ${videoFit === 'contain' ? 'bg-[#25f4ee]/15 text-[#25f4ee]' : 'bg-white/[.03] text-white/45 hover:text-white/75'}`}
+                                >
+                                    Mostrar completo
+                                </button>
+                            </div>
+                            <p className="text-[10px] leading-relaxed text-white/40">
+                                {processingSetup.hardware?.gpu_name || 'GPU no detectada'} · {processingSetup.hardware?.logical_cores || '—'} hilos · {processingSetup.hardware?.whisper_gpu_supported ? 'Aceleración Whisper disponible' : 'Fallback CPU activo'}
                             </p>
                         </SectionCard>
 
@@ -804,7 +896,7 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                         </div>
 
                         <p className="text-[11px] text-white/50 leading-relaxed">
-                            Algoritmo de clustering semántico no supervisado para agrupar videos por temas recurrentes y proximidad conceptual.
+                            Crea colecciones automáticamente por similitud de transcripciones o usando una condición escrita por ti.
                         </p>
                         {clusteringError && (
                             <div role="alert" className="rounded-xl border border-[#fe2c55]/30 bg-[#fe2c55]/10 px-3 py-2 text-[10px] text-[#fe2c55]">
@@ -843,6 +935,18 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                             />
                         </label>
 
+                        <label className="flex flex-col gap-2 p-3.5 rounded-[14px] bg-black/30 border border-white/5 text-[10px] uppercase font-bold tracking-wider text-white/60">
+                            Condición opcional
+                            <input
+                                type="text"
+                                aria-label="Condición para organizar videos"
+                                value={organizationCondition}
+                                onChange={(e) => setOrganizationCondition(e.target.value)}
+                                placeholder="Ej. videos sobre diseño y tecnología"
+                                className="rounded-[10px] bg-black/50 border border-white/10 px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-white outline-none focus:border-[#8a5cff]/50"
+                            />
+                        </label>
+
                         {/* Clusters List */}
 
                         <div className="flex flex-col gap-2">
@@ -851,16 +955,17 @@ export function SettingsPanel({ onClose, jobs = [] }: SettingsPanelProps) {
                             </span>
                             {clustersList.length > 0 ? (
                                 clustersList.map((group, idx) => (
-                                    <div key={idx} className="p-3 rounded-[12px] bg-black/40 border border-[#8a5cff]/20 flex items-center justify-between">
+                                    <div key={idx} className="p-3 rounded-[12px] bg-black/40 border border-[#8a5cff]/20 flex items-center justify-between gap-3">
                                         <div className="flex items-center gap-2">
                                             <div className="w-6 h-6 rounded-[8px] bg-[#8a5cff]/15 flex items-center justify-center text-[#8a5cff] font-bold text-xs">
                                                 #{idx + 1}
                                             </div>
-                                            <span className="text-xs font-bold text-white">Grupo Temático</span>
+                                            <span className="text-xs font-bold text-white truncate">{group.name}</span>
                                         </div>
-                                        <span className="text-[10px] font-mono text-[#8a5cff] font-bold">
-                                            {group.count} videos
-                                        </span>
+                                        <div className="flex shrink-0 items-center gap-2">
+                                            <span className="text-[10px] font-mono text-[#8a5cff] font-bold">{group.count} videos</span>
+                                            {group.playlistId && <button type="button" onClick={() => { onPlaylistSelect?.(group.playlistId ?? null); onClose(); }} className="rounded-[8px] border border-[#25f4ee]/30 px-2 py-1 text-[8px] font-black uppercase tracking-wider text-[#25f4ee] transition hover:bg-[#25f4ee]/10">Ver</button>}
+                                        </div>
                                     </div>
                                 ))
                             ) : (

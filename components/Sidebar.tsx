@@ -2,7 +2,7 @@
 
 import { AddLinks } from './AddLinks';
 import { QueueSection } from './QueueSection';
-import { PlaylistsPanel } from './PlaylistsPanel';
+import type { JobRecord, PendingJob } from '@/hooks/use-jobs';
 
 /**
  * Props del componente Sidebar — panel lateral izquierdo de Pulsar Eventide.
@@ -11,15 +11,21 @@ import { PlaylistsPanel } from './PlaylistsPanel';
  * y PlaylistsPanel (colecciones temáticas).
  */
 export interface SidebarProps {
-    /** ID de la playlist actualmente seleccionada, o null */
-    selectedPlaylistId: number | null;
-    /** Callback para seleccionar/deseleccionar una playlist */
-    onPlaylistSelect: (id: number | null) => void;
+    jobs: JobRecord[];
+    pending: PendingJob[];
+    globalProgress: number;
+    onSubmitLinks: (urls: string[]) => Promise<void>;
+    onRetryJob: (jobId: number) => Promise<void>;
+    onRetryPending: (clientId: string) => Promise<void>;
 }
 
 export function Sidebar({
-    selectedPlaylistId,
-    onPlaylistSelect,
+    jobs,
+    pending,
+    globalProgress,
+    onSubmitLinks,
+    onRetryJob,
+    onRetryPending,
 }: SidebarProps) {
     return (
         <aside
@@ -34,11 +40,13 @@ export function Sidebar({
         >
             {/* Scrollable Column Content — Dashboard Exclusivo */}
             <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-5 flex flex-col gap-5 custom-scrollbar">
-                <AddLinks />
-                <QueueSection />
-                <PlaylistsPanel
-                    selectedPlaylistId={selectedPlaylistId}
-                    onPlaylistSelect={onPlaylistSelect}
+                <AddLinks onSubmitLinks={onSubmitLinks} />
+                <QueueSection
+                    jobs={jobs}
+                    pending={pending}
+                    globalProgress={globalProgress}
+                    onRetryJob={onRetryJob}
+                    onRetryPending={onRetryPending}
                 />
             </div>
         </aside>

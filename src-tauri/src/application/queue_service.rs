@@ -266,16 +266,20 @@ impl QueueService {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
 
+        let mut command = Command::new(python_exe);
+        command
+            .arg(&script)
+            .arg("--expand-url")
+            .arg(url)
+            .current_dir(&worker_dir)
+            .env("PYTHONPATH", &worker_dir)
+            .env("PYTHONUNBUFFERED", "1");
+        #[cfg(windows)]
+        command.creation_flags(0x08000000);
+
         let output = tokio::time::timeout(
             Duration::from_secs(120),
-            Command::new(python_exe)
-                .arg(&script)
-                .arg("--expand-url")
-                .arg(url)
-                .current_dir(&worker_dir)
-                .env("PYTHONPATH", &worker_dir)
-                .env("PYTHONUNBUFFERED", "1")
-                .output(),
+            command.output(),
         )
         .await
         .map_err(|_| "Timed out expanding TikTok collection".to_string())?
@@ -440,10 +444,13 @@ impl QueueService {
         let start_time = std::time::Instant::now();
         let result = match worker.run_job(job).await {
             Ok(Some(worker_result)) => {
-                if worker_result.transcript.trim().is_empty() {
-                    Err(QueueError::ProcessingError("Empty transcript".to_string()))
-                } else if let Err(error) = persist_worker_result(&repo, job, &worker_result) {
+                // A silent video is still a valid media job. Persist its
+                // metadata/visual analysis and complete it without semantic
+                // indexing; searchable chunks are created only when text exists.
+                if let Err(error) = persist_worker_result(&repo, job, &worker_result) {
                     Err(QueueError::ProcessingError(error))
+                } else if worker_result.transcript.trim().is_empty() {
+                    Ok(())
                 } else if let Err(error) =
                     search_service.index_document(job.job_id, &worker_result.transcript)
                 {

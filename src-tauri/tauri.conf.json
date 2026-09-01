@@ -12,6 +12,7 @@
     "bundle": {
         "active": true,
         "targets": ["nsis", "msi"],
+        "icon": ["icons/icon.ico"],
         "resources": {
             "resources/python": "resources/python",
             "resources/python-workers": "resources/python-workers",
@@ -25,6 +26,15 @@
         }
     },
     "app": {
+        "security": {
+            "assetProtocol": {
+                "enable": true,
+                "scope": [
+                    "$HOME/**",
+                    "$RESOURCE/**"
+                ]
+            }
+        },
         "windows": [
             {
                 "title": "Pulsar Eventide",

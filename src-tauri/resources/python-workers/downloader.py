@@ -1,4 +1,20 @@
-import json
+"""
+Pulsar Eventide — Video Downloader (downloader.py)
+==================================================
+
+Responsabilidad: Descargar videos y extraer metadata usando yt-dlp.
+
+Este módulo resuelve la ruta de yt-dlp de forma flexible (venv, bin local,
+PATH del sistema) y ejecuta las siguientes operaciones:
+
+- **extract_metadata()**: Extrae metadata sin descargar (--dump-json)
+- **download_video()**: Descarga el mejor MP4 disponible
+- **extract_playlist_videos()**: Expande URLs de playlists/colecciones
+
+Resolución de rutas:
+    Todas las rutas se calculan de forma relativa a este archivo,
+    nunca hardcodeadas con rutas absolutas de una máquina específica.
+"""
 import json
 import os
 import sys
@@ -21,7 +37,9 @@ _PROJECT_ROOT = _WORKERS_DIR.parent
 
 def resolve_yt_dlp_path() -> str:
     """
-    Resuelve la ruta del ejecutable yt-dlp probando, en orden:
+    Resuelve la ruta del ejecutable yt-dlp probando múltiples ubicaciones.
+
+    Orden de búsqueda:
     1. Variable de entorno YT_DLP_PATH (override explícito).
     2. venv del worker (Windows): python-workers/.venv/Scripts/yt-dlp.exe
     3. venv del worker (Unix/macOS): python-workers/.venv/bin/yt-dlp
@@ -91,30 +109,110 @@ def build_yt_dlp_base_cmd() -> list:
     browser = os.environ.get("PULSAR_COOKIES_FROM_BROWSER", "").strip().lower()
     if browser in {"chrome", "edge", "firefox"}:
         command.extend(["--cookies-from-browser", browser])
+
+    # TikTok WAF / TLS challenge bypass via curl_cffi impersonation
+    if importlib.util.find_spec("curl_cffi") is not None:
+        command.extend(["--impersonate", "chrome"])
+
     return command
 
 
-def download_video(url: str, job_id: int, base_dir: Path) -> str:
-    """Extrae metadatos y descarga el mejor MP4. Retorna la ruta."""
-    
-    output_path = base_dir / str(job_id) / "video.mp4"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+def _get_format_args() -> list:
+    """
+    Bug #34 FIX: Read format preference from PULSAR_FORMATS env var.
+    Bug #78 FIX: TikTok's HEVC (bytevc1) formats report acodec=aac in metadata
+    but the downloaded container is video-only. We MUST use -f (format filter)
+    to force h264 selection, not just -S (sort).
+    Returns a list of yt-dlp CLI args for format selection.
+    """
+    formats_json = os.environ.get("PULSAR_FORMATS", "")
+    try:
+        formats = json.loads(formats_json) if formats_json else []
+        if not isinstance(formats, list):
+            formats = []
+    except (json.JSONDecodeError, TypeError):
+        formats = []
 
+    # -S provides sort fallback when -f doesn't narrow enough
+    # For mp4/mkv/etc, sort by extension preference
+    video_fmts = [f for f in formats if f in ("mp4", "mkv", "webm", "mov")]
+    if video_fmts:
+        sort_str = "ext:" + ":".join(video_fmts) + ":vcodec:h264:m4a"
+    else:
+        sort_str = "ext:mp4:vcodec:h264:m4a"
+
+    # -f forces h264 video codec — critical for TikTok HEVC avoidance.
+    # Pattern: best muxed file with h264 video; fallback to best with audio.
+    return ["-f", "b[vcodec~='h264']/b[acodec!=none]/b", "-S", sort_str]
+
+
+def _has_audio_stream(video_path: str) -> bool:
+    """Bug #78 FIX: Check if a video file contains an audio stream.
+    Uses ffprobe to detect audio tracks. Returns False if ffprobe is
+    unavailable or the file has no audio — signals a retry with h264.
+    """
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=codec_type", "-of", "csv=p=0", video_path],
+            capture_output=True, text=True, timeout=30
+        )
+        return bool(result.stdout.strip())
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return True  # Assume audio exists if ffprobe is unavailable
+
+
+def download_video(url: str, job_id: int, base_dir: Path) -> str:
+    """Extrae metadatos y descarga el mejor video. Retorna la ruta."""
+    
+    output_dir = base_dir / str(job_id)
+    output_path = output_dir / "video.mp4"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    format_args = _get_format_args()
     cmd = build_yt_dlp_base_cmd() + [
         "--quiet",
         "--no-warnings",
-        "-S", "ext:mp4:m4a",
+    ] + format_args + [
         "-o", str(output_path),
         url
     ]
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
+        # Bug #26 FIX: Find actual downloaded file — yt-dlp may rename on conflict
         if not output_path.exists():
-            raise FileNotFoundError(f"yt-dlp completó sin error, pero {output_path} no existe")
-            
+            mp4_files = sorted(output_dir.glob('*.mp4'), key=lambda p: p.stat().st_mtime, reverse=True)
+            if mp4_files:
+                actual = mp4_files[0]
+                if actual != output_path:
+                    actual.rename(output_path)
+            else:
+                raise FileNotFoundError(f"yt-dlp completó sin error, pero no se encontró MP4 en {output_dir}")
+
+        # Bug #78 FIX: Verify the downloaded video has an audio stream.
+        # TikTok HEVC (bytevc1) formats falsely report acodec=aac in metadata
+        # but the actual container often contains only the video stream.
+        if not _has_audio_stream(str(output_path)):
+            # Re-download forcing H.264 format which has proper audio muxing
+            retry_cmd = build_yt_dlp_base_cmd() + [
+                "--quiet",
+                "--no-warnings",
+                "-f", "b[vcodec~='h264']",
+                "-o", str(output_path),
+                url
+            ]
+            try:
+                subprocess.run(retry_cmd, check=True, capture_output=True, text=True)
+                if not output_path.exists():
+                    mp4_files = sorted(output_dir.glob('*.mp4'), key=lambda p: p.stat().st_mtime, reverse=True)
+                    if mp4_files:
+                        mp4_files[0].rename(output_path)
+            except subprocess.CalledProcessError:
+                pass  # Keep the original video-only download if retry fails
+
         return str(output_path)
-        
+
     except subprocess.CalledProcessError as e:
         error_msg = e.stderr.strip() if e.stderr else str(e)
         raise RuntimeError(f"Fallo descargando video: {error_msg}")
@@ -129,7 +227,7 @@ def extract_metadata(url: str) -> dict:
         url
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60)
         info = json.loads(result.stdout)
 
         return {

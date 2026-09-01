@@ -42,7 +42,10 @@ def _resolve_tesseract_path() -> str | None:
     return shutil.which("tesseract")
 
 
-def _sample_times(duration_seconds: float | int | None, frame_count: int = 5) -> list[float]:
+def _sample_times(duration_seconds: float | int | None, frame_count: int | None = None) -> list[float]:
+    if frame_count is None:
+        quality = int(os.environ.get("PULSAR_PROCESSING_QUALITY", "78"))
+        frame_count = 5 if quality < 35 else 12 if quality < 72 else 24
     duration = max(0.0, float(duration_seconds or 0.0))
     if duration <= 0:
         return [0.0]
@@ -134,7 +137,29 @@ def _build_instructional_guide(
 
 
 def analyze_video(video_path: str, duration_seconds: float | int | None, transcript: str = "") -> dict[str, Any]:
-    """Analiza un video local y devuelve datos JSON serializables."""
+    """
+    Analiza un video local y devuelve datos JSON serializables.
+
+    Extrae keyframes a intervalos regulares, calcula estadísticas de color
+    y tamaño, ejecuta OCR si Tesseract está disponible, y genera un
+    instructivo audiovisual en Markdown.
+
+    Args:
+        video_path: Ruta al archivo de video (MP4 recomendado).
+        duration_seconds: Duración del video en segundos. Si es None, se
+            detecta automáticamente con ffprobe.
+        transcript: Transcripción del video (opcional, para contexto del instructivo).
+
+    Returns:
+        dict con claves:
+            - 'frames': list[dict] — Keyframes analizados con timestamps y metadatos
+            - 'frame_count': int — Total de keyframes extraídos
+            - 'ocr_available': bool — Si Tesseract estaba disponible
+            - 'instructional_guide': str — Instructivo audiovisual en Markdown
+
+    Raises:
+        FileNotFoundError: Si el archivo de video no existe.
+    """
     path = Path(video_path).resolve()
     if not path.exists():
         raise FileNotFoundError(f"Video para análisis visual no encontrado: {video_path}")
@@ -161,9 +186,22 @@ def analyze_video(video_path: str, duration_seconds: float | int | None, transcr
             )
 
     successful_frames = [frame for frame in frames if frame.get("status") == "ok"]
+    previous_mean: list[float] | None = None
+    for frame in successful_frames:
+        current_mean = frame.get("mean_rgb")
+        if isinstance(current_mean, list) and len(current_mean) == 3 and previous_mean is not None:
+            frame["scene_change_score"] = round(
+                sum(abs(float(current_mean[index]) - previous_mean[index]) for index in range(3)) / (3 * 255),
+                4,
+            )
+        else:
+            frame["scene_change_score"] = 0.0
+        if isinstance(current_mean, list) and len(current_mean) == 3:
+            previous_mean = [float(value) for value in current_mean]
+
     result = {
         "schema_version": 1,
-        "analysis_mode": "keyframe-statistics+ocr-optional",
+        "analysis_mode": "dense-keyframes+scene-change+ocr-optional",
         "frame_count": len(frames),
         "successful_frame_count": len(successful_frames),
         "frames": frames,

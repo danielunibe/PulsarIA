@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 
 // ============================================================
 // SettingsContext — Sistema Global de Ajustes
@@ -25,6 +25,8 @@ export type AppTheme = 'carbon' | 'chromatic' | 'aurora' | 'oled' | 'cyberpunk';
  * - `online`: Eliminar archivos locales tras procesar, conservar solo la ficha
  */
 export type RetentionPolicy = 'keep' | 'online';
+export type ProcessingQuality = 'fast' | 'balanced' | 'high';
+export type VideoFit = 'cover' | 'contain';
 
 /**
  * Configuración global del sistema de Pulsar Eventide.
@@ -43,6 +45,12 @@ export interface SystemSettings {
     retention: RetentionPolicy;
     /** Navegador del cual extraer cookies para fuentes restringidas (''=deshabilitado) */
     cookiesBrowser: '' | 'chrome' | 'edge' | 'firefox';
+    /** Intensidad global del pipeline local (0-100). */
+    processingQuality: number;
+    /** Perfil derivado del deslizador de calidad. */
+    processingProfile: ProcessingQuality;
+    /** Preferencia de encuadre en el reproductor ampliado. */
+    videoFit: VideoFit;
 }
 
 interface SettingsContextValue {
@@ -57,6 +65,9 @@ const defaultSettings: SystemSettings = {
     folder: '~/Downloads/Pulsar',
     retention: 'keep',
     cookiesBrowser: '',
+    processingQuality: 78,
+    processingProfile: 'high',
+    videoFit: 'cover',
 };
 
 const SettingsContext = createContext<SettingsContextValue>({
@@ -97,7 +108,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         };
     }, []);
 
-    const updateSettings = (newSettings: Partial<SystemSettings>) => {
+    const updateSettings = useCallback((newSettings: Partial<SystemSettings>) => {
         setSettings(prev => {
             const updated = { ...prev, ...newSettings };
             try {
@@ -105,7 +116,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             } catch { /* Ignorar errores de localStorage */ }
             return updated;
         });
-    };
+    }, []);
 
     return (
         <SettingsContext.Provider value={{ settings, updateSettings }}>
