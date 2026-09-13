@@ -252,8 +252,8 @@
                                              "sourcePath":  "python-workers/downloader.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  15099,
-                                             "sha256":  "DCC33994FE9B048811FE6085888D0D8D69FDCA37DD65488BBC24BE695596CB6E"
+                                             "sizeBytes":  14645,
+                                             "sha256":  "87406612D0740F263A803BC984528D21C646B9D2816683632811D21F0A768555"
                                          },
                                          {
                                              "path":  "python-workers/embed_query.py",

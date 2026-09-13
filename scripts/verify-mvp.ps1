@@ -16,8 +16,18 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Locale contract failed' }
 
     Write-Host '4/12 Reproducible Next.js production build'
-    npm run build
-    if ($LASTEXITCODE -ne 0) { throw 'Next.js build failed' }
+    $previousNextDistDir = $env:NEXT_DIST_DIR
+    $env:NEXT_DIST_DIR = '.next-mvp-verify'
+    try {
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw 'Next.js build failed' }
+    } finally {
+        if ($null -eq $previousNextDistDir) {
+            Remove-Item Env:NEXT_DIST_DIR -ErrorAction SilentlyContinue
+        } else {
+            $env:NEXT_DIST_DIR = $previousNextDistDir
+        }
+    }
 
     Write-Host '5/12 Rust formatting contract'
     cargo fmt --manifest-path src-tauri/Cargo.toml -- --check

@@ -100,9 +100,9 @@ y, cuando exista una URL autorizada, el smoke live documentado en
 | --- | --- | --- |
 | Lint, TypeScript, build Next | PASS previo a esta consolidación | Reejecutar antes de publicar |
 | Locale es/en | PASS previo a esta consolidación | `scripts/verify-locale.ps1` |
-| Rust fmt/check/tests | PASS previo a esta consolidación | 34 tests Rust sin fallos antes del cambio de rutas |
+| Rust fmt/check/tests | PASS | 40 tests Rust sin fallos después del cambio de rutas |
 | Python | PASS previo a esta consolidación | 18 tests y un skip live intencional |
-| Runtime preparado | PASS en staging local | 56/56 recursos antes de regenerar el manifiesto canónico |
+| Runtime preparado | PASS en staging local | 50/50 recursos canónicos verificados; se eliminó la copia de compatibilidad |
 | Instalador NSIS/MSI | PASS local | Build `0.1.0`, SHA NSIS `77095348AA234D1152000A34DD02258DF68D9C8E5FF5267701063483FB12DB13` |
 | TikTok live | PASS parcial | Descarga/audio/análisis/indexado/reinicio/dedupe/URL inválida/search shape; la muestra no produjo texto reconocible |
 | Updater, firmas y Authenticode | BLOCKED_EXTERNAL | No se fabrican `latest.json`, `.sig`, claves ni firmas |

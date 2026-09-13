@@ -24,10 +24,10 @@ cambios locales intencionales, archivos nuevos y eliminaciones; no se debe usar
 | Next build | PASS | `npm run build` |
 | Rust formato | PASS | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` |
 | Rust check | PASS | `cargo check --manifest-path src-tauri/Cargo.toml` |
-| Rust tests | PASS | 34 pruebas, 0 fallos |
+| Rust tests | PASS | 40 pruebas, 0 fallos |
 | Python contracts | PASS | 18 pruebas; skip live intencional sin URL |
-| Runtime manifest | PASS | 56/56 archivos y FFmpeg/FFprobe verificados |
-| Bundle instalado | PASS | NSIS release vigente `77095348…`: instalación limpia + manifest 56/56 + health + reinicio + desinstalación |
+| Runtime manifest | PASS | 50/50 archivos canónicos y FFmpeg/FFprobe verificados |
+| Bundle instalado | PASS previo a esta consolidación | NSIS release vigente `77095348…` fue generado antes de retirar recursos duplicados; requiere reconstrucción con el `tauri.conf.json` canónico |
 | Artefactos de release pública | BLOCKED_EXTERNAL | `target-tauri/release/bundle` y firmas del updater requieren build release/credenciales de firma; updater y Authenticode permanecen fuera del MVP local |
 | Pipeline TikTok live | PASS parcial | Release `77095348…`: job real, deduplicación, URL inválida, shapes de búsqueda y persistencia; reintento de un job fallido y búsqueda UI requieren smoke asistido |
 
@@ -46,13 +46,15 @@ real se hidrata correctamente y que los estados fallidos no se ocultan.
 
 ## Evidencia reproducida
 
-- `npm run verify:mvp`: PASS; 11/11 gates, incluyendo formato Rust y contrato
+- `npm run verify:mvp`: PASS; 12/12 gates, incluyendo formato Rust, contrato
+  canónico y contrato español/inglés.
   español/inglés.
 - `pwsh -File scripts/verify-installed-bundle.ps1 -Configuration release`: PASS
   con NSIS SHA-256
   `77095348AA234D1152000A34DD02258DF68D9C8E5FF5267701063483FB12DB13`;
   recursos 8/8, manifest 56/56, health antes/después del reinicio,
-  desinstalación 0 y limpieza temporal correcta.
+  desinstalación 0 y limpieza temporal correcta. Este artefacto es anterior a
+  la publicación canónica y debe reconstruirse para release.
 - `pwsh -File scripts/verify-installed-bundle.ps1 -Configuration release -RunLive`:
   PASS; `job_id=1` completó al 100%, generó video MP4, audio MP3, análisis
   visual e instructivo, conservó el job tras reinicio, devolvió `existing` para

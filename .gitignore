@@ -64,8 +64,12 @@ src-tauri/resources/*
 !src-tauri/resources/local-llm-manifest.json
 !src-tauri/resources/runtime-manifest.json
 !src-tauri/resources/bin/
+src-tauri/resources/bin/*
 !src-tauri/resources/bin/FFMPEG-LICENSE.txt
 !src-tauri/resources/bin/runtime-provenance.json
+
+# Isolated frontend verification output.
+.next-*/
 
 # Functional model roots outside the runtime staging contract are forbidden.
 assets/models/
