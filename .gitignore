@@ -26,6 +26,7 @@ cargo_check.log
 *.tar.gz
 *.7z
 *.mp4
+!public/demo/*.mp4
 *.mov
 *.dmg
 *.pkg
@@ -54,3 +55,19 @@ data/
 .kilo/
 yt_err.txt
 interactive-inventory-cycle1.txt
+.native-smoke*/
+
+# Generated runtime staging. The approved runtime is prepared externally and
+# verified by scripts/prepare-runtime.ps1; it is never committed as source.
+src-tauri/resources/*
+!src-tauri/resources/
+!src-tauri/resources/local-llm-manifest.json
+!src-tauri/resources/runtime-manifest.json
+!src-tauri/resources/bin/
+!src-tauri/resources/bin/FFMPEG-LICENSE.txt
+!src-tauri/resources/bin/runtime-provenance.json
+
+# Functional model roots outside the runtime staging contract are forbidden.
+assets/models/
+src-tauri/assets/models/
+src-tauri/resources/models/

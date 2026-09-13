@@ -1,8 +1,8 @@
 {
     "$schema": "https://schema.tauri.app/config/2",
-    "productName": "pulsar-eventide",
+    "productName": "Pulsaria",
     "version": "0.1.0",
-    "identifier": "com.pulsar.eventide",
+    "identifier": "com.pulsaria.app",
     "build": {
         "beforeDevCommand": "npm run dev",
         "devUrl": "http://localhost:3000",
@@ -11,19 +11,38 @@
     },
     "bundle": {
         "active": true,
-        "targets": ["nsis", "msi"],
-        "icon": ["icons/icon.ico"],
+        "targets": [
+            "nsis",
+            "msi"
+        ],
+        "icon": [
+            "icons/icon.ico"
+        ],
         "resources": {
             "resources/python": "resources/python",
-            "resources/python-workers": "resources/python-workers",
+            "../python-workers/main.py": "resources/python-workers/main.py",
+            "../python-workers/downloader.py": "resources/python-workers/downloader.py",
+            "../python-workers/events.py": "resources/python-workers/events.py",
+            "../python-workers/models.py": "resources/python-workers/models.py",
+            "../python-workers/transcriber.py": "resources/python-workers/transcriber.py",
+            "../python-workers/visual_analyzer.py": "resources/python-workers/visual_analyzer.py",
+            "../python-workers/audio_extractor.py": "resources/python-workers/audio_extractor.py",
+            "../python-workers/daemon.py": "resources/python-workers/daemon.py",
+            "../python-workers/embed_query.py": "resources/python-workers/embed_query.py",
+            "../python-workers/export_onnx.py": "resources/python-workers/export_onnx.py",
+            "../python-workers/export_onnx_embeddings.py": "resources/python-workers/export_onnx_embeddings.py",
+            "../python-workers/prepare_whisper_model.py": "resources/python-workers/prepare_whisper_model.py",
             "resources/assets": "resources/assets",
-            "resources/bin": "resources/bin"
+            "resources/bin": "resources/bin",
+            "resources/runtime-manifest.json": "resources/runtime-manifest.json",
+            "resources/local-llm-manifest.json": "resources/local-llm-manifest.json"
         },
         "windows": {
             "nsis": {
                 "installMode": "currentUser"
             }
-        }
+        },
+        "createUpdaterArtifacts": false
     },
     "app": {
         "security": {
@@ -37,16 +56,24 @@
         },
         "windows": [
             {
-                "title": "Pulsar Eventide",
+                "title": "Pulsaria",
                 "width": 1280,
                 "height": 800,
-                "minWidth": 1000,
-                "minHeight": 750,
+                "minWidth": 860,
+                "minHeight": 640,
                 "resizable": true,
                 "fullscreen": false,
                 "decorations": false,
-                "transparent": false
+                "transparent": false,
+                "center": true
             }
         ]
+    },
+    "plugins": {
+        "updater": {
+            "active": false,
+            "dialog": false,
+            "pubkey": ""
+        }
     }
 }
