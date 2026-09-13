@@ -1,5 +1,8 @@
 ﻿# Pulsaria — Agent Guide
 
+> Fuente normativa: [PROJECT_TRUTH.md](PROJECT_TRUTH.md). Este archivo solo
+> contiene orientación operativa subordinada y no define otra arquitectura.
+
 ## Purpose
 
 This document helps AI agents work efficiently in the Pulsaria codebase by providing scoped context, clear boundaries, and fast validation paths.

@@ -1,19 +1,21 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { FaRobot, FaPaperPlane } from "react-icons/fa6";
-import { generateChatResponse } from "@/lib/gemini";
+import { generateChatResponse } from "@/lib/local-llm";
+import type { JobRecord } from "@/hooks/use-jobs";
 
 interface Message { role: "user" | "assistant"; content: string; }
+type ChatJob = JobRecord & { transcript?: string; text?: string };
 
 /**
  * ChatAssistantPanel — Panel de chat RAG (Retrieval-Augmented Generation).
  * 
  * Permite al usuario hacer preguntas en lenguaje natural sobre la
- * biblioteca de videos. Usa Google Gemini como modelo de generación
- * y envía los primeros 5 videos procesados como contexto.
+ * biblioteca de videos. Usa un modelo local como motor de generación
+ * y envía los primeros 5 videos procesados al sidecar local.
  */
-export function ChatAssistantPanel({ jobs = [] }: { jobs?: any[] }) {
-  const [messages, setMessages] = useState<Message[]>([{ role: "assistant", content: "Hola, soy el asistente de investigación de Pulsar. Pregúntame sobre tus videos transcritos y te ayudo a encontrar información." }]);
+export function ChatAssistantPanel({ jobs = [] }: { jobs?: ChatJob[] }) {
+  const [messages, setMessages] = useState<Message[]>([{ role: "assistant", content: "Hola, soy el asistente de investigación de Pulsaria. Pregúntame sobre tus videos transcritos y te ayudo a encontrar información." }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -27,8 +29,8 @@ export function ChatAssistantPanel({ jobs = [] }: { jobs?: any[] }) {
     setMessages((prev) => [...prev, { role: "user", content: query }]);
     setLoading(true);
     try {
-      const completed = jobs.filter((j: any) => j.status === "complete");
-      const contextChunks = completed.slice(0, 5).map((j: any) => `Título: ${j.title || j.url}
+      const completed = jobs.filter((j) => j.status === "complete");
+      const contextChunks = completed.slice(0, 5).map((j) => `Título: ${j.title || j.url}
 ${j.transcript || j.text || ""}`).filter(Boolean);
       const response = await generateChatResponse(query, contextChunks);
       setMessages((prev) => [...prev, { role: "assistant", content: response }]);
@@ -54,10 +56,13 @@ ${j.transcript || j.text || ""}`).filter(Boolean);
           <div className="w-5 h-5 rounded-[6px] bg-[#8a5cff]/20 flex items-center justify-center text-[#8a5cff]">
             <FaRobot size={11} />
           </div>
-          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">Asistente RAG</span>
+        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">Asistente RAG</span>
         </div>
-        <span className="text-[8px] font-mono text-[#8a5cff] font-bold px-1.5 py-0.5 rounded bg-[#8a5cff]/10 border border-[#8a5cff]/20">
-          GEMINI
+        <span
+          title="La síntesis usa un modelo local. Los fragmentos no se envían a un servicio cloud."
+          className="text-[8px] font-mono text-[#8a5cff] font-bold px-1.5 py-0.5 rounded bg-[#8a5cff]/10 border border-[#8a5cff]/20"
+        >
+          IA LOCAL · SIN NUBE
         </span>
       </div>
 

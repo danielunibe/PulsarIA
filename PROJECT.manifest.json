@@ -1,7 +1,7 @@
-{
+ï»¿{
   "project": "Pulsaria",
-  "name": "Pulsar Eventide",
-  "description": "Motor multimodal de escritorio para descarga, transcripción, indexación semántica y consulta de videos cortos (TikTok, YouTube, Instagram).",
+  "name": "Pulsaria",
+  "description": "Motor multimodal de escritorio para descarga, transcripciï¿½n, indexaciï¿½n semï¿½ntica y consulta de videos cortos (TikTok, YouTube, Instagram).",
   "version": "0.1.0",
   "language": "Rust + TypeScript",
   "framework": {

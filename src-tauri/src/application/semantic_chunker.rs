@@ -71,3 +71,9 @@ impl SemanticChunker {
         chunks
     }
 }
+
+impl Default for SemanticChunker {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -14,12 +14,26 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
 
+/// The desktop gateway is intentionally restricted to the local machine.
+/// Keep this as a single contract so a future host configurability change
+/// cannot silently turn the desktop API into a network service.
+pub const API_BIND_HOST: &str = "127.0.0.1";
+
+pub fn validate_api_bind_host(host: &str) -> Result<(), &'static str> {
+    if host == API_BIND_HOST {
+        Ok(())
+    } else {
+        Err("Pulsaria API solo puede enlazarse a 127.0.0.1 durante la fase desktop")
+    }
+}
+
 #[derive(Clone)]
 pub struct ApiState {
     pub queue_service: Arc<QueueService>,
     pub search_service: Arc<SearchService>,
     pub job_repo: Arc<dyn JobRepository>,
     pub security: Arc<crate::api::middleware::security::SecurityConfig>,
+    pub runtime: crate::api::ApiRuntimeState,
 }
 
 #[derive(Deserialize)]
@@ -81,7 +95,7 @@ use crate::url_utils::is_collection_source;
 fn register_collection_source_for_api(
     repo: &Arc<dyn JobRepository>,
     url: &str,
-) -> Result<(), (StatusCode, String)> {
+) -> Result<i64, (StatusCode, String)> {
     let connection = repo
         .get_connection()
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
@@ -92,7 +106,56 @@ fn register_collection_source_for_api(
         )
     })?;
     crate::db::register_collection_source(&connection, url)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    crate::db::find_collection_source_id_by_url(&connection, url)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Collection source was registered but no identifier was returned".to_string(),
+            )
+        })
+}
+
+fn persist_collection_failure_for_api(repo: &Arc<dyn JobRepository>, source_id: i64, error: &str) {
+    let connection = match repo.get_connection() {
+        Ok(connection) => connection,
+        Err(connection_error) => {
+            warn!(
+                "Could not open database to persist collection failure: {}",
+                connection_error
+            );
+            return;
+        }
+    };
+    let connection = match connection.lock() {
+        Ok(connection) => connection,
+        Err(_) => {
+            warn!("Could not lock database to persist collection failure");
+            return;
+        }
+    };
+    if let Err(state_error) =
+        crate::db::mark_collection_source_failed(&connection, source_id, error)
+    {
+        warn!(
+            "Could not persist collection failure state: {}",
+            state_error
+        );
+    }
+    if let Err(event_error) = crate::db::insert_health_event(
+        &connection,
+        "tiktok_sync",
+        "error",
+        error,
+        Some("retry_with_backoff"),
+        Some("api"),
+    ) {
+        warn!(
+            "Could not persist collection failure event: {}",
+            event_error
+        );
+    }
 }
 
 fn find_or_insert_job_for_api(
@@ -122,6 +185,12 @@ async fn ingest_handler(
     State(state): State<ApiState>,
     Json(payload): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>, (StatusCode, String)> {
+    if payload.url.trim().is_empty() || payload.url.len() > 2_048 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Media URL must contain between 1 and 2048 characters".to_string(),
+        ));
+    }
     if !crate::api::middleware::security::is_valid_sandbox_url(&payload.url) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -130,31 +199,41 @@ async fn ingest_handler(
     }
 
     if is_collection_source(&payload.url) {
-        register_collection_source_for_api(&state.job_repo, &payload.url)?;
+        let source_id = register_collection_source_for_api(&state.job_repo, &payload.url)?;
 
-        let collection_urls = state
-            .queue_service
-            .expand_collection(&payload.url)
-            .await
-            .map_err(|error| (StatusCode::BAD_GATEWAY, error))?;
+        let collection_urls = match state.queue_service.expand_collection(&payload.url).await {
+            Ok(urls) => urls,
+            Err(error) => {
+                persist_collection_failure_for_api(&state.job_repo, source_id, &error);
+                return Err((StatusCode::BAD_GATEWAY, error));
+            }
+        };
         if collection_urls.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "No public videos were found in the TikTok collection".to_string(),
-            ));
+            let error = "No public videos were found in the TikTok collection";
+            persist_collection_failure_for_api(&state.job_repo, source_id, error);
+            return Err((StatusCode::BAD_REQUEST, error.to_string()));
         }
 
         let mut first_job_id = None;
+        let mut queued = 0usize;
         for video_url in collection_urls.into_iter().take(200) {
-            let (job_id, is_new) = find_or_insert_job_for_api(&state.job_repo, &video_url)?;
+            let (job_id, is_new) = match find_or_insert_job_for_api(&state.job_repo, &video_url) {
+                Ok(value) => value,
+                Err(error) => {
+                    persist_collection_failure_for_api(&state.job_repo, source_id, &error.1);
+                    return Err(error);
+                }
+            };
             first_job_id.get_or_insert(job_id);
 
             if is_new {
-                state
-                    .queue_service
-                    .dispatch(job_id, video_url)
-                    .await
-                    .map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, error))?;
+                match state.queue_service.dispatch(job_id, video_url).await {
+                    Ok(()) => queued += 1,
+                    Err(error) => {
+                        persist_collection_failure_for_api(&state.job_repo, source_id, &error);
+                        return Err((StatusCode::SERVICE_UNAVAILABLE, error));
+                    }
+                }
             }
         }
 
@@ -164,6 +243,15 @@ async fn ingest_handler(
                 "Collection did not yield any new or existing jobs".to_string(),
             )
         })?;
+        if let Ok(connection) = state.job_repo.get_connection() {
+            if let Ok(connection) = connection.lock() {
+                if let Err(error) =
+                    crate::db::mark_collection_source_synced(&connection, source_id, queued)
+                {
+                    warn!("Could not persist collection success state: {}", error);
+                }
+            }
+        }
         return Ok(Json(IngestResponse {
             job_id,
             status: "queued".to_string(),
@@ -195,6 +283,13 @@ async fn literal_search_handler(
     State(state): State<ApiState>,
     Json(payload): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, (StatusCode, String)> {
+    let query = payload.query.trim();
+    if query.is_empty() || query.len() > 500 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Search query must contain between 1 and 500 characters".to_string(),
+        ));
+    }
     let connection = state
         .job_repo
         .get_connection()
@@ -207,8 +302,8 @@ async fn literal_search_handler(
     })?;
     let results = crate::db::search_literal_transcripts(
         &connection,
-        &payload.query,
-        payload.limit.unwrap_or(10).min(100),
+        query,
+        payload.limit.unwrap_or(10).clamp(1, 100),
     )
     .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
     .into_iter()
@@ -228,19 +323,22 @@ async fn search_handler(
     State(state): State<ApiState>,
     Json(payload): Json<SearchRequest>,
 ) -> Result<Json<SearchResponse>, (StatusCode, String)> {
-    let results = state
-        .search_service
-        .search(&payload.query)
-        .await
-        .map_err(|e| {
-            warn!("API Search failed: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, e)
-        })?;
+    let query = payload.query.trim();
+    if query.is_empty() || query.len() > 500 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Search query must contain between 1 and 500 characters".to_string(),
+        ));
+    }
+    let results = state.search_service.search(query).await.map_err(|e| {
+        warn!("API Search failed: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, e)
+    })?;
 
     // Note: Future Phases 11 & 12 (Reranker and Semantic Cache) will intercept here
     let final_results = results
         .into_iter()
-        .take(payload.limit.unwrap_or(10))
+        .take(payload.limit.unwrap_or(10).clamp(1, 100))
         .collect();
 
     Ok(Json(SearchResponse {
@@ -313,13 +411,23 @@ async fn retry_job_handler(
     State(state): State<ApiState>,
     Path(job_id): Path<i64>,
 ) -> Result<Json<IngestResponse>, (StatusCode, String)> {
+    if state.queue_service.is_active(job_id).await {
+        return Ok(Json(IngestResponse {
+            job_id,
+            status: "retrying".to_string(),
+        }));
+    }
+
     let job_url = {
         let connection = state
             .job_repo
             .get_connection()
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
         let connection = connection.lock().map_err(|_| {
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database mutex poisoned".to_string())
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database mutex poisoned".to_string(),
+            )
         })?;
         let job = crate::db::get_job_by_id(&connection, job_id)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
@@ -333,10 +441,10 @@ async fn retry_job_handler(
                 "Job is not available for retry".to_string(),
             ));
         }
-        let processing_root = std::env::var_os("PULSAR_DOWNLOAD_DIR")
+        let media_root = std::env::var_os("PULSAR_DOWNLOAD_DIR")
             .map(std::path::PathBuf::from)
-            .unwrap_or_else(crate::db::data_dir_path)
-            .join("processing");
+            .unwrap_or_else(crate::storage::default_media_root);
+        let processing_root = crate::storage::staging_root(&media_root);
         crate::db::cleanup_media_files(&connection, job_id, &processing_root)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
         crate::db::reset_job_for_retry(&connection, job_id)
@@ -350,13 +458,23 @@ async fn retry_job_handler(
         // queued ni obligamos a esperar al scheduler de mantenimiento.
         if let Ok(connection) = state.job_repo.get_connection() {
             if let Ok(connection) = connection.lock() {
-                let _ = crate::db::update_job_error(&connection, job_id, "error", &error);
+                if let Err(persist_error) =
+                    crate::db::update_job_error(&connection, job_id, "error", &error)
+                {
+                    warn!(
+                        "API retry error state could not be persisted for job {}: {}",
+                        job_id, persist_error
+                    );
+                }
             }
         }
         return Err((StatusCode::SERVICE_UNAVAILABLE, error));
     }
 
-    Ok(Json(IngestResponse { job_id, status: "queued".to_string() }))
+    Ok(Json(IngestResponse {
+        job_id,
+        status: "queued".to_string(),
+    }))
 }
 
 async fn get_playlists_handler(
@@ -425,9 +543,19 @@ async fn get_playlist_items_handler(
             "Database mutex poisoned".to_string(),
         )
     })?;
-    crate::db::get_playlist_jobs(&connection, playlist_id)
-        .map(Json)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+    let mut jobs = crate::db::get_playlist_jobs(&connection, playlist_id)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    for job in &mut jobs {
+        if job
+            .video_path
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .is_some_and(|path| !path.is_file())
+        {
+            job.video_path = None;
+        }
+    }
+    Ok(Json(jobs))
 }
 
 async fn add_playlist_item_handler(
@@ -495,65 +623,8 @@ async fn health_handler() -> Json<HealthResponse> {
     })
 }
 
-async fn get_julia_pending_handler(
-    State(state): State<ApiState>,
-) -> Result<Json<Vec<crate::domain::models::JobRecord>>, (StatusCode, String)> {
-    let conn = state
-        .job_repo
-        .get_connection()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    let conn = conn.lock().unwrap_or_else(|poisoned| {
-        eprintln!("API: DB mutex poisoned (julia/pending), recovering");
-        poisoned.into_inner()
-    });
-    let db_jobs = crate::db::get_julia_ready_jobs(&conn)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let mut jobs = Vec::new();
-    for j in db_jobs {
-        jobs.push(crate::domain::models::JobRecord {
-            id: j.id,
-            url: j.url,
-            status: j.status,
-            progress: j.progress,
-            created_at: j.created_at,
-            title: j.title,
-            author: j.author,
-            thumbnail: j.thumbnail,
-            duration: j.duration,
-            video_path: j.video_path,
-            keep_status: j.keep_status,
-            platform: j.platform,
-            error_message: j.error_message,
-            visual_analysis: j.visual_analysis,
-            instructional_guide: j.instructional_guide,
-        });
-    }
-    Ok(Json(jobs))
-}
-
-#[derive(Deserialize)]
-pub struct JuliaAckRequest {
-    pub job_id: i64,
-}
-
-async fn julia_ack_handler(
-    State(state): State<ApiState>,
-    Json(payload): Json<JuliaAckRequest>,
-) -> Result<Json<()>, (StatusCode, String)> {
-    let conn = state
-        .job_repo
-        .get_connection()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    let conn = conn.lock().unwrap_or_else(|poisoned| {
-        eprintln!("API: DB mutex poisoned (julia/ack), recovering");
-        poisoned.into_inner()
-    });
-    crate::db::mark_julia_exported(&conn, payload.job_id)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    Ok(Json(()))
-}
-
 pub async fn start_api_server(port: u16, state: ApiState) {
+    let runtime = state.runtime.clone();
     // Configurar CORS para desarrollo Next.js y el servidor estático de producción.
     let cors = CorsLayer::new()
         .allow_origin([
@@ -568,63 +639,97 @@ pub async fn start_api_server(port: u16, state: ApiState) {
             "authorization".parse().unwrap(),
         ]);
 
-    let app = Router::new()
+    let write_routes = Router::new()
         .route("/api/v1/ingest", post(ingest_handler))
-        .route("/api/v1/jobs", get(get_jobs_handler))
-        .route("/api/v1/jobs/:job_id/retry", post(retry_job_handler))
+        .route("/api/v1/playlists", post(create_playlist_handler))
         .route(
-            "/api/v1/jobs/:job_id/transcript",
-            get(get_transcript_handler),
-        )
-        .route(
-            "/api/v1/playlists",
-            get(get_playlists_handler).post(create_playlist_handler),
+            "/api/v1/playlists/:playlist_id",
+            delete(delete_playlist_handler),
         )
         .route(
             "/api/v1/playlists/:playlist_id/items",
-            get(get_playlist_items_handler).post(add_playlist_item_handler),
+            post(add_playlist_item_handler),
         )
         .route(
             "/api/v1/playlists/:playlist_id/items/:job_id",
             delete(remove_playlist_item_handler),
         )
-        .route(
-            "/api/v1/playlists/:playlist_id",
-            delete(delete_playlist_handler),
-        )
-        .route("/api/v1/search/literal", post(literal_search_handler))
-        .route("/api/v1/search", post(search_handler))
         .route("/api/v1/transcribe", post(transcribe_handler))
-        // Protect with Max Payload Limit (1MB) to prevent large payload attacks
-        .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
-        // Replace old API Auth with JWT and Token-Bucket IP Rate Limits
+        .route("/api/v1/jobs/:job_id/retry", post(retry_job_handler))
+        // The desktop/browser UI has no login token. The API is bound to
+        // loopback, so use the same rate-limited optional-JWT policy as reads;
+        // a supplied token is still validated by the middleware.
         .layer(middleware::from_fn_with_state(
             state.security.clone(),
             crate::api::middleware::security::jwt_rate_limit_middleware,
-        ))
-        // Unauthenticated bypass
+        ));
+
+    let read_routes = Router::new()
+        .route("/api/v1/jobs", get(get_jobs_handler))
+        .route(
+            "/api/v1/jobs/:job_id/transcript",
+            get(get_transcript_handler),
+        )
+        .route("/api/v1/playlists", get(get_playlists_handler))
+        .route(
+            "/api/v1/playlists/:playlist_id/items",
+            get(get_playlist_items_handler),
+        )
+        .route("/api/v1/search/literal", post(literal_search_handler))
+        .route("/api/v1/search", post(search_handler))
+        .layer(middleware::from_fn_with_state(
+            state.security.clone(),
+            crate::api::middleware::security::jwt_rate_limit_middleware,
+        ));
+
+    let app = Router::new()
+        .merge(write_routes)
+        .merge(read_routes)
+        .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
         .route("/health", get(health_handler))
         .route("/api/v1/health", get(health_handler))
-        .route("/api/v1/julia/pending", get(get_julia_pending_handler))
-        .route("/api/v1/julia/ack", post(julia_ack_handler))
-        // CORS layer - permite al frontend hablar con el backend (8080)
         .layer(cors)
         .with_state(state);
 
-    let addr = format!("127.0.0.1:{}", port);
+    let configured_host = std::env::var("PULSAR_API_HOST").unwrap_or_else(|_| API_BIND_HOST.into());
+    if let Err(error) = validate_api_bind_host(&configured_host) {
+        runtime.mark_failed(error.to_string());
+        tracing::error!("{} (host configurado: {})", error, configured_host);
+        return;
+    }
+
+    let addr = format!("{}:{}", configured_host, port);
     info!("Starting Pulsar API Gateway REST on loopback {}", addr);
 
-    let listener = TcpListener::bind(&addr)
-        .await
-        .expect("Failed to bind Axum API port");
-    axum::serve(listener, app)
-        .await
-        .expect("Axum REST Server failed to serve");
+    let listener = match TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            let message = format!("Failed to bind Axum API port {}: {}", addr, error);
+            runtime.mark_failed(message.clone());
+            tracing::error!("{}", message);
+            return;
+        }
+    };
+    runtime.mark_ready();
+    if let Err(error) = axum::serve(listener, app).await {
+        runtime.mark_failed(format!("Axum REST Server failed to serve: {}", error));
+        tracing::error!("Axum REST Server failed to serve: {}", error);
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_collection_source;
+    use super::{is_collection_source, validate_api_bind_host, API_BIND_HOST};
+
+    #[test]
+    fn api_bind_contract_accepts_only_desktop_loopback() {
+        assert_eq!(API_BIND_HOST, "127.0.0.1");
+        assert!(validate_api_bind_host("127.0.0.1").is_ok());
+        assert!(validate_api_bind_host("0.0.0.0").is_err());
+        assert!(validate_api_bind_host("192.168.1.50").is_err());
+        assert!(validate_api_bind_host("::").is_err());
+        assert!(validate_api_bind_host("::1").is_err());
+    }
 
     #[test]
     fn detects_supported_tiktok_collection_shapes() {

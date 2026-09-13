@@ -1,3 +1,4 @@
+pub mod collection_service;
 pub mod embedding_cache;
 pub mod hybrid_search;
 pub mod query_analytics;

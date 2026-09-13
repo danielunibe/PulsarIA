@@ -1,6 +1,10 @@
-# Contribuir a Pulsar Eventide
+# Contribuir a Pulsaria
 
-Guía para contribuir al desarrollo de Pulsar Eventide.
+La fuente técnica normativa es [PROJECT_TRUTH.md](PROJECT_TRUTH.md). Este
+archivo describe el flujo operativo y no crea una segunda definición de
+arquitectura o estado.
+
+Guía para contribuir al desarrollo de Pulsaria.
 
 ## Requisitos previos
 
@@ -14,7 +18,7 @@ Guía para contribuir al desarrollo de Pulsar Eventide.
 ```bash
 # 1. Clonar el repositorio
 git clone <url-del-repositorio>
-cd pulsar-eventide
+cd PulsarIA
 
 # 2. Instalar dependencias del frontend
 npm install
@@ -24,7 +28,8 @@ pip install -r python-workers/requirements.txt
 
 # 4. Configurar variables de entorno
 cp .env.example .env
-# Editar .env con tu configuración (API keys, rutas, etc.)
+# Editar .env sólo con rutas y configuración local. No añadas API keys,
+# cookies, bases de datos ni datos de usuarios.
 ```
 
 ## Ejecución en modo desarrollo
@@ -38,7 +43,7 @@ Esto arranca automáticamente el frontend Next.js y el backend Tauri/Rust.
 ## Estructura del proyecto
 
 ```
-pulsar-eventide/
+PulsarIA/
 ├── app/                    # Next.js 15 App Router (frontend)
 ├── components/             # Componentes React modulares
 ├── hooks/                  # Custom hooks de React
@@ -118,7 +123,8 @@ cd python-workers && python -m pytest
 
 ## Documentación
 
-- **Archivos de referencia**: Ver `docs/PULSAR_ARCHITECTURE_AND_SPECS.md`
+- **Archivos de referencia**: Ver `PROJECT_TRUTH.md`; las especificaciones en
+  `docs/archive/` son históricas.
 - **Backlog de tareas**: Ver `docs/PULSAR_TASK_BACKLOG.md`
 - **Reportes de sesión**: Crear `docs/SESSION_REPORT_YYYYMMDD.md` después de sesiones significativas
 
@@ -129,6 +135,31 @@ cd python-workers && python -m pytest
 - `python-workers/` — Pipeline de procesamiento; cambios afectan el procesamiento real
 - `assets/models/` — Modelo ONNX embebido; no debe modificarse sin justificación
 
-## Licencia
+## Propiedad intelectual y contribuciones
 
-Al contribuir, aceptas que tus contribuciones bajo la licencia MIT del proyecto.
+El código de Pulsaria es propietario y visible para evaluación. Al enviar una
+contribución debes confirmar que tienes derecho a hacerlo y que no contiene
+código, datos, contenido multimedia, credenciales o material de terceros sin
+permiso.
+
+Las contribuciones sólo se aceptarán mediante el DCO de este repositorio
+mientras el titular no publique un CLA separado. Cada commit debe incluir una
+línea `Signed-off-by: Nombre <correo>` y quien firma debe tener derecho a
+conceder la licencia necesaria. No envíes una pull request si no puedes
+conceder los derechos necesarios para que el titular revise, incorpore,
+modifique y distribuya la contribución dentro del proyecto.
+
+El DCO no cambia la licencia propietaria del código principal ni concede
+permiso para redistribuir Pulsaria. Las contribuciones aprobadas se integran
+bajo LICENSE; sus dependencias y materiales de terceros conservan sus propias
+licencias.
+
+La licencia aplicable al código principal se encuentra en LICENSE. Los
+componentes de terceros conservan sus propias licencias descritas en
+THIRD_PARTY_NOTICES.md.
+
+## Seguridad y material público
+
+Nunca publiques secretos, cookies, vídeos descargados, transcripciones,
+bases SQLite, rutas privadas o información personal. Para vulnerabilidades,
+usa SECURITY.md y no una issue pública.

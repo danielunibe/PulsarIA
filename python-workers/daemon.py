@@ -1,18 +1,8 @@
 """
-Pulsaria — Worker Daemon Runner
-Keeps the worker container online, ready to execute jobs and respond to healthchecks.
+daemon.py — Punto de entrada del modo demonio de workers de Pulsaria.
+Alias de main.py para compatibilidad con el empaquetado de Tauri (tauri.conf.json).
 """
-import sys
-import time
-
-def main():
-    print(">>> PULSARIA MULTIMEDIA WORKER DAEMON READY <<<", flush=True)
-    while True:
-        try:
-            time.sleep(3600)
-        except (KeyboardInterrupt, SystemExit):
-            print("Pulsaria Worker daemon shutting down cleanly.", flush=True)
-            break
+from main import main
 
 if __name__ == "__main__":
     main()

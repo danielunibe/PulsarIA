@@ -55,9 +55,10 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
     onPlaylistSelect(nextId);
   };
 
+  const [pendingDelete, setPendingDelete] = useState<{ id: number; name: string } | null>(null);
+
   const handleDelete = (id: number, name: string) => {
-    if (typeof window !== 'undefined' && !window.confirm(`¿Eliminar la playlist «${name}»?`)) return;
-    void deletePlaylist(id);
+    setPendingDelete({ id, name });
   };
 
   return (
@@ -177,6 +178,31 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
           </div>
         )}
       </div>
+      {pendingDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+             role="dialog" aria-modal="true" aria-label="Confirmar eliminación">
+          <div className="rounded-2xl p-6 bg-[#0e1017] border border-white/10 shadow-2xl flex flex-col gap-4 max-w-xs w-full mx-4">
+            <p className="text-white text-sm font-medium">
+              ¿Eliminar la playlist «{pendingDelete.name}»?
+            </p>
+            <p className="text-white/40 text-xs">Esta acción no se puede deshacer.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setPendingDelete(null)}
+                className="flex-1 py-2 rounded-xl text-xs text-white/60 bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { void deletePlaylist(pendingDelete.id); setPendingDelete(null); }}
+                className="flex-1 py-2 rounded-xl text-xs font-bold text-white bg-[#fe2c55]/80 hover:bg-[#fe2c55] transition-colors"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Pulsar Eventide — BEIR / MS MARCO Recall Benchmark Runner
+Pulsaria — BEIR / MS MARCO Recall Benchmark Runner
 Sprint 5, Fase 27
 
 Ejecuta el recall benchmark contra el motor desplegado localmente.

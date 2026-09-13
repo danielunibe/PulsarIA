@@ -1,7 +1,6 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { TT_PINK, TT_CYAN, TIKTOK_LOGO_PATH } from '@/types';
 import { FaPlay } from 'react-icons/fa6';
 
 // ============================================================
@@ -28,31 +27,8 @@ interface VideoCardOverlayProps {
     tags?: string[];
     /** Si el video se está reproduciendo actualmente */
     isFullPlaying: boolean;
-    /** String de transición CSS para iconos */
-    iconTransition: string;
     /** Callback al hacer click en el botón de play */
     onPlayClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
-}
-
-// Waveform minimalista (3 barras en lugar de 5)
-function AudioWaveform() {
-    return (
-        <div className="flex items-end gap-[3px] h-[14px]" aria-label="Reproduciendo">
-            {[1, 2, 3].map((i) => (
-                <div
-                    key={i}
-                    className="w-[3px] rounded-full"
-                    style={{
-                        background: '#fe2c55',
-                        animation: `waveBar ${0.7 + i * 0.2}s ease-in-out infinite alternate`,
-                        animationDelay: `${i * 0.15}s`,
-                        height: '14px',
-                        transformOrigin: 'bottom',
-                    }}
-                />
-            ))}
-        </div>
-    );
 }
 
 /**
@@ -67,40 +43,16 @@ export function VideoCardOverlay({
     title,
     tags = [],
     isFullPlaying,
-    iconTransition,
     onPlayClick,
 }: VideoCardOverlayProps) {
     return (
         <>
-            {/* Waveform — solo visible al reproducir */}
-            {isFullPlaying && (
-                <div className="absolute top-4 left-4 z-40 flex items-center gap-2 pointer-events-none">
-                    <AudioWaveform />
-                </div>
-            )}
-
             <div
                 className="absolute inset-0 z-20 flex flex-col justify-between pointer-events-none"
             >
                 {/* Gradientes Protectores Transparentes */}
                 <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-black/80 to-transparent pointer-events-none opacity-80" />
                 <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/50 to-transparent pointer-events-none opacity-60" />
-                {/* Top: TikTok logo — pequeño y sutil */}
-                <div className="flex justify-end p-5 relative z-30">
-                    <svg
-                        style={{
-                            width: '20px',
-                            height: '20px',
-                            fill: 'rgba(255,255,255,0.4)',
-                            filter: `drop-shadow(1px 0px 0px ${TT_PINK}50) drop-shadow(-1px 0px 0px ${TT_CYAN}50)`,
-                            transition: iconTransition,
-                        }}
-                        viewBox="0 0 24 24"
-                    >
-                        <path d={TIKTOK_LOGO_PATH} />
-                    </svg>
-                </div>
-
                 {/* Centro: Play button */}
                 <div className={cn(
                     "flex-1 flex items-center justify-center transition-all duration-300",

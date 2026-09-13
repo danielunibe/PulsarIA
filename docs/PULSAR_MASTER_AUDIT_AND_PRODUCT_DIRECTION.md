@@ -1,4 +1,4 @@
-# PULSAR MASTER AUDIT AND PRODUCT DIRECTION
+﻿# PULSAR MASTER AUDIT AND PRODUCT DIRECTION
 
 > Documento maestro de continuidad. Congela el estado técnico y visual actual de Pulsar y define la dirección de producto antes de seguir programando.
 > Generado sin modificar código, sin ejecutar comandos pesados, sin tocar backend, datos ni modelos.
@@ -334,7 +334,7 @@ Estructura futura propuesta para cada video procesado (no implementada; es dise�
 
 | Decisión | Opciones | Recomendación | Impacto |
 |---|---|---|---|
-| Nombre final del producto | "Pulsar Eventide" / "TikTok Processor" / otro | Unificar en "Pulsar Eventide" (ya es la marca visual y de SDK) | Medio (branding, identificadores) |
+| Nombre final del producto | "Pulsaria" / "TikTok Processor" / otro | Unificar en "Pulsaria" (ya es la marca visual y de SDK) | Medio (branding, identificadores) |
 | Plataforma principal | Solo TikTok / TikTok+YouTube desde ya | TikTok como principal, diseñar el modelo de datos ya pensando en multi-plataforma | Alto (arquitectura de datos) |
 | Soporte YouTube | Ahora / después | Después de validar pipeline TikTok end-to-end | Medio |
 | Persistencia local de videos | Siempre local / opcional | Siempre local por ahora (offline-first) | Medio |

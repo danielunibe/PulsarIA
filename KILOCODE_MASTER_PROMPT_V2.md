@@ -1,5 +1,5 @@
-# KILOCODE - PROMPT MAESTRO V2 (AGOSTO 2026)
-## Pulsar Eventide - Sesion de Programacion Autonoma en Bucle
+﻿# KILOCODE - PROMPT MAESTRO V2 (AGOSTO 2026)
+## Pulsaria - Sesion de Programacion Autonoma en Bucle
 ### Lee este archivo completo primero. Luego ejecuta en orden. No pares hasta terminar.
 
 ---
@@ -11,7 +11,7 @@
 
 ## CONTEXTO DEL PROYECTO (Estado Agosto 2026)
 
-**Nombre:** Pulsar Eventide
+**Nombre:** Pulsaria
 **Ruta:** `C:\Users\danie\Desktop\Pulsaria`
 **Tipo:** App de escritorio nativa (Rust + Tauri 2 + Next.js 15 + React 19)
 **Proposito:** Descarga videos de TikTok/YouTube/Instagram, transcribe audio con IA, indexa en motor vectorial local (ONNX + HNSW en Rust), busqueda semantica por concepto. Soporta Playlists Inteligentes, clustering automatico y exportacion hacia ecosistema Julia.

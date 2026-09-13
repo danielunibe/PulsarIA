@@ -105,9 +105,13 @@ pub async fn jwt_rate_limit_middleware(
             // For now, use connection peer address for loopback.
             false // Never trust forwarded headers on loopback
         })
-        .or_else(|| Some("127.0.0.1")); // Loopback default for desktop app
+        .or(Some("127.0.0.1")); // Loopback default for desktop app
 
-    if !security_state.rate_limiter.check_ip(client_ip.unwrap_or("127.0.0.1")).await {
+    if !security_state
+        .rate_limiter
+        .check_ip(client_ip.unwrap_or("127.0.0.1"))
+        .await
+    {
         counter!("rate_limit_rejections_total", "endpoint" => req.uri().path().to_string())
             .increment(1);
         return Err(StatusCode::TOO_MANY_REQUESTS);
@@ -133,8 +137,7 @@ pub async fn jwt_rate_limit_middleware(
         .get("Authorization")
         .and_then(|h| h.to_str().ok());
     if let Some(auth_header) = auth_header {
-        if auth_header.starts_with("Bearer ") {
-            let token = &auth_header["Bearer ".len()..];
+        if let Some(token) = auth_header.strip_prefix("Bearer ") {
             let validation = Validation::new(Algorithm::HS256);
             if let Err(e) = decode::<Claims>(
                 token,
@@ -156,6 +159,34 @@ pub async fn jwt_rate_limit_middleware(
     Ok(next.run(req).await)
 }
 
+pub async fn jwt_auth_middleware(
+    State(security_state): State<Arc<SecurityConfig>>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok());
+    if let Some(auth_header) = auth_header {
+        if let Some(token) = auth_header.strip_prefix("Bearer ") {
+            let validation = Validation::new(Algorithm::HS256);
+            if let Err(e) = decode::<Claims>(
+                token,
+                &DecodingKey::from_secret(security_state.jwt_secret.as_bytes()),
+                &validation,
+            ) {
+                tracing::warn!("JWT Authentication failed: {}", e);
+                counter!("auth_failures_total", "reason" => "invalid_token").increment(1);
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            return Ok(next.run(req).await);
+        }
+    }
+    counter!("auth_failures_total", "reason" => "missing_token").increment(1);
+    Err(StatusCode::UNAUTHORIZED)
+}
+
 // 3. Simple URL Sandbox Validator
 pub fn is_valid_sandbox_url(url: &str) -> bool {
     let Some((scheme, authority_and_path)) = url.split_once("://") else {
@@ -169,6 +200,11 @@ pub fn is_valid_sandbox_url(url: &str) -> bool {
         .split(['/', '?', '#'])
         .next()
         .unwrap_or("");
+    // Userinfo is not needed for TikTok and can cause credentials to be
+    // forwarded to the extractor. Reject it before host classification.
+    if authority.contains('@') {
+        return false;
+    }
     let host = authority
         .rsplit('@')
         .next()
@@ -178,17 +214,7 @@ pub fn is_valid_sandbox_url(url: &str) -> bool {
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    matches!(
-        host.as_str(),
-        "youtube.com"
-            | "www.youtube.com"
-            | "youtu.be"
-            | "tiktok.com"
-            | "www.tiktok.com"
-            | "instagram.com"
-            | "www.instagram.com"
-    ) || host.ends_with(".tiktok.com")
-        || host.ends_with(".instagram.com")
+    matches!(host.as_str(), "tiktok.com" | "www.tiktok.com") || host.ends_with(".tiktok.com")
 }
 
 #[cfg(test)]
@@ -197,22 +223,27 @@ mod tests {
 
     #[test]
     fn accepts_supported_https_hosts() {
-        assert!(is_valid_sandbox_url("https://www.youtube.com/watch?v=abc"));
-        assert!(is_valid_sandbox_url("https://youtu.be/abc"));
         assert!(is_valid_sandbox_url(
             "https://www.tiktok.com/@creator/video/1"
         ));
-        assert!(is_valid_sandbox_url("https://www.instagram.com/reel/abc"));
+        assert!(is_valid_sandbox_url("https://vm.tiktok.com/ZExample"));
     }
 
     #[test]
     fn rejects_insecure_and_embedded_hosts() {
-        assert!(!is_valid_sandbox_url("http://www.youtube.com/watch?v=abc"));
+        assert!(!is_valid_sandbox_url(
+            "http://www.tiktok.com/@creator/video/1"
+        ));
+        assert!(!is_valid_sandbox_url("https://www.youtube.com/watch?v=abc"));
+        assert!(!is_valid_sandbox_url("https://www.instagram.com/reel/abc"));
         assert!(!is_valid_sandbox_url(
             "https://evil.example/tiktok.com/video/1"
         ));
         assert!(!is_valid_sandbox_url(
             "https://youtube.com.evil.example/watch?v=abc"
+        ));
+        assert!(!is_valid_sandbox_url(
+            "https://user:password@www.tiktok.com/@creator/video/1"
         ));
     }
 }

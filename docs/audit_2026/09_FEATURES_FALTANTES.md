@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 09: MATRIZ DE FEATURES FALTANTES
+﻿# PULSARIA — AUDITORÍA 09: MATRIZ DE FEATURES FALTANTES
 ## Requisitos Funcionales, Módulos Pendientes y Especificación Técnica
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 10_PLAN_IMPLEMENTACION_POR_FASES.md
 

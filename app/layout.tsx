@@ -1,7 +1,8 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter, Space_Grotesk } from 'next/font/google';
 import './globals.css';
 import { SettingsProvider } from '@/lib/settings-context';
+import { I18nProvider } from '@/lib/i18n';
 import { Toaster } from 'sonner';
 
 const inter = Inter({
@@ -17,8 +18,15 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-    title: 'Pulsar Eventide - Video AI Engine',
-    description: 'Motor de análisis y consulta semántica audiovisual.',
+    title: 'Pulsaria — Biblioteca Multimedia Inteligente',
+    description: 'Descarga, transcribe e indexa semánticamente tus videos con IA local. Búsqueda semántica, playlists temáticas y análisis multimodal.',
+    keywords: ['TikTok', 'IA', 'transcripción', 'ONNX', 'Whisper', 'búsqueda semántica'],
+};
+
+export const viewport: Viewport = {
+    width: 'device-width',
+    initialScale: 1,
+    minimumScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -26,7 +34,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <html lang="es" className={`${inter.variable} ${spaceGrotesk.variable}`}>
             <body className="font-sans antialiased" suppressHydrationWarning>
                 <SettingsProvider>
-                    {children}
+                    <I18nProvider>
+                        {children}
+                    </I18nProvider>
                     <Toaster
                         position="bottom-right"
                         theme="dark"

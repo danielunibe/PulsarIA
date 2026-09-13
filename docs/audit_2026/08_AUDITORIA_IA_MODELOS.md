@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 08: INTELIGENCIA ARTIFICIAL Y MODELOS
+﻿# PULSARIA — AUDITORÍA 08: INTELIGENCIA ARTIFICIAL Y MODELOS
 ## Evaluación de Whisper, ONNX MiniLM, Integración con Google Gemini y Estrategia Multimodal
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 09_FEATURES_FALTANTES.md
 

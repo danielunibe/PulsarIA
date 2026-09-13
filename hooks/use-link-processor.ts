@@ -6,16 +6,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * Plataforma de origen detectada a partir de la URL del video.
  * 
  * - `tiktok`: Videos de TikTok (www.tiktok.com, vm.tiktok.com, vt.tiktok.com)
- * - `youtube`: Videos de YouTube (youtube.com/watch, youtu.be, youtube.com/shorts)
- * - `instagram`: Reels de Instagram (instagram.com/reel, instagram.com/p)
- * - `generic`: Cualquier otra URL HTTP válida (respaldo)
+ * - `generic`: URL no soportada por el MVP
  */
-export type Platform = 'tiktok' | 'youtube' | 'instagram' | 'generic';
+export type Platform = 'tiktok' | 'generic';
 
 const PLATFORM_REGEXES: Record<Platform, RegExp> = {
   tiktok: /https:\/\/(?:www\.|vm\.|vt\.)?tiktok\.com\//i,
-  youtube: /https:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)/i,
-  instagram: /https:\/\/(?:www\.)?instagram\.com\/(?:reel|p)\//i,
   generic: /^https?:\/\/.{5,}/i,
 };
 
@@ -37,21 +33,18 @@ export function isPlaylistUrl(url: string): boolean {
 /**
  * Detecta la plataforma de origen de un video a partir de su URL.
  * 
- * Evalúa las URLs contra expresiones regulares específicas para cada plataforma.
- * Si ninguna coincide, retorna 'generic' como respaldo.
+ * Solo TikTok forma parte del MVP; cualquier otra URL retorna `generic`.
  * 
  * @param url - URL del video a analizar
  * @returns La plataforma detectada
  */
 export function detectPlatform(url: string): Platform {
   if (PLATFORM_REGEXES.tiktok.test(url)) return 'tiktok';
-  if (PLATFORM_REGEXES.youtube.test(url)) return 'youtube';
-  if (PLATFORM_REGEXES.instagram.test(url)) return 'instagram';
   return 'generic';
 }
 
 function isValidUrl(url: string): boolean {
-  return [PLATFORM_REGEXES.tiktok, PLATFORM_REGEXES.youtube, PLATFORM_REGEXES.instagram].some((rx) => rx.test(url));
+  return PLATFORM_REGEXES.tiktok.test(url);
 }
 
 type LinkStats = { total: number; valid: number; invalid: number };

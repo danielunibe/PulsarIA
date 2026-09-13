@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Pulsar Eventide — HNSW Snapshot Backup Script
+Pulsaria — HNSW Snapshot Backup Script
 Sprint Hardening — Área E14
 
 Respalda automáticamente los snapshots del índice HNSW a S3/GCS.

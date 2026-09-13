@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
-import { TT_PINK, TT_CYAN, TIKTOK_LOGO_PATH } from '@/types';
+import { TT_PINK, TT_CYAN, TIKTOK_LOGO_PATH } from '@/lib/design-tokens';
 import { 
     FaMagnifyingGlass, 
     FaXmark, 
@@ -20,9 +20,11 @@ import {
     FaWindowMinimize,
     FaWindowMaximize,
     FaWindowRestore,
+    FaFilm,
     FaXmark as FaClose
 } from 'react-icons/fa6';
 import { toast } from 'sonner';
+import { useI18n, type TranslationKey } from '@/lib/i18n';
 import { type PageConfig, type GridLayout, type GridColumns, type SortKey } from './PagePanel';
 
 const TikTokIcon = ({ size = 28, className = "" }: { size?: number, className?: string }) => (
@@ -53,11 +55,13 @@ const MaximizeIcon = () => <FaWindowMaximize size={12} />;
 const RestoreIcon = () => <FaWindowRestore size={12} />;
 const CloseIcon = () => <FaClose size={12} />;
 
+export const TITLEBAR_HEIGHT_PX = 40;
+
 const SORT_OPTIONS = [
-    { id: 'date_desc', label: 'Más Recientes', Icon: ClockFillIcon },
-    { id: 'date_asc', label: 'Más Antiguos', Icon: CalendarFillIcon },
-    { id: 'title', label: 'Por Nombre', Icon: SortAlphaIcon },
-    { id: 'duration', label: 'Por Duración', Icon: TimerFillIcon },
+    { id: 'date_desc', labelKey: 'recent', Icon: ClockFillIcon },
+    { id: 'date_asc', labelKey: 'oldest', Icon: CalendarFillIcon },
+    { id: 'title', labelKey: 'byName', Icon: SortAlphaIcon },
+    { id: 'duration', labelKey: 'byDuration', Icon: TimerFillIcon },
 ];
 
 const btnBase: React.CSSProperties = {
@@ -103,10 +107,22 @@ interface HeaderProps {
     searchMode?: SearchMode;
     /** Callback para cambiar modo de búsqueda */
     onSearchModeChange?: (mode: SearchMode) => void;
+    /** Abre el visor inmersivo de videos visibles */
+    onOpenCinema?: () => void;
+    /** Indica si existe una colección lista para Cinema */
+    canOpenCinema?: boolean;
 }
 
 function useWindowControls() {
     const [isMaximized, setIsMaximized] = useState(false);
+
+    const reportWindowError = (action: string, error: unknown) => {
+        console.warn(`Window ${action} failed:`, error);
+        toast.error(`No se pudo ${action} la ventana`, {
+            description: 'La ventana nativa no aceptó la acción. Reinicia Pulsaria si persiste.',
+            duration: 3500,
+        });
+    };
 
     const minimize = async () => {
         try {
@@ -114,7 +130,7 @@ function useWindowControls() {
             const window = getCurrentWindow();
             await window.minimize();
         } catch (e) {
-            console.warn('Window minimize failed:', e);
+            reportWindowError('minimizar', e);
         }
     };
 
@@ -122,18 +138,12 @@ function useWindowControls() {
         try {
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             const window = getCurrentWindow();
-            // Read the native state at click time. React state may still reflect
-            // the previous window size when the user clicks twice quickly.
-            const currentlyMaximized = await window.isMaximized();
-            if (currentlyMaximized) {
-                await window.unmaximize();
-                setIsMaximized(false);
-            } else {
-                await window.maximize();
-                setIsMaximized(true);
-            }
+            // Use Tauri's atomic toggle so two quick clicks cannot race a
+            // stale React value between maximize and unmaximize.
+            await window.toggleMaximize();
+            setIsMaximized(await window.isMaximized());
         } catch (e) {
-            console.warn('Window maximize failed:', e);
+            reportWindowError('maximizar', e);
         }
     };
 
@@ -143,17 +153,7 @@ function useWindowControls() {
             const window = getCurrentWindow();
             await window.close();
         } catch (e) {
-            console.warn('Window close failed:', e);
-        }
-    };
-
-    const startDragging = async () => {
-        try {
-            const { getCurrentWindow } = await import('@tauri-apps/api/window');
-            const window = getCurrentWindow();
-            await window.startDragging();
-        } catch (e) {
-            console.warn('Window drag failed:', e);
+            reportWindowError('cerrar', e);
         }
     };
 
@@ -179,21 +179,21 @@ function useWindowControls() {
         };
     }, []);
 
-    return { isMaximized, minimize, maximize, close, startDragging };
+    return { isMaximized, minimize, maximize, close };
 }
 
 /** Barra de título nativa sin decoraciones de Windows. Vive en el shell raíz. */
 export function WindowTitlebar() {
-    const dragRef = useRef<HTMLDivElement>(null);
-    const { isMaximized, minimize, maximize, close, startDragging } = useWindowControls();
+    const { isMaximized, minimize, maximize, close } = useWindowControls();
 
     return (
         <div
-            ref={dragRef}
-            className="w-full h-10 shrink-0 flex items-center justify-between px-4 app-drag-region"
+            data-tauri-drag-region="true"
+            className="w-full shrink-0 flex items-center justify-between px-4"
             style={{
                 position: 'relative',
                 zIndex: 100,
+                height: `${TITLEBAR_HEIGHT_PX}px`,
                 background: 'rgba(10, 11, 16, 0.78)',
                 backdropFilter: 'blur(40px)',
                 WebkitBackdropFilter: 'blur(40px)',
@@ -201,14 +201,8 @@ export function WindowTitlebar() {
                 userSelect: 'none',
             }}
             onDoubleClick={(event) => {
-                if (event.target === event.currentTarget) void maximize();
-            }}
-            onMouseDown={(event) => {
-                // Only the empty titlebar surface drags. Without this guard,
-                // pressing a control also starts a drag and steals the click.
-                if (event.button === 0 && event.target === event.currentTarget) {
-                    void startDragging();
-                }
+                const target = event.target;
+                if (!(target instanceof Element) || !target.closest('button')) void maximize();
             }}
         >
             <div className="flex items-center gap-2.5 pointer-events-none">
@@ -242,7 +236,10 @@ export function Header({
     sortKey,
     searchMode = 'literal',
     isLoading = false,
+    onOpenCinema,
+    canOpenCinema = false,
 }: HeaderProps) {
+    const { t } = useI18n();
     const [viewMenuOpen, setViewMenuOpen] = useState(false);
     const activeSort = sortKey || pageConfig?.sortKey || 'date_desc';
     const [query, setQuery] = useState('');
@@ -304,13 +301,13 @@ export function Header({
                 <div
                     onClick={() => {
                         if (activeCount === 0) {
-                            toast.info("Biblioteca vacía", {
-                                description: "Pega un enlace en el panel izquierdo para procesar tu primer video.",
+                            toast.info(t('noResults'), {
+                                description: t('pasteLinks'),
                                 duration: 3500
                             });
                         } else {
-                            toast.success("Biblioteca de TikTok", {
-                                description: `${activeCount} videos disponibles para consulta.`,
+                            toast.success(t('library'), {
+                                description: `${activeCount} ${t('library').toLowerCase()}.`,
                                 duration: 3000
                             });
                         }
@@ -355,6 +352,7 @@ export function Header({
                         <input
                             ref={inputRef}
                             type="text"
+                            aria-label={t('search')}
                             value={query}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
                             onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -363,7 +361,7 @@ export function Header({
                                     onSearchSubmit(query, searchMode);
                                 }
                             }}
-                            placeholder="Buscar por contenido, autor, tema o transcripción..."
+                            placeholder={`${t('search')}…`}
                             className="min-w-0 flex-1 bg-transparent text-xs font-medium text-white placeholder-white/75 outline-none opacity-0 pointer-events-none transition-opacity duration-200 group-hover/search:opacity-100 group-hover/search:pointer-events-auto group-focus-within/search:opacity-100 group-focus-within/search:pointer-events-auto"
                         />
                         {query.trim().length > 0 && (
@@ -375,7 +373,7 @@ export function Header({
                                     if (onSearchClear) onSearchClear();
                                 }}
                                 className="flex-shrink-0 cursor-pointer border-none bg-transparent p-1 text-white/80 transition-colors hover:text-white"
-                                title="Limpiar búsqueda"
+                                 title={t('clearSearch')}
                             >
                                 <XIcon />
                             </button>
@@ -387,6 +385,9 @@ export function Header({
                         <motion.button
                             type="button"
                             onClick={() => setViewMenuOpen(o => !o)}
+                            aria-label="Vista y ordenamiento"
+                            aria-expanded={viewMenuOpen}
+                            aria-controls="view-organization-menu"
                             title="Opciones de visualización y ordenamiento"
                             style={{
                                 ...btnBase,
@@ -415,6 +416,7 @@ export function Header({
                         {/* Popover / Menú Desplegable de Vista y Filtros */}
                         {viewMenuOpen && (
                             <motion.div
+                                id="view-organization-menu"
                                 className="absolute top-full right-0 mt-2 w-64 p-3.5 overflow-hidden z-50 flex flex-col gap-3 font-sans"
                                 initial={{ opacity: 0, y: -8, scale: 0.96, transformOrigin: 'top right' }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -501,7 +503,7 @@ export function Header({
                                 {/* 3. Criterio de Orden */}
                                 <div className="flex flex-col gap-1.5 pt-1 border-t border-white/[0.04]">
                                     <span className="text-[9px] font-bold uppercase tracking-wider text-white/40">
-                                        Ordenar Por
+                                        {t('sortBy')}
                                     </span>
                                     <div className="flex flex-col gap-0.5">
                                         {SORT_OPTIONS.map(opt => {
@@ -521,7 +523,7 @@ export function Header({
                                                         <opt.Icon />
                                                     </span>
                                                     <span className="text-xs font-semibold flex-1">
-                                                        {opt.label}
+                                                         {t(opt.labelKey as TranslationKey)}
                                                     </span>
                                                     {isSelected && (
                                                         <div className="w-1.5 h-1.5 rounded-full bg-[#25f4ee] shadow-[0_0_6px_#25f4ee]" />
@@ -560,11 +562,38 @@ export function Header({
                         )}
                     </div>
 
+                    {/* Modo Cinema: control discreto junto a las vistas de biblioteca */}
+                    <motion.button
+                        type="button"
+                        onClick={onOpenCinema}
+                        disabled={!canOpenCinema}
+                        aria-label={t('openCinema')}
+                        title={canOpenCinema ? t('openCinema') : t('noVideosCinema')}
+                        style={{
+                            ...btnBase,
+                            height: '40px',
+                            padding: '0 12px',
+                            gap: '7px',
+                            border: canOpenCinema ? '1px solid rgba(254,44,85,0.28)' : '1px solid rgba(255,255,255,0.06)',
+                            background: canOpenCinema ? 'linear-gradient(135deg, rgba(254,44,85,0.12), rgba(37,244,238,0.08))' : 'rgba(0,0,0,0.24)',
+                            opacity: canOpenCinema ? 1 : 0.42,
+                            cursor: canOpenCinema ? 'pointer' : 'not-allowed',
+                        }}
+                        whileHover={canOpenCinema ? { scale: 1.04, borderColor: 'rgba(37,244,238,0.6)', boxShadow: '0 0 18px rgba(254,44,85,0.22)' } : undefined}
+                        whileTap={canOpenCinema ? { scale: 0.96 } : undefined}
+                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                        className="group"
+                    >
+                        <FaFilm size={14} className="text-[#fe2c55] transition-colors group-hover:text-[#25f4ee]" />
+                        <span className="hidden lg:inline text-[10px] font-black uppercase tracking-[0.16em] text-white/75">Cinema</span>
+                    </motion.button>
+
                     {/* 3. Botón de Configuración */}
                     <motion.button
                         type="button"
                         onClick={onOpenSettings}
-                        title="Configuración y Ajustes"
+                        aria-label={t('settings')}
+                        title={t('settings')}
                         style={{
                             ...btnBase,
                             height: '40px',
@@ -594,7 +623,7 @@ export function Header({
                             <SettingsIcon />
                         </motion.span>
                         <span className="hidden md:inline text-xs font-bold text-white tracking-wider uppercase drop-shadow-sm">
-                            Configuración
+                            {t('settings')}
                         </span>
                     </motion.button>
                 </div>

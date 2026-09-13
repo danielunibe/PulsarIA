@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 07: PIPELINE DE WORKERS PYTHON
+﻿# PULSARIA — AUDITORÍA 07: PIPELINE DE WORKERS PYTHON
 ## Descarga, Extracción de Audio, Transcripción y Protocolo de Comunicación IPC
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 08_AUDITORIA_IA_MODELOS.md
 

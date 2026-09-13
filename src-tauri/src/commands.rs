@@ -3,31 +3,29 @@
 //! All #[tauri::command] handlers extracted from main.rs to reduce
 //! the composition root to pure bootstrap logic.
 
-
-use std::collections::hash_map::DefaultHasher;
-use std::fs;
-use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::{Arc, Mutex as StdMutex, LazyLock};
-use tokio::sync::Mutex;
-use rusqlite::params;
-use tauri::{Emitter, State};
-use serde::{Deserialize, Serialize};
-use serde_json;
-#[cfg(windows)]
-use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
-use crate::url_utils::is_collection_source;
 use crate::api::middleware::security::is_valid_sandbox_url;
+use crate::application::collection_service::sync_due_collections;
+use crate::application::queue_service::QueueService;
 use crate::application::semantic_chunker::SemanticChunker;
 use crate::db;
 use crate::embedding;
-use crate::queue;
-
-/// Bug #33 FIX: Maximum concurrent workers spawned by collection expansion.
-const MAX_COLLECTION_WORKERS: usize = 8;
-static COLLECTION_SEMAPHORE: LazyLock<tokio::sync::Semaphore> =
-    LazyLock::new(|| tokio::sync::Semaphore::new(MAX_COLLECTION_WORKERS));
+use crate::storage;
+use crate::url_utils::is_collection_source;
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::hash_map::DefaultHasher;
+use std::fs;
+use std::hash::{Hash, Hasher};
+use std::io::Read;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::{Arc, Mutex as StdMutex};
+use tauri::{Emitter, State};
+use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
+use tokio::sync::Mutex;
+#[cfg(windows)]
+use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkerConfig {
@@ -36,6 +34,12 @@ pub struct WorkerConfig {
     pub cookies_browser: String,
     pub retention: String,
     pub processing: ProcessingSettings,
+    #[serde(default)]
+    pub intent: String,
+    #[serde(default)]
+    pub quota_bytes: u64,
+    #[serde(default)]
+    pub reserve_bytes: u64,
 }
 
 impl Default for WorkerConfig {
@@ -46,6 +50,9 @@ impl Default for WorkerConfig {
             cookies_browser: String::new(),
             retention: "keep".into(),
             processing: ProcessingSettings::default(),
+            intent: "balanced".into(),
+            quota_bytes: 0,
+            reserve_bytes: 0,
         }
     }
 }
@@ -86,26 +93,111 @@ pub struct HardwareProfile {
     pub whisper_gpu_supported: bool,
     pub recommended_quality: String,
 }
-/// Estado compartido de la aplicación Tauri.
+/// Estado compartido de la aplicaci├│n Tauri.
 ///
-/// Se gestiona como 	auri::State<AppState> y se pasa a todos los
+/// Se gestiona como `tauri::State<AppState>` y se pasa a todos los
 /// comandos Tauri. Contiene:
-/// - db — Conexión SQLite (std::sync::Mutex para compatibilidad sync)
-/// - queue — Gestor de cola async (tokio::sync::Mutex)
-/// - onnx — Modelo ONNX de embeddings (opcional, puede no estar cargado)
-/// - search — Servicio de búsqueda híbrida (HNSW + BM25 + Cache)
-/// - config — Configuración de búsqueda (min_score, max_results, etc.)
-/// - metrics — Métricas de rendimiento (latencias, conteo de queries)
-/// - worker_config — Configuración de workers (formats, retention, etc.)
+/// - db ÔÇö Conexi├│n SQLite (std::sync::Mutex para compatibilidad sync)
+/// - queue ÔÇö Gestor de cola async (tokio::sync::Mutex)
+/// - onnx ÔÇö Modelo ONNX de embeddings (opcional, puede no estar cargado)
+/// - search ÔÇö Servicio de b├║squeda h├¡brida (HNSW + BM25 + Cache)
+/// - config ÔÇö Configuraci├│n de b├║squeda (min_score, max_results, etc.)
+/// - metrics ÔÇö M├®tricas de rendimiento (latencias, conteo de queries)
+/// - worker_config ÔÇö Configuraci├│n de workers (formats, retention, etc.)
 pub struct AppState {
     pub db: Arc<StdMutex<rusqlite::Connection>>,
 
-    pub queue: Arc<Mutex<queue::QueueManager>>,
+    pub queue: Arc<QueueService>,
+    pub api_runtime: crate::api::ApiRuntimeState,
     pub onnx: Arc<Mutex<Option<embedding::ONNXModelManager>>>,
     pub search: Arc<crate::application::search_service::SearchService>,
     pub config: Arc<Mutex<SearchConfig>>,
     pub metrics: Arc<Mutex<SystemMetrics>>,
     pub worker_config: Arc<tokio::sync::RwLock<WorkerConfig>>,
+    pub model_prepare_pid: Arc<Mutex<Option<u32>>>,
+    pub local_llm: Arc<crate::infrastructure::local_llm::LocalLlmManager>,
+}
+
+#[tauri::command]
+pub async fn get_local_llm_status(
+    state: State<'_, AppState>,
+) -> Result<crate::infrastructure::local_llm::LocalLlmStatus, String> {
+    Ok(state.local_llm.status().await)
+}
+
+#[tauri::command]
+pub async fn ensure_local_llm(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::infrastructure::local_llm::LocalLlmStatus, String> {
+    state.local_llm.ensure_model(&app_handle).await
+}
+
+#[tauri::command]
+pub async fn cancel_local_llm_download(state: State<'_, AppState>) -> Result<(), String> {
+    state.local_llm.cancel_download();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn generate_local_response(
+    request: crate::infrastructure::local_llm::LocalLlmRequest,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::infrastructure::local_llm::LocalLlmResponse, String> {
+    state.local_llm.generate(&app_handle, request).await
+}
+
+/// Optional cloud synthesis. The API key is read by the native adapter only;
+/// the frontend receives text or a bounded actionable error, never the key.
+#[tauri::command]
+pub async fn generate_gemini_response(
+    prompt: String,
+    max_output_tokens: u32,
+) -> Result<String, String> {
+    crate::infrastructure::gemini::generate(&prompt, max_output_tokens)
+        .await
+        .map(|response| response.text)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WhisperModelStatus {
+    pub model: String,
+    pub ready: bool,
+    pub status: String,
+    pub revision: Option<String>,
+    pub path: String,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RuntimeHealth {
+    pub model: WhisperModelStatus,
+    pub queue_depth: usize,
+    pub backpressure_active: bool,
+    pub worker_capacity: usize,
+    pub idle_workers: usize,
+    pub autostart_enabled: bool,
+    pub api_ready: bool,
+    pub api_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MvpSettingsInput {
+    pub download_dir: String,
+    pub retention: String,
+    pub browser: String,
+    pub formats: Vec<String>,
+    pub min_score: f32,
+    pub quality: u8,
+    pub video_fit: String,
+    #[serde(default)]
+    pub intent: Option<String>,
+    #[serde(default)]
+    pub quota_bytes: Option<u64>,
+    #[serde(default)]
+    pub reserve_bytes: Option<u64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -179,121 +271,16 @@ pub fn emit_log(app_handle: &tauri::AppHandle, message: String) {
 }
 
 /// Resolve the bundled/local MiniLM model consistently for development,
-/// packaged Tauri builds, and explicit user overrides.
+/// packaged Tauri builds and the explicit `PULSAR_RUNTIME_ROOT` contract.
 pub fn resolve_model_dir() -> PathBuf {
-    let current_dir = std::env::current_dir().unwrap_or_default();
-    let mut candidates = Vec::new();
-
-    if let Some(configured) = std::env::var_os("ONNX_MODEL_DIR") {
-        candidates.push(PathBuf::from(configured));
-    }
-    candidates.extend([
-        current_dir.join("assets/models/all-MiniLM-L6-v2"),
-        current_dir.join("src-tauri/assets/models/all-MiniLM-L6-v2"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/assets/models/all-MiniLM-L6-v2"),
-    ]);
-    if let Some(executable_dir) = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(PathBuf::from))
-    {
-        candidates.push(executable_dir.join("resources/assets/models/all-MiniLM-L6-v2"));
-        candidates.push(executable_dir.join("assets/models/all-MiniLM-L6-v2"));
-    }
-
-    candidates
-        .into_iter()
-        .find(|candidate| {
-            candidate.join("model.onnx").is_file()
-                && candidate.join("tokenizer.json").is_file()
-        })
-        .unwrap_or_else(|| current_dir.join("assets/models/all-MiniLM-L6-v2"))
+    crate::runtime::embedding_model_dir()
 }
 
 fn processing_root() -> PathBuf {
-    std::env::var_os("PULSAR_DOWNLOAD_DIR")
+    let root = std::env::var_os("PULSAR_DOWNLOAD_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(crate::db::data_dir_path)
-        .join("processing")
-}
-
-async fn sync_collection_sources(
-    db: Arc<StdMutex<rusqlite::Connection>>,
-    queue: Arc<Mutex<queue::QueueManager>>,
-    app_handle: tauri::AppHandle,
-) {
-    let sources = match db.lock() {
-        Ok(connection) => match db::get_collection_sources_to_sync(&connection) {
-            Ok(sources) => sources,
-            Err(error) => {
-                emit_log(&app_handle, format!("Collection sync lookup failed: {}", error));
-                return;
-            }
-        },
-        Err(_) => {
-            emit_log(&app_handle, "Collection sync could not lock the database".into());
-            return;
-        }
-    };
-
-    for source in sources {
-        let collection_urls = {
-            let queue_guard = queue.lock().await;
-            queue_guard.expand_collection(&source).await
-        };
-        let collection_urls = match collection_urls {
-            Ok(urls) => urls,
-            Err(error) => {
-                emit_log(
-                    &app_handle,
-                    format!("Collection sync failed for {}: {}", source, error),
-                );
-                continue;
-            }
-        };
-
-        let mut queued = 0usize;
-        for video_url in collection_urls.into_iter().take(200) {
-            let job_id = match db.lock() {
-                Ok(connection) => match db::find_job_id_by_url(&connection, &video_url) {
-                    Ok(Some(_)) => None,
-                    Ok(None) => db::insert_job(&connection, &video_url).ok(),
-                    Err(error) => {
-                        emit_log(&app_handle, format!("Collection job insert failed: {}", error));
-                        None
-                    }
-                },
-                Err(_) => None,
-            };
-
-            if let Some(job_id) = job_id {
-                let queue_guard = queue.lock().await;
-                queue_guard
-                    .dispatch_worker(job_id, video_url, app_handle.clone())
-                    .await;
-                queued += 1;
-            }
-        }
-
-        if let Ok(connection) = db.lock() {
-            let _ = db::mark_collection_source_synced(&connection, &source);
-        }
-        emit_log(
-            &app_handle,
-            format!("Collection sync complete: {} new jobs queued", queued),
-        );
-    }
-}
-
-pub async fn collection_sync_loop(
-    db: Arc<StdMutex<rusqlite::Connection>>,
-    queue: Arc<Mutex<queue::QueueManager>>,
-    app_handle: tauri::AppHandle,
-) {
-    loop {
-        sync_collection_sources(db.clone(), queue.clone(), app_handle.clone()).await;
-        tokio::time::sleep(tokio::time::Duration::from_secs(15 * 60)).await;
-    }
+        .unwrap_or_else(storage::default_media_root);
+    storage::staging_root(&root)
 }
 
 pub fn load_persisted_download_dir() {
@@ -356,6 +343,31 @@ pub fn load_persisted_formats() {
     }
 }
 
+pub fn load_persisted_storage_settings() {
+    let data_dir = settings_data_dir();
+    if std::env::var_os("PULSAR_SETUP_INTENT").is_none() {
+        if let Ok(intent) = fs::read_to_string(data_dir.join("intent.txt")) {
+            if storage::SetupIntent::parse(intent.trim()).is_some() {
+                std::env::set_var("PULSAR_SETUP_INTENT", intent.trim());
+            }
+        }
+    }
+    if std::env::var_os("PULSAR_MEDIA_QUOTA_BYTES").is_none() {
+        if let Ok(quota) = fs::read_to_string(data_dir.join("quota_bytes.txt")) {
+            if quota.trim().parse::<u64>().is_ok() {
+                std::env::set_var("PULSAR_MEDIA_QUOTA_BYTES", quota.trim());
+            }
+        }
+    }
+    if std::env::var_os("PULSAR_MEDIA_RESERVE_BYTES").is_none() {
+        if let Ok(reserve) = fs::read_to_string(data_dir.join("reserve_bytes.txt")) {
+            if reserve.trim().parse::<u64>().is_ok() {
+                std::env::set_var("PULSAR_MEDIA_RESERVE_BYTES", reserve.trim());
+            }
+        }
+    }
+}
+
 pub fn load_persisted_processing_settings() -> ProcessingSettings {
     let path = settings_data_dir().join("processing_settings.json");
     let mut settings = fs::read_to_string(path)
@@ -372,6 +384,15 @@ pub fn load_persisted_processing_settings() -> ProcessingSettings {
         settings = ProcessingSettings::default();
     }
 
+    // A packaged build always carries Whisper tiny as its offline fallback.
+    // If a previous high-quality selection was interrupted or its cache was
+    // removed, recover to that model instead of blocking the whole library.
+    if !inspect_whisper_model(&settings.whisper_model).ready {
+        if let Some(fallback) = tiny_fallback_settings(&settings.video_fit) {
+            settings = fallback;
+        }
+    }
+
     apply_processing_environment(&settings);
     settings
 }
@@ -383,7 +404,9 @@ fn gpu_probe() -> (Option<String>, Option<u64>) {
             "--format=csv,noheader,nounits",
         ])
         .output();
-    let Ok(output) = output else { return (None, None) };
+    let Ok(output) = output else {
+        return (None, None);
+    };
     if !output.status.success() {
         return (None, None);
     }
@@ -393,7 +416,10 @@ fn gpu_probe() -> (Option<String>, Option<u64>) {
         .find(|line| !line.trim().is_empty())
         .unwrap_or_default();
     let mut parts = line.split(',').map(str::trim);
-    let name = parts.next().filter(|value| !value.is_empty()).map(str::to_string);
+    let name = parts
+        .next()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     let vram_bytes = parts
         .next()
         .and_then(|value| value.parse::<u64>().ok())
@@ -402,17 +428,7 @@ fn gpu_probe() -> (Option<String>, Option<u64>) {
 }
 
 fn bundled_cuda_runtime_exists() -> bool {
-    let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            candidates.push(parent.join("resources/python/Lib/site-packages/ctranslate2/cudnn64_9.dll"));
-        }
-    }
-    if let Ok(current) = std::env::current_dir() {
-        candidates.push(current.join("src-tauri/resources/python/Lib/site-packages/ctranslate2/cudnn64_9.dll"));
-        candidates.push(current.join("resources/python/Lib/site-packages/ctranslate2/cudnn64_9.dll"));
-    }
-    candidates.into_iter().any(|path| path.is_file())
+    crate::runtime::path("python/Lib/site-packages/ctranslate2/cudnn64_9.dll").is_file()
 }
 
 fn detect_hardware_profile() -> HardwareProfile {
@@ -420,13 +436,14 @@ fn detect_hardware_profile() -> HardwareProfile {
     let whisper_gpu_supported = gpu_name.is_some() && bundled_cuda_runtime_exists();
     let logical_cores = num_cpus::get().max(1);
     let ram_bytes = total_ram_bytes();
-    let recommended_quality = if whisper_gpu_supported && vram_bytes.unwrap_or(0) >= 6 * 1024 * 1024 * 1024 {
-        "high"
-    } else if logical_cores >= 8 || ram_bytes >= 16 * 1024 * 1024 * 1024 {
-        "balanced"
-    } else {
-        "fast"
-    };
+    let recommended_quality =
+        if whisper_gpu_supported && vram_bytes.unwrap_or(0) >= 6 * 1024 * 1024 * 1024 {
+            "high"
+        } else if logical_cores >= 8 || ram_bytes >= 16 * 1024 * 1024 * 1024 {
+            "balanced"
+        } else {
+            "fast"
+        };
 
     HardwareProfile {
         cpu_name: std::env::var("PROCESSOR_IDENTIFIER").unwrap_or_else(|_| "CPU local".into()),
@@ -469,10 +486,13 @@ fn apply_processing_environment(settings: &ProcessingSettings) {
     std::env::set_var("WHISPER_MODEL", &settings.whisper_model);
     std::env::set_var("WHISPER_DEVICE", &settings.device);
     std::env::set_var("WHISPER_COMPUTE_TYPE", &settings.compute_type);
-    std::env::set_var("PULSAR_PROCESSING_QUALITY", &settings.quality.to_string());
+    std::env::set_var("PULSAR_PROCESSING_QUALITY", settings.quality.to_string());
 }
 
-fn derive_processing_settings(quality: u8, video_fit: String) -> Result<ProcessingSettings, String> {
+fn derive_processing_settings(
+    quality: u8,
+    video_fit: String,
+) -> Result<ProcessingSettings, String> {
     if !matches!(video_fit.as_str(), "cover" | "contain") {
         return Err("Video fit must be 'cover' or 'contain'".into());
     }
@@ -503,9 +523,670 @@ fn derive_processing_settings(quality: u8, video_fit: String) -> Result<Processi
     })
 }
 
+fn tiny_fallback_settings(video_fit: &str) -> Option<ProcessingSettings> {
+    if !inspect_whisper_model("tiny").ready {
+        return None;
+    }
+    Some(ProcessingSettings {
+        quality: 30,
+        profile: "fast".into(),
+        whisper_model: "tiny".into(),
+        device: "cpu".into(),
+        compute_type: "int8".into(),
+        video_fit: video_fit.to_string(),
+        configured: true,
+    })
+}
+
+fn effective_processing_settings(
+    settings: ProcessingSettings,
+) -> Result<ProcessingSettings, String> {
+    if inspect_whisper_model(&settings.whisper_model).ready {
+        return Ok(settings);
+    }
+    tiny_fallback_settings(&settings.video_fit).ok_or_else(|| {
+        format!(
+            "MODEL_NOT_READY:{}:No hay un modelo Whisper local verificable",
+            settings.whisper_model
+        )
+    })
+}
+
 #[tauri::command]
 pub fn get_hardware_profile() -> HardwareProfile {
     detect_hardware_profile()
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RuntimeResourceCheck {
+    pub name: String,
+    pub path: String,
+    pub required: bool,
+    pub available: bool,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct RuntimePreflight {
+    pub ready: bool,
+    pub offline_ready: bool,
+    pub resources: Vec<RuntimeResourceCheck>,
+    pub checks: std::collections::BTreeMap<String, bool>,
+    pub missing: Vec<String>,
+    pub message: String,
+}
+
+fn resource_roots() -> Vec<PathBuf> {
+    vec![crate::runtime::root()]
+}
+
+fn first_resource_path(relative_paths: &[&str]) -> Option<PathBuf> {
+    resource_roots()
+        .into_iter()
+        .flat_map(|root| {
+            relative_paths
+                .iter()
+                .map(move |relative| root.join(relative))
+        })
+        .find(|path| path.is_file() || path.is_dir())
+}
+
+fn runtime_check(name: &str, relative_paths: &[&str], required: bool) -> RuntimeResourceCheck {
+    let path = first_resource_path(relative_paths);
+    let available = path.is_some();
+    RuntimeResourceCheck {
+        name: name.to_string(),
+        path: path
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| relative_paths.first().unwrap_or(&"").to_string()),
+        required,
+        available,
+        message: if available {
+            "Recurso encontrado".to_string()
+        } else {
+            format!(
+                "Falta el recurso requerido: {}",
+                relative_paths.first().unwrap_or(&"")
+            )
+        },
+    }
+}
+
+fn runtime_check_group(
+    name: &str,
+    relative_paths: &[&str],
+    required: bool,
+) -> RuntimeResourceCheck {
+    let missing = relative_paths
+        .iter()
+        .filter(|relative| first_resource_path(&[**relative]).is_none())
+        .copied()
+        .collect::<Vec<_>>();
+    let available = missing.is_empty();
+    let path = if available {
+        relative_paths
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .to_string()
+    } else {
+        missing.first().copied().unwrap_or_default().to_string()
+    };
+    RuntimeResourceCheck {
+        name: name.to_string(),
+        path,
+        required,
+        available,
+        message: if available {
+            format!("{} recursos encontrados", relative_paths.len())
+        } else {
+            format!("Faltan recursos requeridos: {}", missing.join(", "))
+        },
+    }
+}
+
+#[tauri::command]
+pub fn get_runtime_preflight() -> RuntimePreflight {
+    let mut resources = vec![
+        runtime_check("Python embebido", &["python/python.exe"], true),
+        runtime_check_group(
+            "Workers Python",
+            &[
+                "python-workers/main.py",
+                "python-workers/downloader.py",
+                "python-workers/events.py",
+                "python-workers/models.py",
+                "python-workers/transcriber.py",
+                "python-workers/visual_analyzer.py",
+                "python-workers/audio_extractor.py",
+                "python-workers/daemon.py",
+                "python-workers/embed_query.py",
+                "python-workers/export_onnx.py",
+                "python-workers/export_onnx_embeddings.py",
+                "python-workers/prepare_whisper_model.py",
+            ],
+            true,
+        ),
+        runtime_check("FFmpeg", &["bin/ffmpeg.exe"], true),
+        runtime_check("ffprobe", &["bin/ffprobe.exe"], true),
+        runtime_check(
+            "ONNX MiniLM",
+            &["assets/models/all-MiniLM-L6-v2/model.onnx"],
+            true,
+        ),
+        runtime_check(
+            "Whisper tiny",
+            &["assets/models/models--Systran--faster-whisper-tiny"],
+            true,
+        ),
+        runtime_check("Manifiesto de runtime", &["runtime-manifest.json"], true),
+    ];
+    // The bundled tiny model may be represented by a Hugging Face pointer
+    // rather than a regular file. Treat the native validator as authoritative
+    // for that one resource while still exposing the checked path.
+    if let Some(tiny) = resources
+        .iter_mut()
+        .find(|resource| resource.name == "Whisper tiny")
+    {
+        if bundled_whisper_model_available("tiny") {
+            tiny.available = true;
+            tiny.message = "Modelo tiny incluido y verificable".to_string();
+        }
+    }
+    let missing = resources
+        .iter()
+        .filter(|resource| resource.required && !resource.available)
+        .map(|resource| resource.name.clone())
+        .collect::<Vec<_>>();
+    let ready = missing.is_empty();
+    let checks = resources
+        .iter()
+        .map(|resource| (resource.name.clone(), resource.available))
+        .collect();
+    let message = if ready {
+        "Runtime local listo para trabajar sin Node, Rust, Python ni FFmpeg instalados por el usuario."
+            .to_string()
+    } else {
+        format!(
+            "Runtime incompleto. Reinstala el paquete o corrige estos recursos: {}.",
+            missing.join(", ")
+        )
+    };
+    RuntimePreflight {
+        ready,
+        offline_ready: ready,
+        resources,
+        checks,
+        missing,
+        message,
+    }
+}
+
+#[tauri::command]
+pub fn get_storage_status(
+    path: Option<String>,
+    quota_bytes: Option<u64>,
+) -> Result<storage::StorageStatus, String> {
+    let root = path
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| expand_user_path(&value))
+        .unwrap_or_else(storage::default_media_root);
+    if !root.exists() {
+        fs::create_dir_all(&root)
+            .map_err(|error| format!("No se pudo preparar la carpeta de medios: {}", error))?;
+    }
+    storage::ensure_media_root(&root).map_err(|error| error.to_string())?;
+    Ok(storage::storage_status(
+        &root,
+        quota_bytes.unwrap_or_else(storage::configured_quota_bytes),
+        storage::configured_reserve_bytes(),
+    ))
+}
+
+#[tauri::command]
+pub fn recommend_storage_setup(
+    intent: Option<String>,
+    path: Option<String>,
+) -> Result<storage::StorageRecommendation, String> {
+    let root = path
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| expand_user_path(&value))
+        .unwrap_or_else(storage::default_media_root);
+    if !root.exists() {
+        fs::create_dir_all(&root)
+            .map_err(|error| format!("No se pudo preparar la carpeta elegida: {}", error))?;
+    }
+    let status = storage::storage_status(&root, 0, None);
+    if status.total_bytes == 0 && status.free_bytes == 0 {
+        return Err(format!(
+            "No se pudo medir el espacio libre de {}. Comprueba la unidad y los permisos.",
+            root.display()
+        ));
+    }
+    let parsed = intent
+        .as_deref()
+        .and_then(storage::SetupIntent::parse)
+        .unwrap_or(storage::SetupIntent::Balanced);
+    Ok(storage::recommend_storage(parsed, status.free_bytes))
+}
+
+#[tauri::command]
+pub async fn preview_media_purge(
+    required_bytes: Option<u64>,
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<storage::PurgeCandidate>, String> {
+    let path_was_provided = path.as_ref().is_some_and(|value| !value.trim().is_empty());
+    let root = path
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| expand_user_path(&value))
+        .unwrap_or_else(storage::default_media_root);
+    let root = if !path_was_provided {
+        let configured = state.worker_config.read().await.download_dir.clone();
+        if configured.trim().is_empty() {
+            root
+        } else {
+            PathBuf::from(configured)
+        }
+    } else {
+        root
+    };
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    storage::preview_purge(&db, &root, required_bytes.unwrap_or(0))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn apply_media_purge(
+    job_ids: Vec<i64>,
+    reason: Option<String>,
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<storage::PurgeAction>, String> {
+    let root = path
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| expand_user_path(&value))
+        .unwrap_or_else(storage::default_media_root);
+    let mut db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    storage::apply_purge(
+        &mut db,
+        &root,
+        &job_ids,
+        reason.as_deref().unwrap_or("manual purge"),
+    )
+}
+
+#[tauri::command]
+pub async fn undo_media_purge(
+    purge_id: i64,
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<storage::PurgeAction, String> {
+    let root = path
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| expand_user_path(&value))
+        .unwrap_or_else(storage::default_media_root);
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    storage::undo_purge(&db, &root, purge_id)
+}
+
+#[tauri::command]
+pub async fn empty_media_trash(
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<u64, String> {
+    let path_was_provided = path.as_ref().is_some_and(|value| !value.trim().is_empty());
+    let root = path
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| expand_user_path(&value))
+        .unwrap_or_else(storage::default_media_root);
+    let root = if !path_was_provided {
+        let configured = state.worker_config.read().await.download_dir.clone();
+        if configured.trim().is_empty() {
+            root
+        } else {
+            PathBuf::from(configured)
+        }
+    } else {
+        root
+    };
+    storage::empty_media_trash(&root)
+}
+
+#[tauri::command]
+pub async fn set_media_protection(
+    job_id: i64,
+    favorite: Option<bool>,
+    pinned: Option<bool>,
+    protected: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::set_media_protection(&db, job_id, favorite, pinned, protected)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn record_media_access(
+    job_id: i64,
+    access_kind: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::record_media_access(&db, job_id, &access_kind).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn get_job_artifacts(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<storage::ArtifactRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    storage::list_artifacts(&db, job_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn save_video_frame(
+    job_id: i64,
+    bytes: Vec<u8>,
+    timestamp: f64,
+    label: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<storage::ArtifactRecord, String> {
+    if !timestamp.is_finite() || timestamp < 0.0 {
+        return Err("El timestamp de la captura no es válido".to_string());
+    }
+    let root = state.worker_config.read().await.download_dir.clone();
+    let root = if root.trim().is_empty() {
+        storage::default_media_root()
+    } else {
+        PathBuf::from(root)
+    };
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    storage::save_manual_frame(&db, &root, job_id, &bytes, timestamp, label.as_deref())
+}
+
+fn whisper_cache_root() -> PathBuf {
+    db::data_dir_path().join("whisper-models")
+}
+
+fn resolve_python_runtime() -> PathBuf {
+    if let Some(configured) =
+        std::env::var_os("PYTHON_EXE").or_else(|| std::env::var_os("PULSAR_PYTHON_PATH"))
+    {
+        let path = PathBuf::from(configured);
+        if path.is_file() {
+            return path;
+        }
+    }
+    crate::runtime::python_executable()
+}
+
+fn resolve_model_preparer() -> PathBuf {
+    crate::runtime::worker_script("prepare_whisper_model.py")
+}
+
+fn model_revision(model: &str) -> Option<&'static str> {
+    match model {
+        "tiny" => Some("d90ca5fe260221311c53c58e660288d3deb8d356"),
+        "small" => Some("536b0662742c02347bc0e980a01041f333bce120"),
+        "medium" => Some("08e178d48790749d25932bbc082711ddcfdfbc4f"),
+        _ => None,
+    }
+}
+
+fn bundled_whisper_model_available(model: &str) -> bool {
+    let Some(revision) = model_revision(model) else {
+        return false;
+    };
+    let cache_name = format!("models--Systran--faster-whisper-{}", model);
+    let roots = vec![crate::runtime::whisper_model_root()];
+
+    let required = [
+        ("config.json", 128_u64),
+        ("model.bin", 10_000_000_u64),
+        ("tokenizer.json", 128_u64),
+        ("vocabulary.txt", 128_u64),
+    ];
+    roots
+        .into_iter()
+        .flat_map(|root| {
+            [
+                root.join(model),
+                root.join(&cache_name).join("snapshots").join(revision),
+            ]
+        })
+        .any(|directory| {
+            required.iter().all(|(name, minimum_size)| {
+                let path = directory.join(name);
+                if fs::metadata(&path)
+                    .map(|metadata| metadata.len() >= *minimum_size)
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+
+                // Hugging Face exports cache pointers for small files and
+                // Windows symlinks for model.bin. Resolve the pointer to the
+                // bundled blobs directory before declaring the fallback ready.
+                let Ok(pointer) = fs::read_to_string(&path) else {
+                    return false;
+                };
+                let pointer = pointer.trim();
+                if !pointer.starts_with("../../blobs/") {
+                    return false;
+                }
+                directory
+                    .join(name)
+                    .parent()
+                    .map(|parent| parent.join(pointer))
+                    .and_then(|blob| fs::metadata(blob).ok())
+                    .map(|metadata| metadata.len() >= *minimum_size)
+                    .unwrap_or(false)
+            })
+        })
+}
+
+fn inspect_whisper_model(model: &str) -> WhisperModelStatus {
+    let directory = whisper_cache_root().join(model);
+    let manifest_path = directory.join("pulsaria-model-manifest.json");
+    let revision = model_revision(model).map(str::to_string);
+    let manifest = fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok());
+    let mut problem = None;
+    if manifest
+        .as_ref()
+        .and_then(|value| value.get("revision"))
+        .and_then(|value| value.as_str())
+        != revision.as_deref()
+    {
+        problem = Some("El manifiesto no corresponde a la revisi├│n fijada".to_string());
+    }
+    if problem.is_none() {
+        for name in [
+            "config.json",
+            "model.bin",
+            "tokenizer.json",
+            "vocabulary.txt",
+        ] {
+            let path = directory.join(name);
+            let expected = manifest
+                .as_ref()
+                .and_then(|value| value.get("files"))
+                .and_then(|value| value.get(name));
+            let result = (|| -> Result<(), String> {
+                let expected_size = expected
+                    .and_then(|value| value.get("size"))
+                    .and_then(|value| value.as_u64())
+                    .ok_or_else(|| format!("Falta el tama├▒o de {}", name))?;
+                let expected_hash = expected
+                    .and_then(|value| value.get("sha256"))
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| format!("Falta el hash de {}", name))?;
+                let metadata = fs::metadata(&path).map_err(|_| format!("Falta {}", name))?;
+                if metadata.len() != expected_size
+                    || (name == "model.bin" && metadata.len() < 10_000_000)
+                {
+                    return Err(format!("{} est├í incompleto", name));
+                }
+                let mut file = fs::File::open(&path).map_err(|error| error.to_string())?;
+                let mut hasher = Sha256::new();
+                // Keep the verification buffer on the heap. A 1 MiB stack
+                // allocation here overflows the Windows Tokio main thread
+                // before Tauri has a chance to create its window.
+                let mut buffer = vec![0_u8; 1024 * 1024];
+                loop {
+                    let read = file.read(&mut buffer).map_err(|error| error.to_string())?;
+                    if read == 0 {
+                        break;
+                    }
+                    hasher.update(&buffer[..read]);
+                }
+                if format!("{:x}", hasher.finalize()) != expected_hash {
+                    return Err(format!("El hash de {} no coincide", name));
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                problem = Some(error);
+                break;
+            }
+        }
+    }
+    let bundled_fallback = model == "tiny" && bundled_whisper_model_available(model);
+    if problem.is_some() && bundled_fallback {
+        problem = None;
+    }
+    WhisperModelStatus {
+        model: model.to_string(),
+        ready: problem.is_none(),
+        status: if problem.is_none() {
+            if bundled_fallback {
+                "bundled".into()
+            } else {
+                "ready".into()
+            }
+        } else {
+            "missing".into()
+        },
+        revision,
+        path: directory.to_string_lossy().to_string(),
+        message: problem,
+    }
+}
+
+#[tauri::command]
+pub async fn get_whisper_model_status(model: String) -> Result<WhisperModelStatus, String> {
+    model_revision(&model).ok_or_else(|| "Modelo Whisper no soportado".to_string())?;
+    Ok(inspect_whisper_model(&model))
+}
+
+#[tauri::command]
+pub async fn prepare_whisper_model(
+    model: String,
+    state: State<'_, AppState>,
+) -> Result<WhisperModelStatus, String> {
+    model_revision(&model).ok_or_else(|| "Modelo Whisper no soportado".to_string())?;
+    if inspect_whisper_model(&model).ready {
+        return Ok(inspect_whisper_model(&model));
+    }
+    let mut command = tokio::process::Command::new(resolve_python_runtime());
+    command
+        .arg(resolve_model_preparer())
+        .arg("--model")
+        .arg(&model)
+        .arg("--cache-root")
+        .arg(whisper_cache_root())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let child = command
+        .spawn()
+        .map_err(|error| format!("No se pudo iniciar la preparaci├│n: {}", error))?;
+    {
+        let mut pid = state.model_prepare_pid.lock().await;
+        *pid = child.id();
+    }
+    let output = child.wait_with_output().await;
+    *state.model_prepare_pid.lock().await = None;
+    let output = output.map_err(|error| error.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stdout.lines().last().unwrap_or(stderr.trim()).to_string();
+        if let Ok(connection) = state.db.lock() {
+            let _ = db::insert_health_event(
+                &connection,
+                "whisper",
+                "error",
+                &message,
+                Some("prepare_model"),
+                Some("failed"),
+            );
+        }
+        return Err(message);
+    }
+    let status = inspect_whisper_model(&model);
+    if !status.ready {
+        return Err(status
+            .message
+            .clone()
+            .unwrap_or_else(|| "El modelo no super├│ la validaci├│n".into()));
+    }
+    std::env::set_var("PULSAR_WHISPER_MODEL_DIR", &status.path);
+    if let Ok(connection) = state.db.lock() {
+        let _ = db::insert_health_event(
+            &connection,
+            "whisper",
+            "info",
+            "Modelo descargado y validado",
+            Some("prepare_model"),
+            Some("ready"),
+        );
+    }
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn cancel_whisper_model_preparation(state: State<'_, AppState>) -> Result<(), String> {
+    let pid = *state.model_prepare_pid.lock().await;
+    if let Some(pid) = pid {
+        #[cfg(windows)]
+        {
+            let status = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status()
+                .map_err(|error| error.to_string())?;
+            if !status.success() {
+                return Err("No se pudo cancelar la preparaci├│n del modelo".into());
+            }
+        }
+        *state.model_prepare_pid.lock().await = None;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -522,15 +1203,176 @@ pub async fn set_processing_settings(
     video_fit: String,
     state: State<'_, AppState>,
 ) -> Result<ProcessingSettings, String> {
-    let settings = derive_processing_settings(quality, video_fit)?;
+    let settings = effective_processing_settings(derive_processing_settings(quality, video_fit)?)?;
     apply_processing_environment(&settings);
     let serialized = serde_json::to_string_pretty(&settings).map_err(|error| error.to_string())?;
     fs::create_dir_all(settings_data_dir()).map_err(|error| error.to_string())?;
-    fs::write(settings_data_dir().join("processing_settings.json"), serialized.as_bytes())
-        .map_err(|error| error.to_string())?;
+    fs::write(
+        settings_data_dir().join("processing_settings.json"),
+        serialized.as_bytes(),
+    )
+    .map_err(|error| error.to_string())?;
     let mut config = state.worker_config.write().await;
     config.processing = settings.clone();
     Ok(settings)
+}
+
+#[tauri::command]
+pub async fn save_mvp_settings(
+    input: MvpSettingsInput,
+    state: State<'_, AppState>,
+) -> Result<ProcessingSettings, String> {
+    if !matches!(input.retention.as_str(), "keep" | "online") {
+        return Err("Retenci├│n inv├ílida".into());
+    }
+    if !input.browser.is_empty() && !matches!(input.browser.as_str(), "chrome" | "edge" | "firefox")
+    {
+        return Err("Navegador de sesi├│n inv├ílido".into());
+    }
+    let allowed_formats = [
+        "mp4", "mkv", "webm", "mov", "mp3", "wav", "flac", "ogg", "m4a", "txt", "srt", "vtt",
+        "json",
+    ];
+    if input.formats.is_empty()
+        || input
+            .formats
+            .iter()
+            .any(|value| !allowed_formats.contains(&value.as_str()))
+    {
+        return Err("La selecci├│n de formatos es inv├ílida".into());
+    }
+    if !(0.0..=1.0).contains(&input.min_score) {
+        return Err("El umbral sem├íntico debe estar entre 0 y 1".into());
+    }
+    let download_dir = expand_user_path(&input.download_dir);
+    if input.download_dir.trim().is_empty() {
+        return Err("Selecciona una carpeta de guardado".into());
+    }
+    fs::create_dir_all(&download_dir)
+        .map_err(|error| format!("No se pudo preparar la carpeta: {}", error))?;
+    storage::ensure_media_root(&download_dir)
+        .map_err(|error| format!("No se pudo preparar el almacenamiento local: {}", error))?;
+    let intent = input
+        .intent
+        .as_deref()
+        .and_then(storage::SetupIntent::parse)
+        .unwrap_or(storage::SetupIntent::Balanced);
+    let disk_status = storage::storage_status(&download_dir, 0, input.reserve_bytes);
+    let reserve_bytes = input.reserve_bytes.unwrap_or(disk_status.reserve_bytes);
+    let quota_bytes = input.quota_bytes.unwrap_or_else(|| {
+        storage::recommend_storage(intent.clone(), disk_status.free_bytes).quota_bytes
+    });
+    if quota_bytes > 0 {
+        let safe_bytes = disk_status.free_bytes.saturating_sub(reserve_bytes);
+        if safe_bytes < storage::GIB {
+            return Err(
+                "El disco no tiene 1 GiB de espacio seguro. Libera espacio o cambia la carpeta."
+                    .to_string(),
+            );
+        }
+        if quota_bytes > safe_bytes {
+            return Err(format!(
+                "La cuota solicitada ({}) supera el espacio libre seguro disponible ({}).",
+                storage::format_bytes(quota_bytes),
+                storage::format_bytes(safe_bytes)
+            ));
+        }
+    }
+    let processing = effective_processing_settings(derive_processing_settings(
+        input.quality,
+        input.video_fit.clone(),
+    )?)?;
+
+    let search = SearchConfig {
+        min_score: input.min_score,
+        max_results: 10,
+        similarity_metric: "Cosine".into(),
+        chunk_size: 150,
+        chunk_overlap: 50,
+    };
+    let directory = settings_data_dir();
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let writes = vec![
+        (
+            directory.join("download_dir.txt"),
+            download_dir.to_string_lossy().as_bytes().to_vec(),
+        ),
+        (
+            directory.join("retention.txt"),
+            input.retention.as_bytes().to_vec(),
+        ),
+        (
+            directory.join("cookie_browser.txt"),
+            input.browser.as_bytes().to_vec(),
+        ),
+        (
+            directory.join("formats.json"),
+            serde_json::to_vec_pretty(&input.formats).map_err(|error| error.to_string())?,
+        ),
+        (
+            directory.join("search_config.json"),
+            serde_json::to_vec_pretty(&search).map_err(|error| error.to_string())?,
+        ),
+        (
+            directory.join("processing_settings.json"),
+            serde_json::to_vec_pretty(&processing).map_err(|error| error.to_string())?,
+        ),
+        (
+            directory.join("intent.txt"),
+            intent.as_str().as_bytes().to_vec(),
+        ),
+        (
+            directory.join("quota_bytes.txt"),
+            quota_bytes.to_string().into_bytes(),
+        ),
+        (
+            directory.join("reserve_bytes.txt"),
+            reserve_bytes.to_string().into_bytes(),
+        ),
+    ];
+    let previous: Vec<(PathBuf, Option<Vec<u8>>)> = writes
+        .iter()
+        .map(|(path, _)| (path.clone(), fs::read(path).ok()))
+        .collect();
+    for (path, content) in &writes {
+        if let Err(error) = fs::write(path, content) {
+            for (restore_path, restore_content) in &previous {
+                if let Some(bytes) = restore_content {
+                    let _ = fs::write(restore_path, bytes);
+                } else {
+                    let _ = fs::remove_file(restore_path);
+                }
+            }
+            return Err(format!("No se pudo guardar {}: {}", path.display(), error));
+        }
+    }
+
+    std::env::set_var("PULSAR_DOWNLOAD_DIR", &download_dir);
+    std::env::set_var("PULSAR_DEFAULT_RETENTION", &input.retention);
+    std::env::set_var("PULSAR_SETUP_INTENT", intent.as_str());
+    std::env::set_var("PULSAR_MEDIA_QUOTA_BYTES", quota_bytes.to_string());
+    std::env::set_var("PULSAR_MEDIA_RESERVE_BYTES", reserve_bytes.to_string());
+    std::env::set_var(
+        "PULSAR_FORMATS",
+        serde_json::to_string(&input.formats).map_err(|error| error.to_string())?,
+    );
+    if input.browser.is_empty() {
+        std::env::remove_var("PULSAR_COOKIES_FROM_BROWSER");
+    } else {
+        std::env::set_var("PULSAR_COOKIES_FROM_BROWSER", &input.browser);
+    }
+    apply_processing_environment(&processing);
+    *state.config.lock().await = search;
+    let mut worker = state.worker_config.write().await;
+    worker.download_dir = download_dir.to_string_lossy().to_string();
+    worker.retention = input.retention;
+    worker.cookies_browser = input.browser;
+    worker.formats = input.formats;
+    worker.processing = processing.clone();
+    worker.intent = intent.as_str().to_string();
+    worker.quota_bytes = quota_bytes;
+    worker.reserve_bytes = reserve_bytes;
+    Ok(processing)
 }
 
 pub fn load_persisted_search_config() -> SearchConfig {
@@ -552,13 +1394,33 @@ fn settings_data_dir() -> PathBuf {
 }
 
 fn default_download_dir() -> PathBuf {
+    storage::default_media_root()
+}
+
+fn expand_user_path(value: &str) -> PathBuf {
+    let trimmed = value.trim();
     if let Some(profile) = std::env::var_os("USERPROFILE") {
-        return PathBuf::from(profile).join("Downloads");
+        let profile = PathBuf::from(profile);
+        if let Some(relative) = trimmed
+            .strip_prefix("%USERPROFILE%\\")
+            .or_else(|| trimmed.strip_prefix("%USERPROFILE%/"))
+        {
+            return profile.join(relative);
+        }
+        if trimmed.eq_ignore_ascii_case("%USERPROFILE%") {
+            return profile;
+        }
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join("Downloads");
+    if let Some(relative) = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix("~\\"))
+    {
+        if let Some(profile) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))
+        {
+            return PathBuf::from(profile).join(relative);
+        }
     }
-    PathBuf::from("downloads")
+    PathBuf::from(trimmed)
 }
 
 fn format_timestamp(seconds: f64) -> String {
@@ -581,7 +1443,7 @@ fn parse_unib_time(value: &str) -> Option<f64> {
     let mut parts = value.trim().split(':');
     let minutes = parts.next()?.parse::<f64>().ok()?;
     let seconds = parts.next()?.parse::<f64>().ok()?;
-    if parts.next().is_some() || minutes < 0.0 || seconds < 0.0 || seconds >= 60.0 {
+    if parts.next().is_some() || minutes < 0.0 || !(0.0..60.0).contains(&seconds) {
         return None;
     }
     Some(minutes * 60.0 + seconds)
@@ -630,30 +1492,109 @@ impl crate::domain::ports::EmbeddingEngine for SharedEmbeddingEngine {
 pub async fn add_job(
     url: String,
     state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
+    _app_handle: tauri::AppHandle,
 ) -> Result<i64, String> {
+    {
+        let configured = state.worker_config.read().await.processing.clone();
+        let effective = effective_processing_settings(configured.clone())?;
+        if effective.whisper_model != configured.whisper_model {
+            apply_processing_environment(&effective);
+            state.worker_config.write().await.processing = effective.clone();
+        }
+    }
     if !is_valid_sandbox_url(&url) {
         return Err("Only supported HTTPS media URLs are accepted".to_string());
     }
+    let media_root = {
+        let configured = state.worker_config.read().await.download_dir.clone();
+        if configured.trim().is_empty() {
+            storage::default_media_root()
+        } else {
+            PathBuf::from(configured)
+        }
+    };
+    storage::ensure_media_root(&media_root)
+        .map_err(|error| format!("No se pudo preparar el almacenamiento local: {}", error))?;
+    storage::ensure_capacity(&media_root)?;
 
     if is_collection_source(&url) {
-        {
+        let browser = state.worker_config.read().await.cookies_browser.clone();
+        let source_id = {
             let db = state
                 .db
                 .lock()
                 .map_err(|_| "Database mutex poisoned".to_string())?;
-            db::register_collection_source(&db, &url).map_err(|e| e.to_string())?;
-        }
+            db::register_collection_source_with_browser(
+                &db,
+                &url,
+                (!browser.is_empty()).then_some(browser.as_str()),
+            )
+            .map_err(|e| e.to_string())?;
+            let source_id = db::find_collection_source_id_by_url(&db, &url)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "No se pudo registrar la fuente".to_string())?;
+            db::mark_collection_source_attempt(&db, source_id)
+                .map_err(|error| error.to_string())?;
+            source_id
+        };
 
-        let collection_urls = {
-            let queue = state.queue.lock().await;
-            queue.expand_collection(&url).await?
+        let collection_urls = state
+            .queue
+            .expand_collection_with_browser(&url, (!browser.is_empty()).then_some(browser.as_str()))
+            .await;
+        let collection_urls = match collection_urls {
+            Ok(urls) => urls,
+            Err(error) => {
+                if let Ok(connection) = state.db.lock() {
+                    if let Err(state_error) =
+                        db::mark_collection_source_failed(&connection, source_id, &error)
+                    {
+                        emit_log(
+                            &_app_handle,
+                            format!("Collection failure state update failed: {}", state_error),
+                        );
+                    }
+                    if let Err(event_error) = db::insert_health_event(
+                        &connection,
+                        "tiktok_sync",
+                        "error",
+                        &error,
+                        Some("retry_with_backoff"),
+                        Some("scheduled"),
+                    ) {
+                        emit_log(
+                            &_app_handle,
+                            format!(
+                                "Collection health event persistence failed: {}",
+                                event_error
+                            ),
+                        );
+                    }
+                }
+                return Err(error);
+            }
         };
         if collection_urls.is_empty() {
+            if let Ok(connection) = state.db.lock() {
+                if let Err(state_error) = db::mark_collection_source_failed(
+                    &connection,
+                    source_id,
+                    "La fuente no devolvió videos accesibles",
+                ) {
+                    emit_log(
+                        &_app_handle,
+                        format!(
+                            "Collection empty-source state update failed: {}",
+                            state_error
+                        ),
+                    );
+                }
+            }
             return Err("No public videos were found in the TikTok collection".to_string());
         }
 
         let mut first_job_id = None;
+        let mut queued = 0usize;
         for video_url in collection_urls.into_iter().take(200) {
             let new_job_id = {
                 let db = state
@@ -671,15 +1612,41 @@ pub async fn add_job(
 
             if let Some(job_id) = new_job_id {
                 first_job_id.get_or_insert(job_id);
-                let _permit = COLLECTION_SEMAPHORE
-                    .acquire()
+                match state
+                    .queue
+                    .dispatch_with_browser(
+                        job_id,
+                        video_url,
+                        (!browser.is_empty()).then_some(browser.clone()),
+                    )
                     .await
-                    .map_err(|_| "Collection semaphore closed".to_string())?;
-                let cfg = state.worker_config.read().await.clone();
-                let queue = state.queue.lock().await;
-                queue
-                    .dispatch_worker_with_config(job_id, video_url, app_handle.clone(), Some(cfg))
-                    .await;
+                {
+                    Ok(()) => queued += 1,
+                    Err(error) => {
+                        if let Ok(connection) = state.db.lock() {
+                            let _ =
+                                db::mark_collection_source_failed(&connection, source_id, &error);
+                            let _ = db::insert_health_event(
+                                &connection,
+                                "tiktok_sync",
+                                "error",
+                                &error,
+                                Some("retry_with_backoff"),
+                                Some("manual"),
+                            );
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+        }
+
+        if let Ok(connection) = state.db.lock() {
+            if let Err(error) = db::mark_collection_source_synced(&connection, source_id, queued) {
+                emit_log(
+                    &_app_handle,
+                    format!("Collection success state update failed: {}", error),
+                );
             }
         }
 
@@ -713,9 +1680,7 @@ pub async fn add_job(
         }
     };
 
-    let cfg = state.worker_config.read().await.clone();
-    let queue = state.queue.lock().await;
-    queue.dispatch_worker_with_config(job_id, url, app_handle.clone(), Some(cfg)).await;
+    state.queue.dispatch(job_id, url).await?;
 
     Ok(job_id)
 }
@@ -743,6 +1708,108 @@ pub async fn get_jobs(state: State<'_, AppState>) -> Result<Vec<db::JobRecord>, 
 }
 
 #[tauri::command]
+pub async fn get_collection_sources(
+    state: State<'_, AppState>,
+) -> Result<Vec<db::CollectionSourceRecord>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_collection_sources(&connection).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn set_collection_source_active(
+    source_id: i64,
+    active: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::set_collection_source_active(&connection, source_id, active)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_collection_source(
+    source_id: i64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::delete_collection_source(&connection, source_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn sync_collection_source_now(
+    source_id: i64,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        db::force_collection_source_due(&connection, source_id)
+            .map_err(|error| error.to_string())?;
+    }
+    sync_due_collections(state.db.clone(), state.queue.clone(), app_handle).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_health_events(
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::HealthEvent>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_health_events(&connection, limit.unwrap_or(100)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn get_runtime_health(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<RuntimeHealth, String> {
+    let processing = state.worker_config.read().await.processing.clone();
+    let model = inspect_whisper_model(&processing.whisper_model);
+    let (queue_depth, backpressure_active, worker_capacity, idle_workers) =
+        state.queue.runtime_status().await;
+    let (api_ready, api_error) = state.api_runtime.snapshot();
+    Ok(RuntimeHealth {
+        model,
+        queue_depth,
+        backpressure_active,
+        worker_capacity,
+        idle_workers,
+        autostart_enabled: app_handle.autolaunch().is_enabled().unwrap_or(false),
+        api_ready,
+        api_error,
+    })
+}
+
+#[tauri::command]
+pub async fn repair_library(state: State<'_, AppState>) -> Result<db::LibraryRepairReport, String> {
+    let report = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        db::repair_library(&connection).map_err(|error| error.to_string())?
+    };
+    state.queue.resume_pending_jobs().await?;
+    Ok(report)
+}
+
+#[tauri::command]
 pub fn get_base_path() -> Result<String, String> {
     std::env::current_dir()
         .map(|path| path.to_string_lossy().to_string())
@@ -753,8 +1820,15 @@ pub fn get_base_path() -> Result<String, String> {
 pub async fn retry_job(
     job_id: i64,
     state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
+    _app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    // A failed attempt may still be inside QueueService's exponential
+    // backoff. Treat a second click as idempotent instead of resetting the
+    // same job while its original retry task is alive.
+    if state.queue.is_active(job_id).await {
+        return Ok(());
+    }
+
     let url = {
         let db = state
             .db
@@ -768,7 +1842,7 @@ pub async fn retry_job(
             status.as_str(),
             "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
         ) {
-            return Err("El trabajo todavía no está disponible para reintento".to_string());
+            return Err("El trabajo todav├¡a no est├í disponible para reintento".to_string());
         }
         // Remove only this job's processing directory and stale media paths.
         // A retry starts from a clean pipeline instead of reusing partial files.
@@ -778,11 +1852,7 @@ pub async fn retry_job(
         job.url
     };
 
-    let config = state.worker_config.read().await.clone();
-    let queue = state.queue.lock().await;
-    queue
-        .dispatch_worker_with_config(job_id, url, app_handle, Some(config))
-        .await;
+    state.queue.dispatch(job_id, url).await?;
     Ok(())
 }
 
@@ -839,18 +1909,27 @@ pub async fn get_model_status(state: State<'_, AppState>) -> Result<ModelStatus,
     let loaded = onnx.is_some();
 
     let model_dir = resolve_model_dir();
-    let model_path = model_dir
-        .join("model.onnx")
-        .is_file()
-        .then(|| model_dir.join("model.onnx").to_string_lossy().to_string())
-        .unwrap_or_else(|| "model.onnx not found".to_string());
+    let model_file = model_dir.join("model.onnx");
+    let model_path = if model_file.is_file() {
+        model_file.to_string_lossy().to_string()
+    } else {
+        "model.onnx not found".to_string()
+    };
 
     Ok(ModelStatus {
         loaded,
         dimensions: if loaded { 384 } else { 0 },
-        runtime: if loaded { "ONNX Runtime (all-MiniLM-L6-v2)".into() } else { "Not loaded".into() },
+        runtime: if loaded {
+            "ONNX Runtime (all-MiniLM-L6-v2)".into()
+        } else {
+            "Not loaded".into()
+        },
         model_path,
-        memory_usage: if loaded { "~100MB".into() } else { "0MB".into() },
+        memory_usage: if loaded {
+            "~100MB".into()
+        } else {
+            "0MB".into()
+        },
     })
 }
 
@@ -947,12 +2026,17 @@ pub async fn get_db_status(state: State<'_, AppState>) -> Result<DbStatus, Strin
 
     let indexed_videos: usize = db
         .query_row("SELECT COUNT(*) FROM media", [], |row| row.get(0))
-        .unwrap_or(0);
+        .map_err(|error| format!("Database health query failed for media: {}", error))?;
     let transcript_chunks: usize = db
         .query_row("SELECT COUNT(*) FROM transcript_embeddings", [], |row| {
             row.get(0)
         })
-        .unwrap_or(0);
+        .map_err(|error| {
+            format!(
+                "Database health query failed for transcript embeddings: {}",
+                error
+            )
+        })?;
 
     let actual_db_path = crate::db::data_dir_path()
         .join("library.db")
@@ -1048,7 +2132,10 @@ pub async fn rebuild_index(
 }
 
 #[tauri::command]
-pub async fn vacuum_db(state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<(), String> {
+pub async fn vacuum_db(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     emit_log(&app_handle, "Vacuuming SQLite database...".into());
     let db = state
         .db
@@ -1093,8 +2180,7 @@ pub async fn recompute_embeddings(
                 .db
                 .lock()
                 .map_err(|_| "Database mutex poisoned".to_string())?;
-            db::get_transcript_text_for_job(&db, *job_id)
-                .map_err(|e| e.to_string())?
+            db::get_transcript_text_for_job(&db, *job_id).map_err(|e| e.to_string())?
         };
 
         if chunks.is_empty() {
@@ -1105,6 +2191,7 @@ pub async fn recompute_embeddings(
         let text_chunks = chunker.chunk_text(&chunks.join("\n"));
 
         let mut indexed = Vec::with_capacity(text_chunks.len());
+        let mut job_errors = 0usize;
         for chunk in &text_chunks {
             let embed_result = {
                 let mut onnx_guard = state.onnx.lock().await;
@@ -1123,23 +2210,41 @@ pub async fn recompute_embeddings(
                         job_id,
                         vector.len()
                     );
+                    job_errors += 1;
                     total_errors += 1;
                 }
                 Err(error) => {
                     eprintln!("recompute: job_id={} embedding error: {}", job_id, error);
+                    job_errors += 1;
                     total_errors += 1;
                 }
             }
         }
 
+        // A partial rebuild must never replace a complete set of embeddings
+        // with a smaller subset. Keep the previous derived data intact and
+        // report the job as failed so the caller can retry after fixing the
+        // embedding engine or model.
+        if job_errors > 0 {
+            eprintln!(
+                "recompute: preserving existing embeddings for job_id={} after {} errors",
+                job_id, job_errors
+            );
+            continue;
+        }
+
         {
-            let db = state
+            let mut db = state
                 .db
                 .lock()
                 .map_err(|_| "Database mutex poisoned".to_string())?;
-            let _ = db::clear_transcript_data(&db, *job_id);
-            for (idx, text, embedding) in &indexed {
-                let _ = db::insert_transcript_chunk(&db, *job_id, *idx, text, embedding);
+            if let Err(error) = db::replace_transcript_embeddings(&mut db, *job_id, &indexed) {
+                eprintln!(
+                    "recompute: job_id={} embedding persistence error: {}",
+                    job_id, error
+                );
+                total_errors += 1;
+                continue;
             }
         }
 
@@ -1188,19 +2293,26 @@ pub async fn replace_ai_playlists(
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    let inputs = groups.iter().map(|group| {
-        let keywords = serde_json::to_string(&group.topic_keywords).unwrap_or_else(|_| "[]".to_string());
-        let description = group.description.as_deref();
-        (group, keywords, description)
-    }).collect::<Vec<_>>();
-    let refs = inputs.iter().map(|(group, keywords, description)| db::AutoPlaylistInput {
-        name: &group.name,
-        description: *description,
-        color: &group.color,
-        cover_job_id: group.cover_job_id,
-        topic_keywords: keywords,
-        job_ids: &group.job_ids,
-    }).collect::<Vec<_>>();
+    let inputs = groups
+        .iter()
+        .map(|group| {
+            let keywords =
+                serde_json::to_string(&group.topic_keywords).unwrap_or_else(|_| "[]".to_string());
+            let description = group.description.as_deref();
+            (group, keywords, description)
+        })
+        .collect::<Vec<_>>();
+    let refs = inputs
+        .iter()
+        .map(|(group, keywords, description)| db::AutoPlaylistInput {
+            name: &group.name,
+            description: *description,
+            color: &group.color,
+            cover_job_id: group.cover_job_id,
+            topic_keywords: keywords,
+            job_ids: &group.job_ids,
+        })
+        .collect::<Vec<_>>();
     db::replace_auto_playlists(&db, &refs).map_err(|e| e.to_string())?;
     db::get_all_playlists(&db).map_err(|e| e.to_string())
 }
@@ -1220,10 +2332,6 @@ pub async fn set_video_keep_status(
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
     db::set_media_keep_status(&db, job_id, &status).map_err(|e| e.to_string())?;
-
-    if status == "online" {
-        db::cleanup_media_files(&db, job_id, &processing_root()).map_err(|e| e.to_string())?;
-    }
 
     Ok(())
 }
@@ -1310,7 +2418,18 @@ pub async fn get_playlist_items(
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::get_playlist_jobs(&db, playlist_id).map_err(|e| e.to_string())
+    let mut jobs = db::get_playlist_jobs(&db, playlist_id).map_err(|e| e.to_string())?;
+    for job in &mut jobs {
+        if job
+            .video_path
+            .as_deref()
+            .map(PathBuf::from)
+            .is_some_and(|path| !path.is_file())
+        {
+            job.video_path = None;
+        }
+    }
+    Ok(jobs)
 }
 
 #[tauri::command]
@@ -1360,7 +2479,7 @@ pub async fn export_semantic(job_id: i64, state: State<'_, AppState>) -> Result<
         .unwrap_or((None, None));
 
     let unib_content = format!(
-        "@unib:0.0\n@owner:pulsar-eventide\n@mode:media\n@created:{}\n@source:{}\n@title:{}\n@author:{}\n@duration:{}\n@platform:{}\n@upload_date:{}\n@keep_status:{}\n@julia_ready:{}\n@embeddings_count:{}\n@embeddings_dim:384\n@embedding_model:all-MiniLM-L6-v2\n\n{}\n\n[V#media] @video_{}:video > downloaded_from > @source_{}:source ?1.0 !0.8 {{st:confirmed}} ^system.\n",
+        "@unib:0.0\n@owner:pulsaria\n@mode:media\n@created:{}\n@source:{}\n@title:{}\n@author:{}\n@duration:{}\n@platform:{}\n@upload_date:{}\n@keep_status:{}\n@julia_ready:{}\n@embeddings_count:{}\n@embeddings_dim:384\n@embedding_model:all-MiniLM-L6-v2\n\n{}\n\n[V#media] @video_{}:video > downloaded_from > @source_{}:source ?1.0 !0.8 {{st:confirmed}} ^system.\n",
         chrono::Utc::now().to_rfc3339(),
         job.url,
         job.title.clone().unwrap_or_default(),
@@ -1500,11 +2619,13 @@ pub async fn import_semantic(content: String, state: State<'_, AppState>) -> Res
 
 #[tauri::command]
 pub async fn set_download_dir(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let path = PathBuf::from(path.trim());
+    let path = expand_user_path(&path);
     if path.as_os_str().is_empty() {
         return Err("Download directory cannot be empty".to_string());
     }
     fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    storage::ensure_media_root(&path)
+        .map_err(|error| format!("No se pudo preparar el almacenamiento local: {}", error))?;
     std::env::set_var("PULSAR_DOWNLOAD_DIR", &path);
     {
         let mut wc = state.worker_config.write().await;
@@ -1567,11 +2688,8 @@ pub async fn set_formats(formats: Vec<String>, state: State<'_, AppState>) -> Re
     std::env::set_var("PULSAR_FORMATS", &serialized);
     let settings_dir = settings_data_dir();
     fs::create_dir_all(&settings_dir).map_err(|error| error.to_string())?;
-    fs::write(
-        settings_dir.join("formats.json"),
-        serialized.as_bytes(),
-    )
-    .map_err(|error| error.to_string())?;
+    fs::write(settings_dir.join("formats.json"), serialized.as_bytes())
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1582,7 +2700,10 @@ pub async fn get_formats(state: State<'_, AppState>) -> Result<Vec<String>, Stri
 }
 
 #[tauri::command]
-pub async fn set_default_retention(retention: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_default_retention(
+    retention: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     if !matches!(retention.as_str(), "keep" | "online") {
         return Err("Retention policy must be 'keep' or 'online'".to_string());
     }
@@ -1614,7 +2735,7 @@ mod unib_tests {
 
     #[test]
     fn parses_unib_headers_and_timestamped_segments() {
-        let content = "@unib:0.0\n@source:https://www.tiktok.com/@demo/video/123\n@title:Clase breve\n\n[00:01.250 -> 00:03.500] Primero observa el encuadre.\n[00:04.000 -> 00:06.000] Después ajusta la luz.\n[V#media] @video_1:video > downloaded_from > @source_1:source ?1.0 !0.8 {st:confirmed} ^system.";
+        let content = "@unib:0.0\n@source:https://www.tiktok.com/@demo/video/123\n@title:Clase breve\n\n[00:01.250 -> 00:03.500] Primero observa el encuadre.\n[00:04.000 -> 00:06.000] Despu├®s ajusta la luz.\n[V#media] @video_1:video > downloaded_from > @source_1:source ?1.0 !0.8 {st:confirmed} ^system.";
         assert_eq!(
             unib_header_value(content, "title").as_deref(),
             Some("Clase breve")
@@ -1622,15 +2743,15 @@ mod unib_tests {
         assert_eq!(parse_unib_time("00:01.250"), Some(1.25));
         assert_eq!(parse_unib_segments(content).len(), 2);
         assert_eq!(parse_unib_segments(content)[1].1, 4.0);
-        assert_eq!(parse_unib_segments(content)[1].3, "Después ajusta la luz.");
+        assert_eq!(parse_unib_segments(content)[1].3, "Despu├®s ajusta la luz.");
     }
 
     #[test]
     fn rejects_invalid_unib_time_ranges() {
         assert_eq!(parse_unib_time("00:60.000"), None);
-        let content = "[00:03.000 -> 00:02.000] Rango invertido\n[00:00.000 -> 00:01.000] Válido";
+        let content = "[00:03.000 -> 00:02.000] Rango invertido\n[00:00.000 -> 00:01.000] V├ílido";
         let segments = parse_unib_segments(content);
         assert_eq!(segments.len(), 1);
-        assert_eq!(segments[0].3, "Válido");
+        assert_eq!(segments[0].3, "V├ílido");
     }
 }

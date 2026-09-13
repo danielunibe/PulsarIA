@@ -1,24 +1,24 @@
-# Pulsaria Architecture
+ï»¿# Pulsaria Architecture
 
 ## Overview
 
-Pulsar Eventide is a desktop multimodal video processing engine built with Rust + Tauri 2 + Next.js 15.
+Pulsaria is a desktop multimodal video processing engine built with Rust + Tauri 2 + Next.js 15.
 
 ## Layered Architecture
 
 ```
 +----------------------------------------------------------+
-¦  Frontend (Next.js 15 / React 19)                       ¦
-¦  +- Tauri IPC (invoke) + Event Emitter                   ¦
+ï¿½  Frontend (Next.js 15 / React 19)                       ï¿½
+ï¿½  +- Tauri IPC (invoke) + Event Emitter                   ï¿½
 +----------------------------------------------------------+
-¦
+ï¿½
 +----------------------------------------------------------+
-¦  Tauri 2 / Rust Core (este módulo)                       ¦
-¦  +- AppState (db, queue, onnx, search, config, metrics)  ¦
-¦  +- QueueManager ? Python workers (subprocesos aislados) ¦
-¦  +- ONNXModelManager (all-MiniLM-L6-v2, 384d)           ¦
-¦  +- SearchService (HNSW + BM25 + Reranker)               ¦
-¦  +- Axum API Gateway (:8080) + Metrics (:9001)           ¦
+ï¿½  Tauri 2 / Rust Core (este mï¿½dulo)                       ï¿½
+ï¿½  +- AppState (db, queue, onnx, search, config, metrics)  ï¿½
+ï¿½  +- QueueManager ? Python workers (subprocesos aislados) ï¿½
+ï¿½  +- ONNXModelManager (all-MiniLM-L6-v2, 384d)           ï¿½
+ï¿½  +- SearchService (HNSW + BM25 + Reranker)               ï¿½
+ï¿½  +- Axum API Gateway (:8080) + Metrics (:9001)           ï¿½
 +----------------------------------------------------------+
 ```
 
@@ -129,18 +129,18 @@ Background loop ? commands::collection_sync_loop
 ## Configuration
 
 Settings are persisted to `data/settings/`:
-- `search_config.json` — SearchConfig
-- `download_dir.txt` — Download path
-- `cookie_browser.txt` — Browser for cookies
-- `retention.txt` — keep/online policy
-- `formats.json` — Format list
+- `search_config.json` ï¿½ SearchConfig
+- `download_dir.txt` ï¿½ Download path
+- `cookie_browser.txt` ï¿½ Browser for cookies
+- `retention.txt` ï¿½ keep/online policy
+- `formats.json` ï¿½ Format list
 
 Environment variables:
-- `PULSAR_DOWNLOAD_DIR` — Override download path
-- `PULSAR_COOKIES_FROM_BROWSER` — Browser choice
-- `PULSAR_DEFAULT_RETENTION` — keep/online
-- `PULSAR_FORMATS` — JSON array of formats
-- `PULSAR_API_PORT` — REST API port (default 8080)
-- `SHARD_COUNT` — HNSW shard count (default 4)
-- `RERANKER_ENABLED` — Enable reranker (default false)
-- `REDIS_URL` — Redis connection (default redis://127.0.0.1/)
+- `PULSAR_DOWNLOAD_DIR` ï¿½ Override download path
+- `PULSAR_COOKIES_FROM_BROWSER` ï¿½ Browser choice
+- `PULSAR_DEFAULT_RETENTION` ï¿½ keep/online
+- `PULSAR_FORMATS` ï¿½ JSON array of formats
+- `PULSAR_API_PORT` ï¿½ REST API port (default 8080)
+- `SHARD_COUNT` ï¿½ HNSW shard count (default 4)
+- `RERANKER_ENABLED` ï¿½ Enable reranker (default false)
+- `REDIS_URL` ï¿½ Redis connection (default redis://127.0.0.1/)

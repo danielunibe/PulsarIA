@@ -1,5 +1,5 @@
-# 🚀 KILOCODE — DOCUMENTO BASE DE DESARROLLO AUTÓNOMO EN BUCLE
-## Pulsar Eventide · Orquestador de Múltiples Agentes y Ejecución Continua
+﻿# 🚀 KILOCODE — DOCUMENTO BASE DE DESARROLLO AUTÓNOMO EN BUCLE
+## Pulsaria · Orquestador de Múltiples Agentes y Ejecución Continua
 ### Ubicación: `C:\\Users\\danie\\Desktop\\Pulsaria\\docs\\audit_2026\\KILOCODE_BASE_DOCUMENT.md`
 
 ---

@@ -1,9 +1,7 @@
 import type { VideoData } from '@/types';
 
-// ============================================================
-// Mock Data — Videos Activos del Dashboard (Modo Demo)
-// ============================================================
-
+// Recursos locales usados únicamente como estado inicial cuando la biblioteca real está vacía.
+// Mantenerlos en el bundle permite que la ventana nativa tenga una galería reproducible sin red.
 export const MOCK_ACTIVE_VIDEOS: VideoData[] = [
     {
         id: 101,
@@ -18,7 +16,8 @@ export const MOCK_ACTIVE_VIDEOS: VideoData[] = [
             summary: 'Explicación acelerada de la arquitectura RAG con HNSW index y embeddings vectoriales.',
             key_scenes: ['Introducción a vectores', 'Indexación HNSW', 'Búsqueda semántica en tiempo real']
         }),
-        instructionalGuide: '1. Ingesta el texto o video.\n2. Genera los embeddings con ONNX/MiniLM.\n3. Consulta el índice HNSW para similitud coseno.\n4. Sintetiza la respuesta con Gemini RAG.'
+        instructionalGuide: '1. Ingesta el contenido autorizado.\n2. Genera los embeddings con ONNX/MiniLM.\n3. Consulta el índice HNSW para similitud coseno.\n4. Sintetiza la respuesta con el modelo local.',
+        isDemo: true
     },
     {
         id: 102,
@@ -33,7 +32,8 @@ export const MOCK_ACTIVE_VIDEOS: VideoData[] = [
             summary: 'Demostración de interfaces futuristas con desenfoque de fondo y efectos lumínicos.',
             key_scenes: ['Efecto Aurora', 'Bordes pulidos', 'Microanimaciones']
         }),
-        instructionalGuide: 'Aplica backdrop-filter: blur(20px), degradados oscuros de alta gama y bordes semi-transparentes.'
+        instructionalGuide: 'Aplica backdrop-filter: blur(20px), degradados oscuros de alta gama y bordes semi-transparentes.',
+        isDemo: true
     },
     {
         id: 103,
@@ -48,7 +48,8 @@ export const MOCK_ACTIVE_VIDEOS: VideoData[] = [
             summary: 'Comparativa de IPC y consumo de memoria entre Electron y Tauri 2 en Windows 11.',
             key_scenes: ['Consumo de RAM < 40MB', 'IPC handlers nativos', 'Empaquetado binario']
         }),
-        instructionalGuide: 'Estructura tu backend con puertos y adaptadores en Rust y enlaza tu frontend Next.js vía comandos tauri::command.'
+        instructionalGuide: 'Estructura tu backend con puertos y adaptadores en Rust y enlaza tu frontend Next.js vía comandos tauri::command.',
+        isDemo: true
     },
     {
         id: 104,
@@ -63,7 +64,8 @@ export const MOCK_ACTIVE_VIDEOS: VideoData[] = [
             summary: 'Pipeline de extracción y procesamiento de audio con timestamps precisos y soporte multilingüe.',
             key_scenes: ['Extracción FFmpeg', 'Inferencia Whisper', 'Segmentación por timestamps']
         }),
-        instructionalGuide: 'Extrae audio a 16kHz WAV y pasa las muestras al modelo de Whisper para generar subtítulos y embeddings.'
+        instructionalGuide: 'Extrae audio a 16kHz WAV y pasa las muestras al modelo de Whisper para generar subtítulos y embeddings.',
+        isDemo: true
     },
     {
         id: 105,
@@ -78,7 +80,8 @@ export const MOCK_ACTIVE_VIDEOS: VideoData[] = [
             summary: 'Automatización de pipelines de extracción de videos de TikTok y YouTube Shorts.',
             key_scenes: ['Parseo de URLs', 'Extracción de metadatos', 'Almacenamiento SQLite']
         }),
-        instructionalGuide: 'Invoca yt-dlp como módulo de Python con fallback de cookies y rotación de agentes.'
+        instructionalGuide: 'Invoca yt-dlp como módulo de Python con fallback de cookies y rotación de agentes.',
+        isDemo: true
     },
     {
         id: 106,
@@ -93,9 +96,10 @@ export const MOCK_ACTIVE_VIDEOS: VideoData[] = [
             summary: 'Análisis de retención y dinamismo en clips cortos virales.',
             key_scenes: ['Gancho inicial', 'Pico de atención', 'Llamado a la acción']
         }),
-        instructionalGuide: 'Monitorea métricas de interacción para clasificar clips en playlists temáticas automáticas.'
+        instructionalGuide: 'Monitorea métricas de interacción para clasificar clips en playlists temáticas automáticas.',
+        isDemo: true
     }
 ];
 
-// Número de slots inactivos vacíos a mostrar en el Dashboard
+// Número de espacios vacíos que conserva el lienzo cuando la biblioteca está vacía.
 export const INACTIVE_SLOTS_COUNT = 12;

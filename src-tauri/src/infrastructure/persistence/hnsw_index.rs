@@ -106,9 +106,10 @@ impl VectorIndex for HnswVectorIndex {
             .metadata
             .write()
             .map_err(|_| "Poison error HNSW metadata")?;
-        if meta_guard.values().any(|(stored_job, stored_chunk)| {
-            *stored_job == job_id && *stored_chunk == chunk_index
-        }) {
+        if meta_guard
+            .values()
+            .any(|(stored_job, stored_chunk)| *stored_job == job_id && *stored_chunk == chunk_index)
+        {
             return Ok(());
         }
 
@@ -202,8 +203,8 @@ impl VectorIndex for HnswVectorIndex {
         let writer = BufWriter::new(file);
 
         let snapshot = IndexSnapshotRef {
-            hnsw: &*index_guard,
-            metadata: &*meta_guard,
+            hnsw: &index_guard,
+            metadata: &meta_guard,
         };
 
         bincode::serialize_into(writer, &snapshot).map_err(|e| {

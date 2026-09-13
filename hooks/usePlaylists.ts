@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import type { JobRecord } from '@/hooks/use-jobs';
 
 export interface PlaylistRecord {
   id: number;
@@ -12,19 +13,6 @@ export interface PlaylistRecord {
   color: string;
   created_at: string;
   item_count: number;
-}
-
-export interface JobRecord {
-  id: number;
-  url: string;
-  status: string;
-  progress: number;
-  created_at: string;
-  title?: string;
-  author?: string;
-  thumbnail?: string;
-  duration?: number;
-  video_path?: string;
 }
 
 import { REST_API_BASE } from '@/lib/api-config';

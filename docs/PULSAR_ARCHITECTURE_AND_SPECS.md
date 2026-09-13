@@ -1,12 +1,12 @@
-# 🏛️ PULSAR: Arquitectura y Especificaciones Técnicas
+﻿# 🏛️ PULSAR: Arquitectura y Especificaciones Técnicas
 
-> **Documento de especificación técnica de bajo nivel para el motor multimodal Pulsar Eventide.**
+> **Documento de especificación técnica de bajo nivel para el motor multimodal Pulsaria.**
 
 ---
 
 ## 1. Visión General de la Arquitectura
 
-Pulsar está diseñado como un motor desacoplado de alto rendimiento donde el backend nativo (Rust/Tauri) gestiona la orquestación, persistencia, inferencia de embeddings y búsqueda vectorial, mientras que los workers especializados (Python) procesan la descarga y transcripción pesada de medios, y la interfaz (Next.js 15 / React 19) ofrece una experiencia reactiva y fluida.
+Pulsaria está diseñado como un motor desacoplado de alto rendimiento donde el backend nativo (Rust/Tauri) gestiona la orquestación, persistencia, inferencia de embeddings y búsqueda vectorial, mientras que los workers especializados (Python) procesan la descarga y transcripción pesada de medios, y la interfaz (Next.js 15 / React 19) ofrece una experiencia reactiva y fluida.
 
 ```mermaid
 graph TD
@@ -142,11 +142,11 @@ Los workers se ejecutan como subprocesos aislados invocados por el `QueueManager
 
 ## 6. Contrato de Integración con el Ecosistema Julia
 
-Pulsar exporta fichas de conocimiento estructurado a través de endpoints REST (`:8080/api/v1/export/:job_id`) o mediante archivos JSON generados cuando `julia_ready == true`:
+Pulsaria exporta fichas de conocimiento estructurado a través de endpoints REST (`:8080/api/v1/export/:job_id`) o mediante archivos JSON generados cuando `julia_ready == true`:
 
 ```json
 {
-  "source": "pulsar-eventide",
+  "source": "pulsaria",
   "version": "1.0",
   "video_id": 1042,
   "url": "https://www.tiktok.com/@user/video/123456789",

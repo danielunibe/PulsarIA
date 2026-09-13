@@ -1,0 +1,524 @@
+{
+    "schemaVersion":  1,
+    "manifestKind":  "pulsaria-runtime-resources",
+    "productName":  "Pulsaria",
+    "version":  "0.1.0",
+    "platform":  "windows-x86_64",
+    "resourceRoot":  "resources",
+    "generatedBy":  "scripts/generate-runtime-manifest.ps1",
+    "reproducibility":  {
+                            "timestampsExcluded":  true,
+                            "hashes":  "SHA-256 uppercase",
+                            "sourceOfTruth":  "PULSAR_RUNTIME_ROOT plus canonical python-workers source mappings"
+                        },
+    "contract":  {
+                     "status":  "PASS",
+                     "blockers":  [
+
+                                  ],
+                     "policy":  "A missing required resource is a release blocker. System PATH tools and downloaded binaries are not accepted."
+                 },
+    "components":  [
+                       {
+                           "id":  "python-runtime",
+                           "required":  true,
+                           "status":  "ready",
+                           "version":  "3.11.9",
+                           "versionSource":  "python.exe file version",
+                           "criticalPackages":  [
+                                                    {
+                                                        "name":  "faster-whisper",
+                                                        "version":  "1.2.1",
+                                                        "status":  "present",
+                                                        "metadataPath":  "src-tauri/resources/python/Lib/site-packages/faster_whisper-1.2.1.dist-info/METADATA"
+                                                    },
+                                                    {
+                                                        "name":  "ctranslate2",
+                                                        "version":  "4.8.1",
+                                                        "status":  "present",
+                                                        "metadataPath":  "src-tauri/resources/python/Lib/site-packages/ctranslate2-4.8.1.dist-info/METADATA"
+                                                    },
+                                                    {
+                                                        "name":  "onnxruntime",
+                                                        "version":  "1.29.0",
+                                                        "status":  "present",
+                                                        "metadataPath":  "src-tauri/resources/python/Lib/site-packages/onnxruntime-1.29.0.dist-info/METADATA"
+                                                    },
+                                                    {
+                                                        "name":  "Pillow",
+                                                        "version":  "12.3.0",
+                                                        "status":  "present",
+                                                        "metadataPath":  "src-tauri/resources/python/Lib/site-packages/pillow-12.3.0.dist-info/METADATA"
+                                                    },
+                                                    {
+                                                        "name":  "tokenizers",
+                                                        "version":  "0.23.1",
+                                                        "status":  "present",
+                                                        "metadataPath":  "src-tauri/resources/python/Lib/site-packages/tokenizers-0.23.1.dist-info/METADATA"
+                                                    },
+                                                    {
+                                                        "name":  "yt-dlp",
+                                                        "version":  "2026.8.19",
+                                                        "status":  "present",
+                                                        "metadataPath":  "src-tauri/resources/python/Lib/site-packages/yt_dlp-2026.8.19.dist-info/METADATA"
+                                                    },
+                                                    {
+                                                        "name":  "ffmpeg-python",
+                                                        "version":  "0.2.0",
+                                                        "status":  "present",
+                                                        "metadataPath":  "src-tauri/resources/python/Lib/site-packages/ffmpeg_python-0.2.0.dist-info/METADATA"
+                                                    }
+                                                ],
+                           "files":  [
+                                         {
+                                             "path":  "python/python.exe",
+                                             "sourcePath":  "src-tauri/resources/python/python.exe",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  103192,
+                                             "sha256":  "5F7B89A612C9B8AF1D6456CDFCD1DBE5CA630849E79AEBCED9BEE9A6694952EC"
+                                         },
+                                         {
+                                             "path":  "python/python311.dll",
+                                             "sourcePath":  "src-tauri/resources/python/python311.dll",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  5800216,
+                                             "sha256":  "0817A2A657A24C0D5FBB60DF56960F42FC66B3039D522EC952DAB83E2D869364"
+                                         },
+                                         {
+                                             "path":  "python/python311.zip",
+                                             "sourcePath":  "src-tauri/resources/python/python311.zip",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  4285636,
+                                             "sha256":  "7D0F59C930E7D3D9352399EA3C95C0272489B3C09A8E95FAAEDFA8A23E20E5B1"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/ctranslate2/ctranslate2.dll",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/ctranslate2/ctranslate2.dll",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  59294720,
+                                             "sha256":  "A26134C47079896FC046317A3AEA22A64DF6B63B8C51272748CD2CC406D8D668"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/ctranslate2/_ext.cp311-win_amd64.pyd",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/ctranslate2/_ext.cp311-win_amd64.pyd",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  701952,
+                                             "sha256":  "2B679ECCDFB4925EB4DA3AE3EFD8783CDA40F9B9DA4F04A037EB353115C3A4DF"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/faster_whisper/transcribe.py",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/faster_whisper/transcribe.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  82344,
+                                             "sha256":  "99366C4A324630ED74622A9F9929B6765386B27F2CDB596F048C6255BBB2DF6F"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/faster_whisper/version.py",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/faster_whisper/version.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  53,
+                                             "sha256":  "50D05A08460E7E132C44245EB2729A89C8ED29EC0D20B0266C9FAF954EE373FE"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/onnxruntime/capi/onnxruntime.dll",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/onnxruntime/capi/onnxruntime.dll",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  18093408,
+                                             "sha256":  "590EF4358A8FB8E4FCEA23113838EED4384F12F358EAB4412D6C3E22E3048A0E"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/onnxruntime/capi/onnxruntime_pybind11_state.pyd",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/onnxruntime/capi/onnxruntime_pybind11_state.pyd",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  18715448,
+                                             "sha256":  "E22E471297DD20470E3057CC58E63313FB7F62E4EF737555565748A618F384F4"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/PIL/_imaging.cp311-win_amd64.pyd",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/PIL/_imaging.cp311-win_amd64.pyd",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  2632704,
+                                             "sha256":  "16452BDC0CD84BBC8E034319E67F776DDC9D23767E6C589D89A5C973738D5FB4"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/tokenizers/tokenizers.pyd",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/tokenizers/tokenizers.pyd",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  7565312,
+                                             "sha256":  "619B18E51500EF40A7DE56D823D3C34499E59745487562ACC619367AC5D8AE39"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/yt_dlp/YoutubeDL.py",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/yt_dlp/YoutubeDL.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  223722,
+                                             "sha256":  "AA0992A91FD4CBD2922EA92D3D07A9690A908E3A4D43262F779DE3998B575A56"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/faster_whisper-1.2.1.dist-info/METADATA",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/faster_whisper-1.2.1.dist-info/METADATA",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  16951,
+                                             "sha256":  "654ECB571B683C76848A4497728A22FCA8D06F53CF17D25CF1438A8F2DC80CCE"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/ctranslate2-4.8.1.dist-info/METADATA",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/ctranslate2-4.8.1.dist-info/METADATA",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  11289,
+                                             "sha256":  "99FC2027042105D579D85E96AC55DA5E9911B2233FE132D5ED9B04A90ADB4D53"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/onnxruntime-1.29.0.dist-info/METADATA",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/onnxruntime-1.29.0.dist-info/METADATA",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  5802,
+                                             "sha256":  "EB1F9C5003BD1146122DA378763D3F0A853E48D5156F2D54685481820794AC80"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/pillow-12.3.0.dist-info/METADATA",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/pillow-12.3.0.dist-info/METADATA",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  9273,
+                                             "sha256":  "2C4378001803CFAC65809A50722D46E0DA4CE8061E717F103E5D52734BAB30F5"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/tokenizers-0.23.1.dist-info/METADATA",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/tokenizers-0.23.1.dist-info/METADATA",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  10122,
+                                             "sha256":  "7D8E9948E696DC30BDA81C4B98C6BEC98EC469BF23133E7F1F2393FBA3BAD8D2"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/yt_dlp-2026.8.19.dist-info/METADATA",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/yt_dlp-2026.8.19.dist-info/METADATA",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  186240,
+                                             "sha256":  "0073BDE59A21EE16F8A494720D723E6960A7843F280007A72D25AFB02E902EE3"
+                                         },
+                                         {
+                                             "path":  "python/Lib/site-packages/ffmpeg_python-0.2.0.dist-info/METADATA",
+                                             "sourcePath":  "src-tauri/resources/python/Lib/site-packages/ffmpeg_python-0.2.0.dist-info/METADATA",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  1772,
+                                             "sha256":  "97D0B6F472B532055946856365BD1114F290A161D32545D992FFDA54A6C77162"
+                                         }
+                                     ]
+                       },
+                       {
+                           "id":  "python-workers",
+                           "required":  true,
+                           "status":  "ready",
+                           "version":  "bundled-source",
+                           "versionSource":  "tauri.conf.json resource mappings",
+                           "files":  [
+                                         {
+                                             "path":  "python-workers/audio_extractor.py",
+                                             "sourcePath":  "python-workers/audio_extractor.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  5781,
+                                             "sha256":  "7B8AFAD996BD2F08E0D65C08999D27C82D3BAF7B4F19B55300FC68848F9271D5"
+                                         },
+                                         {
+                                             "path":  "python-workers/daemon.py",
+                                             "sourcePath":  "python-workers/daemon.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  225,
+                                             "sha256":  "1DC6BAEF71FD0B6C371E26474692953FF9826A69DADDBB5F18BA1C83C9D75048"
+                                         },
+                                         {
+                                             "path":  "python-workers/downloader.py",
+                                             "sourcePath":  "python-workers/downloader.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  15099,
+                                             "sha256":  "DCC33994FE9B048811FE6085888D0D8D69FDCA37DD65488BBC24BE695596CB6E"
+                                         },
+                                         {
+                                             "path":  "python-workers/embed_query.py",
+                                             "sourcePath":  "python-workers/embed_query.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  1219,
+                                             "sha256":  "8A80B63091786C9627FCEFBD9586F55C96226E5AB77A078B8FFCE06C3ED6BF10"
+                                         },
+                                         {
+                                             "path":  "python-workers/events.py",
+                                             "sourcePath":  "python-workers/events.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  3306,
+                                             "sha256":  "5D59708F3F44EB68F1B7426A5649FB382EA03B2CF5DD2975C375FB459AD1D185"
+                                         },
+                                         {
+                                             "path":  "python-workers/export_onnx.py",
+                                             "sourcePath":  "python-workers/export_onnx.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  1234,
+                                             "sha256":  "613F2098EB5737B91742AE9E3DAC8CC7E8CC2ABB851421F80DBF5D83B4499D33"
+                                         },
+                                         {
+                                             "path":  "python-workers/export_onnx_embeddings.py",
+                                             "sourcePath":  "python-workers/export_onnx_embeddings.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  1366,
+                                             "sha256":  "C6E430DFA73A6E09D296127591027F294E2AE242FF67DF02432881EAC7CE3A0C"
+                                         },
+                                         {
+                                             "path":  "python-workers/main.py",
+                                             "sourcePath":  "python-workers/main.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  12332,
+                                             "sha256":  "02ABD858B934E520D9C92ED9C1C1AB5253DF3001071FC2390581A9D57DEC158B"
+                                         },
+                                         {
+                                             "path":  "python-workers/models.py",
+                                             "sourcePath":  "python-workers/models.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  1639,
+                                             "sha256":  "6A50E442993203D2E42FB085A6E426B3088171979600B52BAD15C5BCB35EEF6D"
+                                         },
+                                         {
+                                             "path":  "python-workers/prepare_whisper_model.py",
+                                             "sourcePath":  "python-workers/prepare_whisper_model.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  4477,
+                                             "sha256":  "9A7B109DA7AD629723A562D7D92AA66E1040584155449252754958D8695AA18E"
+                                         },
+                                         {
+                                             "path":  "python-workers/transcriber.py",
+                                             "sourcePath":  "python-workers/transcriber.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  15669,
+                                             "sha256":  "A9CFAC75210F77CCC37171DA92085F410FF9AE2F380E79661462E5E30B213658"
+                                         },
+                                         {
+                                             "path":  "python-workers/visual_analyzer.py",
+                                             "sourcePath":  "python-workers/visual_analyzer.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  20942,
+                                             "sha256":  "8EF43240951C078D5DFD900457B7C1C8B3B94B1064CC2773FC4BCA81C2EB7232"
+                                         }
+                                     ]
+                       },
+                       {
+                           "id":  "onnx-minilm",
+                           "required":  true,
+                           "status":  "ready",
+                           "version":  "sha256:8A8FBFB32594EBF754EC35CC5C60D4B35FD863199C2CAFD09EDBB7FAF6340A80",
+                           "versionSource":  "model.onnx content hash",
+                           "files":  [
+                                         {
+                                             "path":  "assets/models/all-MiniLM-L6-v2/config.json",
+                                             "sourcePath":  "src-tauri/resources/assets/models/all-MiniLM-L6-v2/config.json",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  613,
+                                             "sha256":  "0061807B0505B2B6BF5F2C211A544EE5159EA525CE05EB121FAE7ED20DA7F16D"
+                                         },
+                                         {
+                                             "path":  "assets/models/all-MiniLM-L6-v2/model.onnx",
+                                             "sourcePath":  "src-tauri/resources/assets/models/all-MiniLM-L6-v2/model.onnx",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  90362391,
+                                             "sha256":  "8A8FBFB32594EBF754EC35CC5C60D4B35FD863199C2CAFD09EDBB7FAF6340A80"
+                                         },
+                                         {
+                                             "path":  "assets/models/all-MiniLM-L6-v2/special_tokens_map.json",
+                                             "sourcePath":  "src-tauri/resources/assets/models/all-MiniLM-L6-v2/special_tokens_map.json",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  732,
+                                             "sha256":  "5AA43C2F985A25296D5A5CE621C2F77376CA8091A47993C492FD5460B895B140"
+                                         },
+                                         {
+                                             "path":  "assets/models/all-MiniLM-L6-v2/tokenizer.json",
+                                             "sourcePath":  "src-tauri/resources/assets/models/all-MiniLM-L6-v2/tokenizer.json",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  742346,
+                                             "sha256":  "754FBACE50A65EB13073189FDE35F561D96D630920B6A65BBF8DBADF9A4896C3"
+                                         },
+                                         {
+                                             "path":  "assets/models/all-MiniLM-L6-v2/tokenizer_config.json",
+                                             "sourcePath":  "src-tauri/resources/assets/models/all-MiniLM-L6-v2/tokenizer_config.json",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  1529,
+                                             "sha256":  "46AC231E9B955A8AF80FC7F23A0ECC65B524F1DF84A02C2C82CBCA354FB207B4"
+                                         },
+                                         {
+                                             "path":  "assets/models/all-MiniLM-L6-v2/vocab.txt",
+                                             "sourcePath":  "src-tauri/resources/assets/models/all-MiniLM-L6-v2/vocab.txt",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  262030,
+                                             "sha256":  "B49E80874C5EFBC7F4CDE245A812673B05EF1360CED56B8BC8C750EAEEF3FE0F"
+                                         }
+                                     ]
+                       },
+                       {
+                           "id":  "whisper-tiny",
+                           "required":  true,
+                           "status":  "ready",
+                           "version":  "d90ca5fe260221311c53c58e660288d3deb8d356",
+                           "versionSource":  "Hugging Face snapshot directory name",
+                           "files":  [
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/blobs/3baa18e2b321a2f489614607852a729fcd516480",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/blobs/3baa18e2b321a2f489614607852a729fcd516480",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  2472,
+                                             "sha256":  "E7347A2CDAD4C72E93B3FC1BA6E105EF6B28F6B24D8D5CAABE98827FED46472B"
+                                         },
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/blobs/7818adb6de9fa3064d3ff81226fdd675be1f6344",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/blobs/7818adb6de9fa3064d3ff81226fdd675be1f6344",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  2304580,
+                                             "sha256":  "38F97D664B34EB6060B958E0E96DECC65A569867F4337ED86C472C59A4E06A2E"
+                                         },
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/blobs/c9074644d9d1205686f16d411564729461324b75",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/blobs/c9074644d9d1205686f16d411564729461324b75",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  511726,
+                                             "sha256":  "119F061D016E0858580CC48C7C45B1C298FF858281EF41259DEFD98CCE72BDE6"
+                                         },
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/blobs/dcb76c6586fc06cbdac6dd21f14cfd129cc4cdd9dce19bf4ffa62e59cbe6e6d1",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/blobs/dcb76c6586fc06cbdac6dd21f14cfd129cc4cdd9dce19bf4ffa62e59cbe6e6d1",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  75538270,
+                                             "sha256":  "DCB76C6586FC06CBDAC6DD21F14CFD129CC4CDD9DCE19BF4FFA62E59CBE6E6D1"
+                                         },
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/refs/main",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/refs/main",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  40,
+                                             "sha256":  "0876106496106B1C9F74ABC097DEF218E23706144B19EAAF1F9A204627A6F827"
+                                         },
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356/config.json",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356/config.json",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  52,
+                                             "sha256":  "183D2C783484FD57FC747D8971F6D7F260B48CE6A7D529B07AA6FEE0BE248546"
+                                         },
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356/model.bin",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356/model.bin",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  75538270,
+                                             "sha256":  "DCB76C6586FC06CBDAC6DD21F14CFD129CC4CDD9DCE19BF4FFA62E59CBE6E6D1"
+                                         },
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356/tokenizer.json",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356/tokenizer.json",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  52,
+                                             "sha256":  "DF0A9A33D7BD0BE15C91642A9685CB42E24371AD5BC35C7E74E24DDCFC1E2CC7"
+                                         },
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356/vocabulary.txt",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356/vocabulary.txt",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  52,
+                                             "sha256":  "7639C092912B82F827135F0885DCFA7E1538F3461A72EAEF4114643AD302C39D"
+                                         },
+                                         {
+                                             "path":  "assets/models/models--Systran--faster-whisper-tiny/trees/d90ca5fe260221311c53c58e660288d3deb8d356.json",
+                                             "sourcePath":  "src-tauri/resources/assets/models/models--Systran--faster-whisper-tiny/trees/d90ca5fe260221311c53c58e660288d3deb8d356.json",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  865,
+                                             "sha256":  "3122220092B7338B5565212C1D4EA8B587DEFF68DE8B7E097828FFD8A4275CB5"
+                                         }
+                                     ]
+                       },
+                       {
+                           "id":  "media-tools",
+                           "required":  true,
+                           "status":  "ready",
+                           "version":  {
+                                           "ffmpeg":  "ffmpeg version 8.1.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+                                           "ffprobe":  "ffprobe version 8.1.2-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers"
+                                       },
+                           "versionSource":  "bundled executable -version output",
+                           "files":  [
+                                         {
+                                             "path":  "bin/ffmpeg.exe",
+                                             "sourcePath":  "src-tauri/resources/bin/ffmpeg.exe",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  242496512,
+                                             "sha256":  "AD8F211BC894755E0061C55AB280AE00E8D3D4F15A8CC4372B24CFA247B5942E"
+                                         },
+                                         {
+                                             "path":  "bin/ffprobe.exe",
+                                             "sourcePath":  "src-tauri/resources/bin/ffprobe.exe",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  242291712,
+                                             "sha256":  "9DF3B0B5275E830961DF6D94E1F7A71121A7ABD5FF708E9FEC8A0B6084A55015"
+                                         },
+                                         {
+                                             "path":  "bin/FFMPEG-LICENSE.txt",
+                                             "sourcePath":  "src-tauri/resources/bin/FFMPEG-LICENSE.txt",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  35147,
+                                             "sha256":  "8CEB4B9EE5ADEDDE47B31E975C1D90C73AD27B6B165A1DCD80C7C545EB65B903"
+                                         }
+                                     ],
+                           "policy":  "ffmpeg, ffprobe and the local license evidence must be present under resources/bin; PATH executables are never accepted"
+                       }
+                   ],
+    "artifacts":  {
+                      "status":  "not-collected",
+                      "root":  null,
+                      "files":  [
+
+                                ],
+                      "note":  "Pass -ArtifactRoot and optionally -BuildRoot after a build to record executable and installer hashes."
+                  }
+}

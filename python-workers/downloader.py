@@ -1,11 +1,11 @@
-"""
-Pulsar Eventide — Video Downloader (downloader.py)
+﻿"""
+Pulsaria — Video Downloader (downloader.py)
 ==================================================
 
 Responsabilidad: Descargar videos y extraer metadata usando yt-dlp.
 
-Este módulo resuelve la ruta de yt-dlp de forma flexible (venv, bin local,
-PATH del sistema) y ejecuta las siguientes operaciones:
+Este módulo resuelve yt-dlp desde el runtime aprobado y ejecuta las
+siguientes operaciones:
 
 - **extract_metadata()**: Extrae metadata sin descargar (--dump-json)
 - **download_video()**: Descarga el mejor MP4 disponible
@@ -18,11 +18,13 @@ Resolución de rutas:
 import json
 import os
 import sys
-import shutil
 
 import subprocess
 import importlib.util
 from pathlib import Path
+
+
+DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 2 * 60 * 60
 
 # ========================================================================
 # DOWNLOADER: Descarga video + metadata vía yt-dlp
@@ -35,17 +37,54 @@ _WORKERS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _WORKERS_DIR.parent
 
 
+def _runtime_root() -> Path:
+    configured = os.environ.get("PULSAR_RUNTIME_ROOT", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    if (_PROJECT_ROOT / "python").is_dir():
+        return _PROJECT_ROOT
+    return _PROJECT_ROOT / "src-tauri" / "resources"
+
+
+def _resolve_ffmpeg_path() -> str | None:
+    """Resolve the FFmpeg binary for yt-dlp post-processing.
+
+    The development tree and installed bundle expose the binary below the
+    same ``PULSAR_RUNTIME_ROOT/bin`` contract.
+    """
+    configured = os.environ.get("FFMPEG_PATH")
+    if configured and Path(configured).is_file():
+        return configured
+
+    candidates = [_runtime_root() / "bin" / "ffmpeg.exe", _runtime_root() / "bin" / "ffmpeg"]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _download_timeout_seconds() -> float:
+    configured = os.environ.get("PULSAR_DOWNLOAD_TIMEOUT_SECONDS", "")
+    try:
+        timeout = float(configured)
+    except (TypeError, ValueError):
+        timeout = DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
+    return timeout if timeout > 0 else DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
+
+
+def _process_error_detail(error: subprocess.CalledProcessError) -> str:
+    stderr = (error.stderr or "").strip() if isinstance(error.stderr, str) else ""
+    stdout = (error.stdout or "").strip() if isinstance(error.stdout, str) else ""
+    return stderr or stdout or str(error)
+
+
 def resolve_yt_dlp_path() -> str:
     """
     Resuelve la ruta del ejecutable yt-dlp probando múltiples ubicaciones.
 
     Orden de búsqueda:
     1. Variable de entorno YT_DLP_PATH (override explícito).
-    2. venv del worker (Windows): python-workers/.venv/Scripts/yt-dlp.exe
-    3. venv del worker (Unix/macOS): python-workers/.venv/bin/yt-dlp
-    4. Carpeta local de binarios del worker: python-workers/bin/yt-dlp(.exe)
-    5. Carpeta bin/ en la raíz del proyecto: bin/yt-dlp(.exe)
-    6. PATH del sistema (shutil.which).
+    2. bin/yt-dlp bajo la raíz de runtime aprobada.
 
     Todas las rutas se calculan de forma relativa a este archivo (__file__),
     nunca hardcodeadas con rutas absolutas de una máquina específica.
@@ -60,24 +99,12 @@ def resolve_yt_dlp_path() -> str:
         if Path(env_path).exists():
             return env_path
 
-    candidates = [
-        _WORKERS_DIR / ".venv" / "Scripts" / "yt-dlp.exe",
-        _WORKERS_DIR / ".venv" / "bin" / "yt-dlp",
-        _WORKERS_DIR / "bin" / "yt-dlp.exe",
-        _WORKERS_DIR / "bin" / "yt-dlp",
-        _PROJECT_ROOT / "bin" / "yt-dlp.exe",
-        _PROJECT_ROOT / "bin" / "yt-dlp",
-    ]
+    candidates = [_runtime_root() / "bin" / "yt-dlp.exe", _runtime_root() / "bin" / "yt-dlp"]
 
     for candidate in candidates:
         checked.append(str(candidate))
         if candidate.exists():
             return str(candidate)
-
-    which_result = shutil.which("yt-dlp")
-    checked.append("PATH (shutil.which)")
-    if which_result:
-        return which_result
 
     raise RuntimeError(
         "yt-dlp executable not found. Checked: " + ", ".join(checked)
@@ -88,21 +115,13 @@ def build_yt_dlp_base_cmd() -> list:
     """
     Construye el prefijo de comando para invocar yt-dlp de la forma más robusta.
 
-    Preferencia:
-    1. Invocación como módulo con el intérprete actual: `python -m yt_dlp`.
-       Es la forma más fiable en Windows cuando la ruta del proyecto contiene
-       espacios, porque evita el launcher .exe generado por pip (que puede
-       fallar silenciosamente al resolver el shebang embebido).
-    2. Fallback: ejecutable yt-dlp resuelto por ruta (resolve_yt_dlp_path()).
+    Invoca siempre el módulo con el intérprete que ejecuta el worker. Así el
+    runtime aprobado controla también la versión de yt-dlp y no se recurre a
+    un ejecutable externo ni a PATH.
 
     Devuelve una lista de tokens lista para anteponer a los argumentos.
     """
-    # 1. Si el módulo yt_dlp es importable con el intérprete actual, usarlo.
-    if importlib.util.find_spec("yt_dlp") is not None:
-        command = [sys.executable, "-m", "yt_dlp"]
-    else:
-        # 2. Fallback al ejecutable resuelto por ruta.
-        command = [resolve_yt_dlp_path()]
+    command = [sys.executable, "-m", "yt_dlp"]
 
     # La sesión autenticada es opt-in y nunca se persiste en SQLite ni en la UI.
     # Ejemplo en Windows: PULSAR_COOKIES_FROM_BROWSER=chrome
@@ -113,6 +132,10 @@ def build_yt_dlp_base_cmd() -> list:
     # TikTok WAF / TLS challenge bypass via curl_cffi impersonation
     if importlib.util.find_spec("curl_cffi") is not None:
         command.extend(["--impersonate", "chrome"])
+
+    ffmpeg_path = _resolve_ffmpeg_path()
+    if ffmpeg_path:
+        command.extend(["--ffmpeg-location", ffmpeg_path])
 
     return command
 
@@ -152,15 +175,45 @@ def _has_audio_stream(video_path: str) -> bool:
     Uses ffprobe to detect audio tracks. Returns False if ffprobe is
     unavailable or the file has no audio — signals a retry with h264.
     """
+    ffmpeg_path = _resolve_ffmpeg_path()
+    ffprobe_path = None
+    runtime_ffprobe = _runtime_root() / "bin" / ("ffprobe.exe" if os.name == "nt" else "ffprobe")
+    if runtime_ffprobe.is_file():
+        ffprobe_path = str(runtime_ffprobe)
+    if ffmpeg_path:
+        sibling = Path(ffmpeg_path).with_name(
+            "ffprobe.exe" if Path(ffmpeg_path).suffix.lower() == ".exe" else "ffprobe"
+        )
+        if sibling.is_file():
+            ffprobe_path = str(sibling)
+    if not ffprobe_path:
+        # Some portable bundles ship only ffmpeg. Use a short stream-map
+        # probe instead of assuming that every container has audio; the old
+        # optimistic fallback could send silent videos into Whisper.
+        ffmpeg_exe = ffmpeg_path
+        if not ffmpeg_exe:
+            return False
+        try:
+            result = subprocess.run(
+                [ffmpeg_exe, "-v", "error", "-i", video_path,
+                 "-map", "0:a:0", "-t", "0.1", "-f", "null", "-"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            return False
+
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "a",
+            [ffprobe_path, "-v", "error", "-select_streams", "a",
              "-show_entries", "stream=codec_type", "-of", "csv=p=0", video_path],
             capture_output=True, text=True, timeout=30
         )
         return bool(result.stdout.strip())
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
-        return True  # Assume audio exists if ffprobe is unavailable
+        return False
 
 
 def download_video(url: str, job_id: int, base_dir: Path) -> str:
@@ -180,7 +233,13 @@ def download_video(url: str, job_id: int, base_dir: Path) -> str:
     ]
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=_download_timeout_seconds(),
+        )
         # Bug #26 FIX: Find actual downloaded file — yt-dlp may rename on conflict
         if not output_path.exists():
             mp4_files = sorted(output_dir.glob('*.mp4'), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -199,24 +258,44 @@ def download_video(url: str, job_id: int, base_dir: Path) -> str:
             retry_cmd = build_yt_dlp_base_cmd() + [
                 "--quiet",
                 "--no-warnings",
-                "-f", "b[vcodec~='h264']",
+                "-f", "bv[vcodec~='h264']+ba/b[vcodec~='h264']",
                 "-o", str(output_path),
                 url
             ]
             try:
-                subprocess.run(retry_cmd, check=True, capture_output=True, text=True)
+                subprocess.run(
+                    retry_cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=_download_timeout_seconds(),
+                )
                 if not output_path.exists():
                     mp4_files = sorted(output_dir.glob('*.mp4'), key=lambda p: p.stat().st_mtime, reverse=True)
                     if mp4_files:
                         mp4_files[0].rename(output_path)
-            except subprocess.CalledProcessError:
-                pass  # Keep the original video-only download if retry fails
+                if not output_path.exists():
+                    raise FileNotFoundError(
+                        f"El reintento H.264 no generó un MP4 en {output_dir}"
+                    )
+                if not _has_audio_stream(str(output_path)):
+                    raise RuntimeError(
+                        "El video descargado no contiene una pista de audio compatible"
+                    )
+            except subprocess.CalledProcessError as error:
+                raise RuntimeError(
+                    f"Fallo descargando video H.264 con audio: {_process_error_detail(error)}"
+                ) from error
 
         return str(output_path)
 
     except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.strip() if e.stderr else str(e)
+        error_msg = _process_error_detail(e)
         raise RuntimeError(f"Fallo descargando video: {error_msg}")
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(
+            f"Tiempo agotado descargando video después de {_download_timeout_seconds():g}s"
+        ) from error
 
 def extract_metadata(url: str) -> dict:
     """Extrae metadatos del video sin descargarlo (solo JSON dump)."""
@@ -228,25 +307,36 @@ def extract_metadata(url: str) -> dict:
         url
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=True, timeout=60
+        )
         info = json.loads(result.stdout)
+        if not isinstance(info, dict):
+            raise ValueError("yt-dlp no devolvió un objeto JSON de metadata")
+
+        title = info.get("title") or ""
+        author = info.get("uploader") or info.get("channel") or info.get("creator") or ""
+        description = info.get("description") or ""
+        tags = info.get("tags") or []
+        if not isinstance(tags, list):
+            tags = []
 
         return {
-            "title": info.get("title", ""),
-            "author": info.get("uploader") or info.get("channel") or info.get("creator", ""),
-            "thumbnail": info.get("thumbnail", ""),
+            "title": str(title),
+            "author": str(author),
+            "thumbnail": str(info.get("thumbnail") or ""),
             "duration": info.get("duration", 0),
-            "upload_date": info.get("upload_date", ""),
-            "description": info.get("description", "")[:500],
-            "hashtags": info.get("tags", [])[:10],
-            "platform": info.get("extractor_key", "unknown").lower(),
+            "upload_date": str(info.get("upload_date") or ""),
+            "description": str(description)[:500],
+            "hashtags": [str(tag) for tag in tags[:10]],
+            "platform": str(info.get("extractor_key") or "unknown").lower(),
             "view_count": info.get("view_count", 0),
             "like_count": info.get("like_count", 0),
         }
     except subprocess.CalledProcessError as error:
-        detail = error.stderr.strip() if error.stderr else str(error)
+        detail = _process_error_detail(error)
         raise RuntimeError(f"Fallo extrayendo metadata: {detail}") from error
-    except (json.JSONDecodeError, subprocess.TimeoutExpired) as error:
+    except (json.JSONDecodeError, ValueError, subprocess.TimeoutExpired, OSError) as error:
         raise RuntimeError(f"Respuesta inválida de metadata: {error}") from error
 
 
@@ -263,17 +353,29 @@ def extract_playlist_videos(url: str) -> list[str]:
         url
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=60)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=True, timeout=60
+        )
         videos = []
 
-        for line in result.stdout.strip().split('\n'):
+        for line_number, line in enumerate(result.stdout.splitlines(), start=1):
             if line.strip():
-                info = json.loads(line)
+                try:
+                    info = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise RuntimeError(
+                        f"Respuesta inválida de playlist en la línea {line_number}: {error}"
+                    ) from error
+                if not isinstance(info, dict):
+                    continue
                 candidate = info.get('webpage_url') or info.get('original_url') or info.get('url')
                 if isinstance(candidate, str) and candidate.startswith(('http://', 'https://')):
                     videos.append(candidate)
 
-        return videos
-    except Exception as e:
-        print(f"Error extracting playlist: {e}", flush=True)
-        return []
+        return list(dict.fromkeys(videos))
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(
+            f"Fallo expandiendo colección: {_process_error_detail(error)}"
+        ) from error
+    except (subprocess.TimeoutExpired, OSError) as error:
+        raise RuntimeError(f"Fallo expandiendo colección: {error}") from error

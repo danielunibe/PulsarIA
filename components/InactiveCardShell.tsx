@@ -2,7 +2,7 @@
 // InactiveCardShell — UI Mate Translucido Premium
 // ============================================================
 
-import { TIKTOK_LOGO_PATH } from '@/types';
+import { TIKTOK_LOGO_PATH } from '@/lib/design-tokens';
 import { FaHeart, FaCommentDots, FaBookmark, FaShare } from 'react-icons/fa6';
 
 const icons = [FaHeart, FaCommentDots, FaBookmark, FaShare];

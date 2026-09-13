@@ -1,11 +1,11 @@
-# KILO CODE — PROMPT MAESTRO V3 (AGOSTO 2026)
-## Pulsar Eventide — Sesión de Programación Autónoma en Bucle
+﻿# KILO CODE — PROMPT MAESTRO V3 (AGOSTO 2026)
+## Pulsaria — Sesión de Programación Autónoma en Bucle
 ### Lee este archivo completo PRIMERO. Luego ejecuta en orden. No pares hasta terminar.
 
 ---
 
 > **INSTRUCCIÓN CRÍTICA PARA KILO CODE:**
-> Estás en modo orquestador autónomo para el proyecto **Pulsar Eventide**.
+> Estás en modo orquestador autónomo para el proyecto **Pulsaria**.
 > Tu objetivo es implementar todos los ítems de este documento en orden secuencial.
 > Por cada ítem: analiza → implementa → verifica (gate TypeScript/Rust) → marca completado → sigue.
 > Si un ítem falla tras 2 intentos, márcalo como BLOQUEADO en `docs/PULSAR_TASK_BACKLOG.md` y sigue con el siguiente independiente.
@@ -16,7 +16,7 @@
 
 ## 📍 CONTEXTO DEL PROYECTO
 
-**Nombre:** Pulsar Eventide
+**Nombre:** Pulsaria
 **Ruta:** `C:\Users\danie\Desktop\Pulsaria`
 **Tipo:** App de escritorio nativa (Rust + Tauri 2 + Next.js 15 + React 19)
 **Propósito:** Descarga videos de TikTok/YouTube/Instagram, transcribe audio con IA local (faster-whisper), indexa en motor vectorial local (ONNX MiniLM-L6-v2 384d + cosine similarity en SQLite), búsqueda semántica por concepto. Soporte de Playlists Inteligentes, clustering automático y exportación al ecosistema Julia (.unib).
@@ -645,4 +645,4 @@ OPCIONALES (para features avanzados):
 *Fecha: 2026-08-23*
 *Versión: 3.0*
 *Basado en: Auditoría técnica completa del código fuente real*
-*Para: Kilo Code — Sesión de programación autónoma Pulsar Eventide*
+*Para: Kilo Code — Sesión de programación autónoma Pulsaria*

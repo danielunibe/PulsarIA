@@ -1,13 +1,15 @@
-'use client';
+﻿'use client';
 
 import { motion } from 'motion/react';
+import FocusTrap from 'focus-trap-react';
 import type { VideoData } from '@/types';
 import {
     FaXmark, FaVideo, FaMusic, FaFileLines, FaDownload,
     FaPlay, FaPause, FaLanguage, FaBrain, FaWandMagicSparkles,
     FaBolt, FaCheckDouble, FaClock, FaCopy, FaShareNodes,
     FaMagnifyingGlass, FaVolumeHigh, FaVolumeXmark, FaExpand,
-    FaTerminal, FaCode, FaCheck, FaRotateLeft
+    FaTerminal, FaCode, FaCheck, FaRotateLeft, FaStar, FaThumbtack,
+    FaCamera
 } from 'react-icons/fa6';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -17,7 +19,7 @@ import { useSettings } from '@/lib/settings-context';
 
 // ============================================================
 // ExpandedVideoModal — AAA Multimodal Knowledge Hub
-// Pulsar Eventide Ultra-Performance Inspector
+// Pulsaria Ultra-Performance Inspector
 // ============================================================
 
 /**
@@ -29,16 +31,56 @@ import { useSettings } from '@/lib/settings-context';
  */
 interface ExpandedVideoModalProps {
     /** Datos del video a mostrar (de tipo VideoData del backend) */
-    video: VideoData;
+    video: ExpandedVideoData;
     /** Callback para cerrar el modal */
     onClose: () => void;
 }
+
+type SourceState = 'local' | 'online' | 'unavailable';
+
+type ExpandedVideoData = VideoData & {
+    sourceState?: SourceState;
+    transcriptAvailable?: boolean;
+    keepStatus?: string;
+    favorite?: boolean;
+    pinned?: boolean;
+    protected?: boolean;
+};
 
 interface TranscriptChunk {
     chunk_index: number;
     chunk_text: string;
     start: number;
     end: number;
+}
+
+interface MediaArtifact {
+    id: number;
+    job_id: number;
+    kind: 'poster' | 'keyframe' | 'screenshot' | string;
+    path: string;
+    timestamp?: number;
+    label?: string;
+    protected: boolean;
+    size_bytes: number;
+    created_at: string;
+}
+
+function isNativeShell(): boolean {
+    if (typeof window === 'undefined') return false;
+    return '__TAURI_INTERNALS__' in window
+        || window.location.protocol === 'tauri:'
+        || window.location.hostname === 'tauri.localhost';
+}
+
+async function resolveArtifactUrl(path: string): Promise<string | undefined> {
+    if (/^(https?:\/\/|data:)/i.test(path)) return path;
+    try {
+        const { convertFileSrc } = await import('@tauri-apps/api/core');
+        return convertFileSrc(path);
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -74,8 +116,32 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
     const [isMuted, setIsMuted] = useState(true);
     const [playbackError, setPlaybackError] = useState(false);
     const [playbackRate, setPlaybackRate] = useState(1);
+    const [favorite, setFavorite] = useState(Boolean(video.favorite));
+    const [pinned, setPinned] = useState(Boolean(video.pinned));
+    const [artifacts, setArtifacts] = useState<MediaArtifact[]>([]);
+    const [artifactUrls, setArtifactUrls] = useState<Record<number, string>>({});
+    const [savingFrame, setSavingFrame] = useState(false);
 
     const { exportSemantic, importSemantic, downloadUnib, exporting, importing, error: semanticError, exportedContent } = useSemanticIO();
+
+    const sourceState: SourceState = video.sourceState || (video.videoSrc ? 'local' : 'unavailable');
+    const transcriptOnly = !video.videoSrc;
+    const sourceStateLabel = sourceState === 'local'
+        ? 'Local'
+        : sourceState === 'online'
+            ? 'Online · ficha conservada'
+            : 'No disponible · ficha conservada';
+
+    const recordAccess = useCallback(async (event: 'open' | 'play' | 'search') => {
+        if (!isNativeShell()) return;
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('record_media_access', { jobId: video.id, accessKind: event });
+        } catch {
+            // Older shells may not expose access telemetry yet. Playback and
+            // transcript-only inspection remain fully usable.
+        }
+    }, [video.id]);
 
     // Engine Toggles State
     const [toggles, setToggles] = useState({
@@ -93,6 +159,38 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
             active = false;
         };
     }, []);
+
+    useEffect(() => {
+        setFavorite(Boolean(video.favorite));
+        setPinned(Boolean(video.pinned));
+    }, [video.favorite, video.id, video.pinned]);
+
+    const loadArtifacts = useCallback(async () => {
+        if (!isNativeShell()) return;
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const next = await invoke<MediaArtifact[]>('get_job_artifacts', { jobId: video.id });
+            const urls = await Promise.all(next.map(async (artifact) => {
+                const url = await resolveArtifactUrl(artifact.path);
+                return [artifact.id, url] as const;
+            }));
+            setArtifacts(next);
+            setArtifactUrls(Object.fromEntries(urls.filter(([, url]) => Boolean(url)) as Array<[string | number, string]>));
+        } catch {
+            // Artifact rendering is additive; transcript and metadata remain usable
+            // when an older native shell does not expose this command yet.
+            setArtifacts([]);
+            setArtifactUrls({});
+        }
+    }, [video.id]);
+
+    useEffect(() => {
+        void loadArtifacts();
+    }, [loadArtifacts]);
+
+    useEffect(() => {
+        void recordAccess('open');
+    }, [recordAccess]);
 
     // Load transcript from SQLite backend via Tauri invoke
     useEffect(() => {
@@ -152,9 +250,10 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
             .then(() => {
                 setPlaybackError(false);
                 setIsPlaying(true);
+                void recordAccess('play');
             })
             .catch(() => setIsPlaying(false));
-    }, []);
+    }, [recordAccess]);
 
     useEffect(() => {
         const element = videoRef.current;
@@ -176,9 +275,12 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
             element.pause();
             setIsPlaying(false);
         } else {
-            void element.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+            void element.play().then(() => {
+                setIsPlaying(true);
+                void recordAccess('play');
+            }).catch(() => setIsPlaying(false));
         }
-    }, []);
+    }, [recordAccess]);
 
     const openOriginal = useCallback(async () => {
         const url = video.originalUrl;
@@ -204,6 +306,82 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
         element.muted = !element.muted;
         setIsMuted(element.muted);
     }, []);
+
+    const updateProtection = useCallback(async (kind: 'favorite' | 'pinned') => {
+        if (!isNativeShell()) {
+            toast.info('La protección se guarda desde la biblioteca local de Pulsaria.');
+            return;
+        }
+        const nextFavorite = kind === 'favorite' ? !favorite : favorite;
+        const nextPinned = kind === 'pinned' ? !pinned : pinned;
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('set_media_protection', {
+                jobId: video.id,
+                favorite: nextFavorite,
+                pinned: nextPinned,
+                protected: null,
+            });
+            setFavorite(nextFavorite);
+            setPinned(nextPinned);
+            toast.success(kind === 'favorite'
+                ? (nextFavorite ? 'Marcado como favorito' : 'Favorito retirado')
+                : (nextPinned ? 'Video fijado' : 'Video desfijado'));
+        } catch (error) {
+            toast.error(`No se pudo actualizar la protección: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }, [favorite, pinned, video.id]);
+
+    const saveCurrentFrame = useCallback(async () => {
+        if (!isNativeShell()) {
+            toast.info('Las capturas manuales requieren la aplicación de escritorio.');
+            return;
+        }
+        const element = videoRef.current;
+        if (!element || !element.videoWidth || !element.videoHeight) {
+            toast.error('El video aún no tiene un frame disponible para capturar.');
+            return;
+        }
+        setSavingFrame(true);
+        try {
+            const scale = Math.min(1, 1280 / element.videoWidth);
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(element.videoWidth * scale));
+            canvas.height = Math.max(1, Math.round(element.videoHeight * scale));
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('No se pudo preparar el lienzo de captura');
+            context.drawImage(element, 0, 0, canvas.width, canvas.height);
+
+            let blob: Blob | null = null;
+            for (const quality of [0.84, 0.74, 0.64, 0.54, 0.44]) {
+                const candidate = await new Promise<Blob | null>((resolve) => {
+                    canvas.toBlob(resolve, 'image/jpeg', quality);
+                });
+                if (candidate && candidate.size <= 2 * 1024 * 1024) {
+                    blob = candidate;
+                    break;
+                }
+                blob = candidate;
+            }
+            if (!blob || blob.size > 2 * 1024 * 1024) {
+                throw new Error('La captura supera el límite de 2 MiB');
+            }
+            const buffer = await blob.arrayBuffer();
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('save_video_frame', {
+                jobId: video.id,
+                bytes: Array.from(new Uint8Array(buffer)),
+                timestamp: rawCurrentTime,
+                label: null,
+            });
+            await loadArtifacts();
+            toast.success('Captura protegida guardada', { description: 'El límite es de 10 capturas por job.' });
+        } catch (error) {
+            toast.error(`No se pudo guardar la captura: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setSavingFrame(false);
+        }
+    }, [loadArtifacts, rawCurrentTime, video.id]);
 
     // Keyboard Shortcuts (Space, Escape, M, Arrows)
     useEffect(() => {
@@ -305,11 +483,12 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
     // Export JSON payload
     const exportPayload = useMemo(() => {
         return {
-            source: "pulsar-eventide",
+            source: "pulsaria",
             version: "1.0",
             video_id: video.id,
             url: video.originalUrl || video.videoSrc || "",
             platform: "tiktok",
+            source_state: sourceState,
             metadata: {
                 title: video.title || `Video #${video.id}`,
                 author: video.author || "Desconocido",
@@ -318,7 +497,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                 thumbnail: video.thumb
             },
             content: {
-                summary: `Ficha estructurada del video '${video.title}'. Procesado por Pulsar Eventide.`,
+                summary: `Ficha estructurada del video '${video.title}'. Procesado por Pulsaria.`,
                 topics: video.tags?.length ? video.tags : ["Audiovisual", "TikTok", "Pulsar"],
                 intent: "Ingesta y Análisis de Conocimiento",
                 full_transcript: fullTranscriptText,
@@ -335,7 +514,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
             },
             julia_ready: true
         };
-    }, [video, fullTranscriptText, transcriptChunks]);
+    }, [sourceState, video, fullTranscriptText, transcriptChunks]);
 
     const handleSemanticImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -398,9 +577,13 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                 if (e.target === e.currentTarget) onClose();
             }}
         >
+            <FocusTrap focusTrapOptions={{ initialFocus: false, escapeDeactivates: false }}>
             <motion.div
                 layoutId={`video-card-${video.id}`}
-                className="w-full max-w-[1240px] h-[88vh] min-h-[600px] max-h-[920px] rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-[0_25px_80px_rgba(0,0,0,0.9)] border border-white/10 relative"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Reproductor y análisis de video"
+                className="w-full max-w-[1240px] h-[88vh] min-h-0 max-h-[calc(100vh-2rem)] rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-[0_25px_80px_rgba(0,0,0,0.9)] border border-white/10 relative"
                 style={{
                     background: 'linear-gradient(145deg, rgba(16,18,27,0.98) 0%, rgba(8,10,15,0.99) 100%)',
                     boxShadow: '0 30px 90px rgba(0,0,0,0.9)'
@@ -411,13 +594,38 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                 transition={{ type: 'spring', damping: 28, stiffness: 350 }}
             >
                 {/* ── Left Column: Video Cinema Player ── */}
-                <div className="w-full md:w-[48%] h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
+                <div className="w-full md:w-[48%] h-[42%] min-h-0 md:h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
                     {/* Compact metadata header; the product identity already lives in the main window. */}
-                    <div className="flex items-center justify-end gap-3 mb-4 shrink-0">
+                    <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
                         <div className="flex items-center gap-2">
+                            <span className={`rounded-lg border px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${sourceState === 'local' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : sourceState === 'online' ? 'border-[#25f4ee]/25 bg-[#25f4ee]/10 text-[#25f4ee]' : 'border-amber-400/25 bg-amber-400/10 text-amber-200'}`}>
+                                {sourceStateLabel}
+                            </span>
                             <span className="text-xs font-mono font-bold text-white/50 bg-white/5 px-2.5 py-1 rounded-lg border border-white/5">
                                 #{video.id}
                             </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                            <button
+                                type="button"
+                                aria-label={favorite ? 'Quitar de favoritos' : 'Marcar como favorito'}
+                                aria-pressed={favorite}
+                                onClick={() => { void updateProtection('favorite'); }}
+                                className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${favorite ? 'border-amber-300/40 bg-amber-300/15 text-amber-200' : 'border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-amber-200'}`}
+                                title={favorite ? 'Quitar favorito' : 'Marcar favorito'}
+                            >
+                                <FaStar size={12} />
+                            </button>
+                            <button
+                                type="button"
+                                aria-label={pinned ? 'Desfijar video' : 'Fijar video'}
+                                aria-pressed={pinned}
+                                onClick={() => { void updateProtection('pinned'); }}
+                                className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${pinned ? 'border-[#25f4ee]/40 bg-[#25f4ee]/15 text-[#25f4ee]' : 'border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-[#25f4ee]'}`}
+                                title={pinned ? 'Desfijar video' : 'Fijar video'}
+                            >
+                                <FaThumbtack size={12} />
+                            </button>
                         </div>
                     </div>
 
@@ -445,18 +653,26 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                                 onClick={togglePlay}
                             />
                         ) : (
-                            <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
-                                <FaVideo size={32} className="text-white/25" />
-                                <p className="text-xs text-white/60">El archivo local no está retenido.</p>
-                                {video.originalUrl && (
+                            <div className="relative flex h-full w-full flex-col items-center justify-center gap-3 overflow-hidden p-8 text-center">
+                                {video.thumb && (
+                                    <div aria-hidden="true" className="absolute inset-0 bg-cover bg-center opacity-30 blur-sm" style={{ backgroundImage: `url(${video.thumb})` }} />
+                                )}
+                                <div className="relative z-[1] flex max-w-sm flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/55 p-6 backdrop-blur-md">
+                                    <FaVideo size={32} className="text-white/25" />
+                                    <p className="text-xs font-bold text-white/75">
+                                        {sourceState === 'online' ? 'El medio local está fuera de esta cuota.' : 'La fuente remota no está disponible localmente.'}
+                                    </p>
+                                    <p className="text-[10px] leading-relaxed text-white/50">La ficha, el transcript y los timestamps permanecen disponibles. No se redescarga nada automáticamente.</p>
+                                    {video.originalUrl && (
                                     <button
                                         type="button"
                                         onClick={() => void openOriginal()}
                                         className="px-3 py-2 rounded-xl bg-[#25f4ee]/10 border border-[#25f4ee]/30 text-[#25f4ee] text-xs font-bold hover:bg-[#25f4ee]/20 transition-colors"
                                     >
-                                        Ver fuente original
+                                        Abrir en TikTok
                                     </button>
-                                )}
+                                    )}
+                                </div>
                             </div>
                         )}
 
@@ -483,6 +699,16 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                             {/* Control Bar */}
                             <div className="flex items-center justify-between pt-1">
                                 <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        aria-label="Guardar captura del frame actual"
+                                        onClick={() => { void saveCurrentFrame(); }}
+                                        disabled={savingFrame}
+                                        className="w-8 h-8 rounded-lg bg-white/10 hover:bg-[#25f4ee]/20 border border-white/10 flex items-center justify-center text-white transition-all disabled:cursor-wait disabled:opacity-50"
+                                        title="Guardar captura protegida"
+                                    >
+                                        <FaCamera size={11} />
+                                    </button>
                                     <button
                                         type="button"
                                         aria-label={isPlaying ? 'Pausar video' : 'Reproducir video'}
@@ -539,7 +765,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                 </div>
 
                 {/* ── Right Column: AAA Inspector, Transcript & Export ── */}
-                <div className="w-full md:w-[52%] h-full flex flex-col p-5 bg-[#0b0d14]/90 overflow-hidden relative">
+                <div className="w-full md:w-[52%] h-[58%] min-h-0 md:h-full flex flex-col p-5 bg-[#0b0d14]/90 overflow-hidden relative">
                     {/* Header Action Row */}
                     <div className="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
                         {/* Tab Switcher */}
@@ -652,6 +878,11 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                                     No se pudo cargar la transcripción: {transcriptError}
                                 </div>
                             )}
+                            {transcriptOnly && !transcriptError && (
+                                <div className="mb-3 rounded-xl border border-[#25f4ee]/20 bg-[#25f4ee]/5 px-3 py-2 text-[10px] leading-relaxed text-[#25f4ee]/75">
+                                    Modo transcript-only: los timestamps se conservan para consulta, pero no hay un video local al que saltar.
+                                </div>
+                            )}
 
                             {/* Transcript Chunks List */}
                             <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-2 rounded-2xl bg-black/30 border border-white/5 p-3">
@@ -672,14 +903,15 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                                     </div>
                                 ) : (
                                     filteredChunks.map((chunk) => {
-                                        const isChunkActive = rawCurrentTime >= chunk.start && rawCurrentTime <= chunk.end;
+                                        const isChunkActive = !transcriptOnly && rawCurrentTime >= chunk.start && rawCurrentTime <= chunk.end;
                                         return (
                                             <motion.button
                                                 type="button"
                                                 key={chunk.chunk_index}
                                                 onClick={() => seekToSecond(chunk.start)}
+                                                disabled={transcriptOnly}
                                                 aria-label={`Ir al segmento ${chunk.chunk_index + 1}, desde ${formatPreciseTime(chunk.start)}`}
-                                                className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer flex flex-col gap-1.5 ${
+                                                className={`w-full text-left p-3 rounded-xl border transition-all flex flex-col gap-1.5 ${transcriptOnly ? 'cursor-default opacity-90' : 'cursor-pointer'} ${
                                                     isChunkActive
                                                         ? 'bg-[#25f4ee]/15 border-[#25f4ee]/40 shadow-[0_0_15px_rgba(37,244,238,0.15)]'
                                                         : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.06] hover:border-white/10'
@@ -730,6 +962,34 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                                     {visualAnalysis.frames?.some((frame) => frame.ocr_text) && (
                                         <p className="text-[10px] text-white/55">OCR: {visualAnalysis.frames.filter((frame) => frame.ocr_text).map((frame) => frame.ocr_text).join(' | ')}</p>
                                     )}
+                                </div>
+                            )}
+
+                            {artifacts.length > 0 && (
+                                <div className="p-4 rounded-2xl bg-black/40 border border-white/10 flex flex-col gap-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-[10px] font-bold text-white/55 uppercase tracking-widest">Artifacts locales</span>
+                                        <span className="text-[9px] text-white/35">{artifacts.length} conservados</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                        {artifacts.map((artifact) => (
+                                            <figure key={artifact.id} className="overflow-hidden rounded-xl border border-white/10 bg-black/30">
+                                                {artifactUrls[artifact.id] ? (
+                                                    <img
+                                                        src={artifactUrls[artifact.id]}
+                                                        alt={artifact.label || `${artifact.kind} del job ${video.id}`}
+                                                        className="aspect-video w-full object-cover"
+                                                    />
+                                                ) : (
+                                                    <div className="flex aspect-video items-center justify-center text-[9px] text-white/35">Sin vista previa</div>
+                                                )}
+                                                <figcaption className="flex items-center justify-between gap-2 px-2 py-1.5 text-[9px] text-white/55">
+                                                    <span className="truncate">{artifact.label || (artifact.kind === 'keyframe' ? 'Keyframe' : artifact.kind === 'screenshot' ? 'Captura protegida' : 'Poster')}</span>
+                                                    {artifact.protected && <span className="shrink-0 text-emerald-300">Protegida</span>}
+                                                </figcaption>
+                                            </figure>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
 
@@ -920,6 +1180,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                     </div>
                 </div>
             </motion.div>
+            </FocusTrap>
         </motion.div>,
         document.body
     );

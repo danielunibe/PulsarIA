@@ -63,6 +63,10 @@ impl EmbeddingCache {
     pub fn len(&self) -> usize {
         self.cache.lock().map(|c| c.len()).unwrap_or(0)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Normaliza la query para maximizar cache hits (lowercase + trim)

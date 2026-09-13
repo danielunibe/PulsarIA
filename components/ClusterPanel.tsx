@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { FaBrain, FaVideo, FaPlay } from 'react-icons/fa6';
+import type { JobRecord } from '@/hooks/use-jobs';
 
 /**
  * Props del panel de clustering temático.
@@ -43,10 +44,12 @@ export function ClusterPanel({ onVideoSelect }: ClusterPanelProps) {
             
             const { REST_API_BASE } = await import('@/lib/api-config');
             const jobsResponse = await fetch(`${REST_API_BASE}/jobs`);
-            const allJobs: any[] = jobsResponse.ok ? await jobsResponse.json() : [];
-            
+            const allJobs: JobRecord[] = jobsResponse.ok ? await jobsResponse.json() : [];
+
             const groups: ClusterGroup[] = result.map((jobIds) => {
-                const jobs = jobIds.map(id => allJobs.find(j => j.id === id)).filter(Boolean);
+                const jobs = jobIds
+                    .map(id => allJobs.find(j => j.id === id))
+                    .filter((job): job is JobRecord => Boolean(job));
                 return {
                     jobs: jobs.map(j => ({
                         id: j.id,

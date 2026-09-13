@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 // ========================================================================
-// DOMAIN MODELS: Entidades Core de Pulsar Eventide
+// DOMAIN MODELS: Entidades Core de Pulsaria
 // Sin dependencias de Infraestructura (UI, DB o Python), 100% Rust puro.
 // ========================================================================
 
@@ -69,6 +69,7 @@ pub struct JobRecord {
     pub url: String,
     pub status: String,
     pub progress: i32,
+    pub retry_count: u32,
     pub created_at: String,
 
     // Media details (Flattened for simplicity matching current DB)
@@ -77,11 +78,26 @@ pub struct JobRecord {
     pub thumbnail: Option<String>,
     pub duration: Option<i32>,
     pub video_path: Option<String>,
+    pub audio_path: Option<String>,
+    pub transcript_path: Option<String>,
     pub keep_status: Option<String>,
     pub platform: Option<String>,
     pub error_message: Option<String>,
     pub visual_analysis: Option<String>,
     pub instructional_guide: Option<String>,
+    pub video_bytes: Option<u64>,
+    pub audio_bytes: Option<u64>,
+    pub downloaded_at: Option<String>,
+    pub last_accessed_at: Option<String>,
+    pub play_count: u64,
+    pub open_count: u64,
+    pub search_hit_count: u64,
+    pub favorite: bool,
+    pub pinned: bool,
+    pub source_state: String,
+    pub purged_at: Option<String>,
+    pub purged_reason: Option<String>,
+    pub poster_path: Option<String>,
 }
 
 // Resultado puro de una búsqueda semántica
@@ -142,4 +158,5 @@ pub struct JobMessage {
     pub job_id: i64,
     pub url: String,
     pub attempt: u32,
+    pub cookies_browser: Option<String>,
 }

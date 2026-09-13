@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 11: CONTRATO DE DATOS Y TIPOS
+﻿# PULSARIA — AUDITORÍA 11: CONTRATO DE DATOS Y TIPOS
 ## Especificación de Tipos TypeScript, Structs Rust y Protocolo de Comunicación
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: KILOCODE_BASE_DOCUMENT.md
 

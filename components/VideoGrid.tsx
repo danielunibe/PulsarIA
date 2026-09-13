@@ -3,9 +3,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { motion } from 'motion/react';
 import { VideoCard } from '@/components/VideoCard';
-import { MOCK_ACTIVE_VIDEOS, INACTIVE_SLOTS_COUNT } from '@/lib/mock-data';
-import { FaFolderOpen } from 'react-icons/fa6';
+import { MOCK_ACTIVE_VIDEOS } from '@/lib/mock-data';
 import type { JobRecord as SharedJobRecord } from '@/hooks/use-jobs';
+import type { CinemaVideo, VideoData } from '@/types';
 
 const ExpandedVideoModal = dynamic(
     () => import('@/components/ExpandedVideoModal').then((mod) => mod.ExpandedVideoModal),
@@ -40,18 +40,24 @@ interface VideoGridProps {
     /** Si es true, muestra solo jobs con errores */
     showErrors?: boolean;
     /** Callback que notifica al padre cuando cambia la lista de jobs */
-    onJobsChange?: (jobs: JobRecord[]) => void;
+    onJobsChange?: (jobs: SharedJobRecord[]) => void;
     /** Fuente de trabajos compartida por la página principal */
     jobs?: SharedJobRecord[];
+    /** Evita mostrar demos durante la primera reconciliación con SQLite. */
+    jobsLoading?: boolean;
+    /** Evita mostrar demos cuando la biblioteca no pudo reconciliarse. */
+    jobsReady?: boolean;
     /** Filtrar por estado de retención: 'keep', 'online' */
     keepStatusFilter?: string;
-    /** Filtrar por plataforma: 'tiktok', 'youtube', etc. */
+    /** Filtro heredado; el MVP solo admite TikTok. */
     platformFilter?: string;
+    /** Colección visible ya ordenada y con assets listos para el modo Cinema */
+    onVisibleVideosChange?: (videos: CinemaVideo[]) => void;
 }
 
-// Gap y padding exterior id�nticos ? espaciado sim�trico en todas las direcciones
-const SPACING = 32;        // px � m�s separaci�n entre cards
-const CARD_MIN_WIDTH = 200; // Ancho m�nimo deseado para que no se  encojan
+// Gap y padding exterior idénticos — espaciado simétrico en todas las direcciones
+const SPACING = 32;        // px — más separación entre cards
+const CARD_MIN_WIDTH = 200; // Ancho mínimo para que no se encojan
 
 interface ProgressEvent {
     job: number;
@@ -59,47 +65,8 @@ interface ProgressEvent {
     progress: number;
 }
 
-/**
- * Registro de un job (video) con sus metadatos de media.
- * 
- * Coincide con la estructura `JobRecord` del backend Rust (db.rs).
- * Se obtiene mediante el comando Tauri `get_jobs` o el endpoint REST `/api/v1/jobs`.
- */
-interface JobRecord {
-    /** ID autoincremental del job */
-    id: number;
-    /** URL original del video */
-    url: string;
-    /** Estado actual: 'queued', 'downloading', 'metadata', 'transcribing', 'indexing', 'processing', 'complete', 'error' */
-    status: string;
-    /** Progreso del pipeline (0-100) */
-    progress: number;
-    /** Timestamp de creación del job (ISO 8601) */
-    created_at: string;
-    /** Título del video (extraído por yt-dlp) */
-    title?: string;
-    /** Autor/creador del video */
-    author?: string;
-    /** URL o path local de la miniatura del video */
-    thumbnail?: string;
-    /** Duración del video en segundos */
-    duration?: number;
-    /** Path local al archivo de video procesado */
-    video_path?: string;
-    /** Mensaje de error si el job falló */
-    error_message?: string;
-    /** Resultados del análisis visual (JSON serializado) */
-    visual_analysis?: string;
-    /** Instructivo audiovisual generado por IA */
-    instructional_guide?: string;
-    /** Poltica de retencin del archivo: 'keep' o 'online' */
-    keep_status?: string;
-    /** Plataforma de origen: 'tiktok', 'youtube', etc. */
-    platform?: string;
-}
-
 // -- Convierte una ruta local de archivo a una URL que Tauri puede renderizar
-// Usa convertFileSrc si est� disponible (app Tauri), de lo contrario usa asset.localhost
+// Usa convertFileSrc si está disponible (app Tauri), de lo contrario usa asset.localhost
 async function toAssetUrl(localPath: string | undefined): Promise<string | undefined> {
     if (!localPath) return undefined;
     // Si ya es URL http/https, devolver tal cual
@@ -111,6 +78,87 @@ async function toAssetUrl(localPath: string | undefined): Promise<string | undef
         return undefined;
     }
 }
+
+type SourceState = 'local' | 'online' | 'unavailable';
+
+type UiJobRecord = SharedJobRecord & {
+    audio_path?: string;
+    transcript_path?: string;
+    poster_path?: string;
+    source_state?: SourceState;
+    favorite?: boolean;
+    pinned?: boolean;
+    protected?: boolean;
+};
+
+type UiVideoData = VideoData & {
+    sourceState?: SourceState;
+    transcriptAvailable?: boolean;
+    keepStatus?: string;
+    favorite?: boolean;
+    pinned?: boolean;
+    protected?: boolean;
+};
+
+function sourceStateForJob(job: UiJobRecord): SourceState {
+    // A durable local video is authoritative for the card state. The
+    // retention preference `online` does not mean that an already-downloaded
+    // file disappeared; it only controls what can be purged later.
+    if (job.video_path) return 'local';
+    if (job.source_state === 'unavailable') return 'unavailable';
+    if (job.source_state === 'online' || job.keep_status === 'online') return 'online';
+    return 'unavailable';
+}
+
+function hasKnowledgeRecord(job: UiJobRecord) {
+    return Boolean(job.transcript_path || job.visual_analysis || job.instructional_guide || job.thumbnail);
+}
+
+function OnlineLibraryCard({
+    job,
+    thumbnail,
+    sourceState,
+    layout,
+    onOpen,
+}: {
+    job: UiJobRecord;
+    thumbnail?: string;
+    sourceState: Exclude<SourceState, 'local'>;
+    layout: 'grid' | 'list' | 'compact';
+    onOpen: () => void;
+}) {
+    const stateLabel = sourceState === 'unavailable' ? 'Fuente no disponible' : 'Online · ficha conservada';
+    return (
+        <button
+            type="button"
+            onClick={onOpen}
+            aria-label={`Abrir ficha de ${job.title || `job ${job.id}`}`}
+            className={`group relative w-full overflow-hidden border border-white/10 bg-[#0d1118] text-left shadow-[0_18px_40px_rgba(0,0,0,.24)] transition duration-300 hover:-translate-y-1 hover:border-[#25f4ee]/40 ${layout === 'list' ? 'aspect-[16/7] min-h-[190px] sm:min-h-[220px]' : layout === 'compact' ? 'aspect-[3/4]' : 'aspect-[9/16]'}`}
+            style={{
+                borderRadius: '20px',
+                backgroundImage: thumbnail
+                    ? `linear-gradient(180deg, rgba(7,10,16,.08), rgba(7,10,16,.94)), url(${thumbnail})`
+                    : 'radial-gradient(circle at 30% 20%, rgba(37,244,238,.18), transparent 36%), linear-gradient(145deg, #171d2a, #080a10)',
+                backgroundPosition: 'center',
+                backgroundSize: 'cover',
+            }}
+        >
+            <span className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-transparent" aria-hidden="true" />
+            <span className="absolute left-4 top-4 rounded-full border border-[#25f4ee]/30 bg-[#071316]/70 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-[#25f4ee] backdrop-blur-md">
+                {stateLabel}
+            </span>
+            <span className="absolute bottom-0 left-0 right-0 flex flex-col gap-1.5 p-5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-white/60">{job.author ? `@${job.author}` : 'TikTok'}</span>
+                <span className="line-clamp-2 text-sm font-bold leading-tight text-white/95">{job.title || job.url || `Video #${job.id}`}</span>
+                <span className="text-[10px] text-white/45">Transcript y ficha locales · abre la fuente original desde el detalle</span>
+            </span>
+        </button>
+    );
+}
+
+
+const isRealJobRecord = (job: SharedJobRecord | VideoData): job is SharedJobRecord =>
+    'status' in job;
 
 export function VideoGrid({
     activeVideoId,
@@ -124,43 +172,48 @@ export function VideoGrid({
     keepStatusFilter,
     platformFilter,
     jobs: controlledJobs,
+    jobsLoading = false,
+    jobsReady = true,
+    onVisibleVideosChange,
 }: VideoGridProps) {
 
     const [isInitialLoad, setIsInitialLoad] = useState(true);
-    const [localJobs, setLocalJobs] = useState<JobRecord[]>([]);
-    const [playlistJobs, setPlaylistJobs] = useState<JobRecord[]>([]);
+    const [localJobs, setLocalJobs] = useState<SharedJobRecord[]>([]);
+    const [playlistJobs, setPlaylistJobs] = useState<SharedJobRecord[]>([]);
     const [resolvedAssets, setResolvedAssets] = useState<Record<number, { thumb?: string; video?: string }>>({});
     const [containerWidth, setContainerWidth] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
 
     const jobs = controlledJobs ?? localJobs;
     const sourceJobs = playlistId ? playlistJobs : jobs;
-    const isCompleted = (job: JobRecord) => ['complete', 'completed'].includes(job.status.toLowerCase());
-    const isError = (job: JobRecord) => ['error', 'failed', 'failure', 'cancelled', 'canceled'].includes(job.status.toLowerCase());
+    const isCompleted = (job: SharedJobRecord) => ['complete', 'completed'].includes(job.status.toLowerCase());
+    const isError = (job: SharedJobRecord) => ['error', 'failed', 'failure', 'cancelled', 'canceled'].includes(job.status.toLowerCase());
     const normalizedPlatformFilter = (platformFilter ?? 'all').toLowerCase();
 
     // PagePanel controla qué estados aparecen en la biblioteca; la cola sigue mostrando el progreso completo.
     // Bug #5 FIX: Error jobs are ALWAYS visible in the grid
     const visibleJobs = sourceJobs
         .filter((job) => {
+            const uiJob = job as UiJobRecord;
             const isJobError = isError(job);
+            const sourceState = sourceStateForJob(uiJob);
             // La galería solo contiene medios terminados; el pipeline vive en la cola.
             const statusVisible = isCompleted(job) && !isJobError;
+            const effectiveKeepStatus = job.keep_status || (sourceState === 'online' ? 'online' : undefined);
             const keepVisible = (keepStatusFilter ?? 'all') === 'all'
-                || job.keep_status === (keepStatusFilter ?? 'all');
+                || effectiveKeepStatus === (keepStatusFilter ?? 'all');
             const jobPlatform = job.platform?.toLowerCase() ?? '';
             const platformVisible = normalizedPlatformFilter === 'all'
                 || jobPlatform === normalizedPlatformFilter
                 || job.url.toLowerCase().includes(normalizedPlatformFilter);
-            // A completed row without a local video is stale metadata, not a
-            // playable gallery item. Keeping it out avoids a blank card that
-            // reports a video but cannot reproduce anything.
-            const onlineOnly = job.keep_status === 'online';
+            // A completed row can remain useful as a transcript-only/online
+            // card after the large media has been released. Only hide rows
+            // that have neither local media nor a durable knowledge record.
             return statusVisible
                 && keepVisible
                 && platformVisible
                 && Boolean(job.status)
-                && (Boolean(job.video_path) || onlineOnly);
+                && (Boolean(job.video_path) || sourceState !== 'local' || hasKnowledgeRecord(uiJob));
         });
 
     // Cálculo de columnas basado en el ancho real, salvo cuando el usuario fija un número.
@@ -171,15 +224,15 @@ export function VideoGrid({
     const fetchJobs = useCallback(async () => {
                 if (playlistId) {
             try {
-                let items: JobRecord[];
+                let items: SharedJobRecord[];
                 try {
                     const { invoke } = await import('@tauri-apps/api/core');
-                    items = await invoke<JobRecord[]>('get_playlist_items', { playlistId });
+                    items = await invoke<SharedJobRecord[]>('get_playlist_items', { playlistId });
                 } catch {
                     const { REST_API_BASE } = await import('@/lib/api-config');
                     const response = await fetch(`${REST_API_BASE}/playlists/${playlistId}/items`);
                     if (!response.ok) throw new Error(`Playlist request failed with status ${response.status}`);
-                    items = await response.json() as JobRecord[];
+                    items = await response.json() as SharedJobRecord[];
                 }
                 setPlaylistJobs(items);
             } catch {
@@ -190,7 +243,7 @@ export function VideoGrid({
 
         if (controlledJobs) return;
 
-        let data: JobRecord[] = [];
+        let data: SharedJobRecord[] = [];
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             data = await invoke('get_jobs');
@@ -206,12 +259,13 @@ export function VideoGrid({
         setPlaylistJobs([]);
     }, [controlledJobs, onJobsChange, playlistId]);
 
-    // -- Resolver rutas locales de assets de manera as�ncrona
-    const resolveAssets = useCallback(async (list: JobRecord[]) => {
+    // -- Resolver rutas locales de assets de manera asíncrona
+    const resolveAssets = useCallback(async (list: SharedJobRecord[]) => {
         const updates: Record<number, { thumb?: string; video?: string }> = {};
         await Promise.all(list.map(async (job) => {
+            const uiJob = job as UiJobRecord;
             const [thumb, video] = await Promise.all([
-                toAssetUrl(job.thumbnail),
+                toAssetUrl(uiJob.poster_path || uiJob.thumbnail),
                 toAssetUrl(job.video_path),
             ]);
             updates[job.id] = { thumb, video };
@@ -222,7 +276,7 @@ export function VideoGrid({
         useEffect(() => {
         const timer = setTimeout(() => setIsInitialLoad(false), 2000);
         let active = true;
-        if (!controlledJobs || playlistId) {
+        if (playlistId || !controlledJobs) {
             queueMicrotask(() => {
                 if (active) void fetchJobs();
             });
@@ -237,10 +291,13 @@ export function VideoGrid({
         });
         if (containerRef.current) observer.observe(containerRef.current);
 
-        // Escuchar eventos Tauri si est�n disponibles
+        // Escuchar eventos Tauri si están disponibles
         let unlistenProgress: (() => void) | undefined;
         let unlistenIndexed: (() => void) | undefined;
-        if (!controlledJobs || playlistId) {
+        // The main library is reconciled by useJobs. A selected playlist only
+        // needs one derived membership fetch; it must not create a second
+        // polling loop or duplicate Tauri event listeners.
+        if (!controlledJobs && !playlistId) {
             (async () => {
                 try {
                     const { listen } = await import('@tauri-apps/api/event');
@@ -252,7 +309,7 @@ export function VideoGrid({
             })();
         }
 
-        const fallbackInterval = (!controlledJobs || playlistId) ? setInterval(fetchJobs, 3000) : undefined;
+        const fallbackInterval = (!controlledJobs && !playlistId) ? setInterval(fetchJobs, 3000) : undefined;
 
         return () => {
                         active = false;
@@ -298,10 +355,41 @@ export function VideoGrid({
       }
 
     });
-    const isDemoMode = !playlistId && jobs.length === 0;
+    // Las demos locales solo ocupan el lienzo cuando todavía no existe ningún
+    // trabajo real. En cuanto SQLite devuelve una fila (aunque esté fallida),
+    // la biblioteca vuelve a representar únicamente el estado real.
+    const isDemoMode = !playlistId && !jobsLoading && jobsReady && jobs.length === 0;
     const renderList = isDemoMode ? MOCK_ACTIVE_VIDEOS : sortedJobs;
-    const showEmptyState = !isDemoMode && !playlistId && renderList.length === 0;
-    const inactiveSlotsCount = Math.max(0, INACTIVE_SLOTS_COUNT - renderList.length);
+    const showEmptyState = !playlistId && !isDemoMode && !jobsLoading && jobsReady && renderList.length === 0;
+
+    // El padre conserva una instantánea de la misma colección que ve el usuario.
+    // La clave evita un ciclo de renders cuando el array calculado cambia de referencia.
+    const cinemaSnapshotKeyRef = useRef('');
+    useEffect(() => {
+        const snapshot = renderList.map((job: SharedJobRecord | VideoData) => {
+            const isRealJob = 'status' in job;
+            const uiJob = isRealJob ? job as UiJobRecord : null;
+            const assets = isRealJob ? resolvedAssets[job.id] : undefined;
+            const sourceState = uiJob ? sourceStateForJob(uiJob) : 'local';
+            return {
+                id: job.id,
+                title: job.title || (isRealJob ? job.url : 'Untitled'),
+                author: job.author || 'Unknown',
+                duration: isRealJob ? formatDuration(job.duration) : job.duration,
+                tags: isRealJob ? [] : job.tags,
+                thumb: (isRealJob ? assets?.thumb : job.thumb) || '',
+                videoSrc: (isRealJob ? assets?.video : job.videoSrc) || '',
+                originalUrl: isRealJob ? job.url : job.originalUrl,
+                visualAnalysis: isRealJob ? job.visual_analysis : job.visualAnalysis,
+                instructionalGuide: isRealJob ? job.instructional_guide : job.instructionalGuide,
+                sourceState,
+            } satisfies CinemaVideo;
+        });
+        const snapshotKey = JSON.stringify(snapshot);
+        if (snapshotKey === cinemaSnapshotKeyRef.current) return;
+        cinemaSnapshotKeyRef.current = snapshotKey;
+        onVisibleVideosChange?.(snapshot);
+    }, [onVisibleVideosChange, renderList, resolvedAssets]);
 
     return (
         <motion.div
@@ -310,41 +398,6 @@ export function VideoGrid({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
         >
-            {/* Banner de Modo Demo */}
-            {isDemoMode && (
-                <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                    className="w-full mb-6 p-5 rounded-[22px] relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4"
-                    style={{
-                        background: 'linear-gradient(135deg, rgba(138,92,255,0.12) 0%, rgba(37,244,238,0.08) 50%, rgba(254,44,85,0.12) 100%)',
-                        border: '1px solid rgba(138, 92, 255, 0.25)',
-                        backdropFilter: 'blur(20px)',
-                        boxShadow: '0 10px 30px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)'
-                    }}
-                >
-                    <div className="flex items-center gap-3.5">
-                        <div className="w-10 h-10 rounded-[14px] bg-[#8a5cff]/20 border border-[#8a5cff]/40 flex items-center justify-center relative shadow-lg">
-                            <FaFolderOpen size={18} className="text-[#25f4ee]" />
-                        </div>
-                        <div className="flex flex-col">
-                            <div className="flex items-center gap-2">
-                                <h3 className="text-sm font-black text-white tracking-wide uppercase">
-                                    Modo Demostración Activo
-                                </h3>
-                                <span className="text-[9px] font-mono font-bold text-[#25f4ee] px-2 py-0.5 rounded-full bg-[#25f4ee]/15 border border-[#25f4ee]/30">
-                                    6 VIDEOS PRECARGADOS
-                                </span>
-                            </div>
-                            <p className="text-xs text-white/70 font-medium leading-relaxed mt-0.5">
-                                Mostrando clips interactivos con análisis visual, guías instruccionales y búsqueda semántica listos para explorar.
-                            </p>
-                        </div>
-                    </div>
-                </motion.div>
-            )}
-
             <div
                 ref={containerRef}
                 className="video-grid-container"
@@ -363,14 +416,38 @@ export function VideoGrid({
                 }}
             >
                 {/* -- Tarjetas de videos completados o mocks -- */}
-                                {renderList.map((job: any, idx: number) => {
+                                {renderList.map((job: SharedJobRecord | VideoData, idx: number) => {
                     const isRealJob = 'status' in job;
+                    const uiJob = isRealJob ? job as UiJobRecord : null;
                     const assets = isRealJob ? resolvedAssets[job.id] : undefined;
                     const thumbnailSrc = isRealJob ? assets?.thumb : job.thumb;
                     const videoSrc = isRealJob ? assets?.video : job.videoSrc;
                     const isPlaying = activeVideoId === job.id;
-                    const onlineOnly = isRealJob && job.keep_status === 'online';
-
+                    const sourceState = uiJob ? sourceStateForJob(uiJob) : 'local';
+                    if (uiJob && !videoSrc && (sourceState === 'online' || sourceState === 'unavailable')) {
+                        return (
+                            <motion.div
+                                key={job.id}
+                                layoutId={`video-card-${job.id}`}
+                                initial={{ opacity: 0, y: 24 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{
+                                    duration: 0.45,
+                                    ease: [0.22, 1, 0.36, 1],
+                                    delay: isInitialLoad ? idx * 0.05 : 0,
+                                }}
+                                style={{ position: 'relative' }}
+                            >
+                                <OnlineLibraryCard
+                                    job={uiJob}
+                                    thumbnail={thumbnailSrc}
+                                    sourceState={sourceState}
+                                    layout={layout}
+                                    onOpen={() => onVideoPlayStart(job.id)}
+                                />
+                            </motion.div>
+                        );
+                    }
                     return (
 
                         <motion.div
@@ -387,20 +464,20 @@ export function VideoGrid({
                         >
                             <VideoCard
                                 id={job.id}
-                                isActive={Boolean(videoSrc) || onlineOnly}
+                                isActive={Boolean(videoSrc)}
                                 layout={layout}
                                 title={job.title || (isRealJob ? job.url : 'Untitled')}
                                 author={job.author || 'Unknown'}
                                 duration={isRealJob ? formatDuration(job.duration) : job.duration}
-                                tags={job.tags || []}
+                                tags={isRealJob ? [] : job.tags}
                                 thumb={thumbnailSrc}
                                 videoSrc={videoSrc}
-                                url={job.url}
+                                url={isRealJob ? job.url : ""}
                                 isFullPlaying={isPlaying}
                                 onPlayStart={() => onVideoPlayStart(job.id)}
                                 onPlayStop={() => onVideoPlayStop(job.id)}
-                                keepStatus={job.keep_status}
-                                onlineOnly={onlineOnly}
+                                keepStatus={isRealJob ? job.keep_status : undefined}
+                                onlineOnly={isRealJob && sourceState === 'online' && !videoSrc}
                             />
 
                         </motion.div>
@@ -408,77 +485,65 @@ export function VideoGrid({
                 })}
 
                 {showEmptyState && (
-                    <div className="col-span-full flex min-h-28 items-center justify-center rounded-[20px] bg-white/[0.015] px-6 text-center">
-                        <div>
-                            <p className="text-xs font-semibold text-white/55">Sin videos disponibles todavía</p>
-                            <p className="mt-1 text-[11px] text-white/30">Los trabajos detenidos quedan en la cola para reintentarse.</p>
+                    <div className="col-span-full flex min-h-[240px] flex-col items-center justify-center rounded-[24px] border border-white/5 bg-white/[0.02] px-6 py-10 text-center backdrop-blur-md">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.04] text-white/50 border border-white/10 mb-3">
+                            <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                                <path d="M10 18a7.952 7.952 0 0 0 4.897-1.688l4.396 4.396 1.414-1.414-4.396-4.396A7.952 7.952 0 0 0 18 10c0-4.411-3.589-8-8-8s-8 3.589-8 8 3.589 8 8 8zm0-14c3.309 0 6 2.691 6 6s-2.691 6-6 6-6-2.691-6-6 2.691-6 6-6z" />
+                            </svg>
                         </div>
+                        <p className="text-sm font-semibold text-white/80">Biblioteca vacía o sin coincidencias</p>
+                        <p className="mt-1 max-w-sm text-xs text-white/40 leading-relaxed">
+                            Agrega URLs de video desde la barra superior para iniciar la descarga, transcripción e indexación semántica.
+                        </p>
                     </div>
                 )}
-
-                {/* -- Slots vac�os -- */}
-                {Array.from({ length: inactiveSlotsCount }).map((_, i) => {
-                    const globalIdx = renderList.length + i;
-                    return (
-                        <motion.div
-                            key={`inactive-${i}`}
-                            initial={{ opacity: 0, y: 24 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{
-                                duration: 0.45,
-                                ease: [0.22, 1, 0.36, 1],
-                                delay: isInitialLoad ? globalIdx * 0.05 : 0
-                            }}
-                            style={{ position: 'relative' }}
-                        >
-                                                        <VideoCard isActive={false} slotIndex={i} layout={layout} />
-
-                        </motion.div>
-                    );
-                })}
             </div>
 
             {/* -- Modal expandido -- */}
-                        <>
+            {activeVideoId !== null && (() => {
+                const allAvailableJobs = playlistId ? [...playlistJobs, ...jobs] : jobs;
+                const activeJob = allAvailableJobs.find(j => j.id === activeVideoId);
+                const activeMock = isDemoMode
+                    ? MOCK_ACTIVE_VIDEOS.find(video => video.id === activeVideoId)
+                    : undefined;
+                if (!activeJob && !activeMock) return null;
 
-                {activeVideoId !== null && (() => {
-                    const allAvailableJobs = playlistId ? [...playlistJobs, ...jobs] : jobs;
-                    const activeJob = allAvailableJobs.find(j => j.id === activeVideoId);
-                    const mockVideo = MOCK_ACTIVE_VIDEOS.find(m => m.id === activeVideoId);
+                let videoData: UiVideoData;
+                if (activeJob) {
+                    const uiJob = activeJob as UiJobRecord;
+                    const assets = resolvedAssets[activeJob.id];
+                    const sourceState = sourceStateForJob(uiJob);
+                    videoData = {
+                        id: activeJob.id,
+                        title: activeJob.title || activeJob.url,
+                        author: activeJob.author || 'Unknown',
+                        duration: formatDuration(activeJob.duration),
+                        tags: [] as string[],
+                        thumb: assets?.thumb || '',
+                        videoSrc: assets?.video || '',
+                        originalUrl: activeJob.url,
+                        visualAnalysis: activeJob.visual_analysis,
+                        instructionalGuide: activeJob.instructional_guide,
+                        sourceState,
+                        transcriptAvailable: Boolean(uiJob.transcript_path || activeJob.visual_analysis || activeJob.instructional_guide),
+                        keepStatus: activeJob.keep_status,
+                        favorite: uiJob.favorite,
+                        pinned: uiJob.pinned,
+                        protected: uiJob.protected,
+                    };
+                } else {
+                    if (!activeMock) return null;
+                    videoData = activeMock;
+                }
 
-                    if (!activeJob && !mockVideo) return null;
-
-                    let videoData;
-                    if (activeJob) {
-                        const assets = resolvedAssets[activeJob.id];
-                        videoData = {
-                            id: activeJob.id,
-                            title: activeJob.title || activeJob.url,
-                            author: activeJob.author || 'Unknown',
-                            duration: formatDuration(activeJob.duration),
-                            tags: [] as string[],
-                            thumb: assets?.thumb || '',
-                            videoSrc: assets?.video || '',
-                            originalUrl: activeJob.url,
-                            visualAnalysis: activeJob.visual_analysis,
-                            instructionalGuide: activeJob.instructional_guide,
-                        };
-                    } else if (mockVideo) {
-                        videoData = mockVideo;
-                    } else {
-                        return null;
-                    }
-
-                    return (
-                        <ExpandedVideoModal
-                            key={`expanded-video-modal-${activeVideoId}`}
-                            video={videoData}
-                            onClose={() => onVideoPlayStop(activeVideoId)}
-                        />
-                    );
-                })()}
-                        </>
-
+                return (
+                    <ExpandedVideoModal
+                        key={`expanded-video-modal-${activeVideoId}`}
+                        video={videoData}
+                        onClose={() => onVideoPlayStop(activeVideoId)}
+                    />
+                );
+            })()}
         </motion.div>
     );
 }

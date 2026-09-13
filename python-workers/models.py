@@ -1,5 +1,5 @@
-"""
-Pulsar Eventide — Domain Models (models.py)
+﻿"""
+Pulsaria — Domain Models (models.py)
 ============================================
 
 Modelos de dominio compartidos entre workers Python y el backend Rust.

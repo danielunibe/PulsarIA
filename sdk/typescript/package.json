@@ -1,7 +1,7 @@
-{
+﻿{
   "name": "@pulsar/client",
   "version": "1.0.0",
-  "description": "Official TypeScript SDK for Pulsar Eventide Semantic Search Engine",
+  "description": "Official TypeScript SDK for Pulsaria Semantic Search Engine",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

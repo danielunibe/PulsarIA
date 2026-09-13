@@ -1,0 +1,229 @@
+name: Pulsaria public release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag, for example v0.1.1-rc.1'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pulsaria-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    environment:
+      name: release
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      RELEASE_TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag != '' && inputs.tag || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Validate release inputs
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Invalid release tag: $env:RELEASE_TAG"
+          }
+          $required = @{
+            TAURI_UPDATER_PUBLIC_KEY = $env:TAURI_UPDATER_PUBLIC_KEY
+            TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+            WINDOWS_CERTIFICATE_BASE64 = $env:WINDOWS_CERTIFICATE_BASE64
+            WINDOWS_CERTIFICATE_PASSWORD = $env:WINDOWS_CERTIFICATE_PASSWORD
+            WINDOWS_TIMESTAMP_URL = $env:WINDOWS_TIMESTAMP_URL
+          }
+          foreach ($entry in $required.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace($entry.Value)) {
+              throw "Missing release environment value: $($entry.Key)"
+            }
+          }
+          if ($env:WINDOWS_TIMESTAMP_URL -notmatch '^https://') {
+            throw 'WINDOWS_TIMESTAMP_URL must use HTTPS.'
+          }
+
+      - name: Synchronize version from tag
+        run: |
+          node scripts/set-release-version.mjs $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Release version synchronization failed.' }
+
+      - name: Install reproducible dependencies
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+
+      - name: Prepare approved external runtime
+        env:
+          PULSAR_RUNTIME_BUNDLE_URL: ${{ vars.PULSAR_RUNTIME_BUNDLE_URL }}
+          PULSAR_RUNTIME_BUNDLE_SHA256: ${{ vars.PULSAR_RUNTIME_BUNDLE_SHA256 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PULSAR_RUNTIME_BUNDLE_URL) -or [string]::IsNullOrWhiteSpace($env:PULSAR_RUNTIME_BUNDLE_SHA256)) {
+            throw 'External runtime bundle URL and SHA-256 are required; runtime artifacts are not stored in Git.'
+          }
+          if ($env:PULSAR_RUNTIME_BUNDLE_URL -notmatch '^https://') { throw 'PULSAR_RUNTIME_BUNDLE_URL must use HTTPS.' }
+          $zipPath = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bundle.zip'
+          $bundlePath = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bundle'
+          Invoke-WebRequest -Uri $env:PULSAR_RUNTIME_BUNDLE_URL -OutFile $zipPath
+          $actualHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actualHash -ne $env:PULSAR_RUNTIME_BUNDLE_SHA256.ToUpperInvariant()) { throw 'External runtime SHA-256 mismatch.' }
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $bundlePath -Force
+          npm run prepare:runtime -- -RuntimeBundle $bundlePath
+          if ($LASTEXITCODE -ne 0) { throw 'External runtime preparation failed.' }
+
+      - name: Run MVP gates
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npm run verify:canonical
+          if ($LASTEXITCODE -ne 0) { throw 'Canonical structure gate failed.' }
+          $sbomPath = Join-Path $env:RUNNER_TEMP 'pulsaria-npm-sbom.spdx.json'
+          npm sbom --sbom-format=spdx --sbom-type=application | Set-Content -LiteralPath $sbomPath -Encoding utf8
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sbomPath -PathType Leaf)) { throw 'SBOM generation failed.' }
+          npm run verify:legal-release -- -RequireSbom -SbomPath $sbomPath
+          if ($LASTEXITCODE -ne 0) { throw 'Legal release gate failed.' }
+          npm run verify:local-llm
+          if ($LASTEXITCODE -ne 0) { throw 'Local LLM verification failed.' }
+          npm run verify:mvp
+          if ($LASTEXITCODE -ne 0) { throw 'MVP verification failed.' }
+          npm run verify:api
+          if ($LASTEXITCODE -ne 0) { throw 'API verification failed.' }
+          npm audit --omit=dev --audit-level=low
+          if ($LASTEXITCODE -ne 0) { throw 'Production dependency audit failed.' }
+
+      - name: Build signed Tauri release
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          $isCandidate = $env:RELEASE_TAG -match '-rc\.'
+          $endpoint = if ($isCandidate) {
+            "https://github.com/danielunibe/PulsarIA/releases/download/$env:RELEASE_TAG/latest.json"
+          } else {
+            'https://github.com/danielunibe/PulsarIA/releases/latest/download/latest.json'
+          }
+          $overlayPath = Join-Path $env:RUNNER_TEMP 'pulsaria-tauri-release.conf.json'
+          $overlay = [ordered]@{
+            bundle = [ordered]@{
+              createUpdaterArtifacts = $true
+              windows = [ordered]@{
+                signCommand = [ordered]@{
+                  cmd = 'powershell'
+                  args = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/sign-windows.ps1'), '-Path', '%1')
+                }
+              }
+            }
+            plugins = [ordered]@{
+              updater = [ordered]@{
+                active = $true
+                dialog = $false
+                endpoints = @($endpoint)
+                pubkey = $env:TAURI_UPDATER_PUBLIC_KEY
+              }
+            }
+          }
+          $overlay | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $overlayPath -Encoding utf8
+          try {
+            npm run tauri build -- --config $overlayPath
+            if ($LASTEXITCODE -ne 0) { throw 'Tauri release build failed.' }
+          } finally {
+            if (Test-Path -LiteralPath $overlayPath -PathType Leaf) {
+              Remove-Item -LiteralPath $overlayPath -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Sign Windows installers with temporary certificate
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          $nsis = Get-ChildItem -LiteralPath 'target-tauri/release/bundle/nsis' -Filter '*_x64-setup.exe' -File | Select-Object -First 1
+          $msi = Get-ChildItem -LiteralPath 'target-tauri/release/bundle/msi' -Filter '*_x64*.msi' -File | Select-Object -First 1
+          if ($null -eq $nsis -or $null -eq $msi) { throw 'NSIS or MSI installer was not generated.' }
+          & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .github/scripts/sign-windows.ps1 -Path $nsis.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS Authenticode signing failed.' }
+          & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .github/scripts/sign-windows.ps1 -Path $msi.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'MSI Authenticode signing failed.' }
+
+      - name: Smoke test installed release
+        run: |
+          npm run verify:installed -- -Configuration release
+          if ($LASTEXITCODE -ne 0) { throw 'Installed release smoke failed.' }
+
+      - name: Generate and verify updater manifest
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/create-updater-manifest.ps1 `
+            -ArtifactRoot target-tauri/release/bundle `
+            -Version ($env:RELEASE_TAG -replace '^v', '') `
+            -ReleaseTag $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Updater manifest generation failed.' }
+          npm run verify:release-artifacts -- -ArtifactRoot target-tauri/release/bundle -RequireAuthenticode
+          if ($LASTEXITCODE -ne 0) { throw 'Release artifact verification failed.' }
+
+      - name: Stage public release assets
+        run: |
+          $assetRoot = Join-Path $env:RUNNER_TEMP 'pulsaria-release-assets'
+          if (Test-Path -LiteralPath $assetRoot) { Remove-Item -LiteralPath $assetRoot -Recurse -Force }
+          New-Item -ItemType Directory -Path $assetRoot -Force | Out-Null
+          $files = Get-ChildItem -LiteralPath 'target-tauri/release/bundle' -File -Recurse |
+            Where-Object { $_.Name -match '(_x64-setup\.exe|_x64.*\.msi|\.nsis\.zip|\.sig$|^latest\.json$)' }
+          if ($files.Count -lt 5) { throw 'The public release asset set is incomplete.' }
+          foreach ($file in $files) { Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $assetRoot $file.Name) -Force }
+          "RELEASE_ASSET_ROOT=$assetRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notesPath = Join-Path $env:RUNNER_TEMP 'pulsaria-release-notes.md'
+          @("Pulsaria $env:RELEASE_TAG", '', 'Artefactos generados por el workflow firmado de Windows.', '', 'La aplicación valida la firma Tauri antes de instalar actualizaciones.') | Set-Content -LiteralPath $notesPath -Encoding utf8
+          $assets = @(Get-ChildItem -LiteralPath $env:RELEASE_ASSET_ROOT -File | ForEach-Object { $_.FullName })
+          $arguments = @('release', 'create', $env:RELEASE_TAG, '--repo', 'danielunibe/PulsarIA', '--title', "Pulsaria $env:RELEASE_TAG", '--notes-file', $notesPath)
+          if ($env:RELEASE_TAG -match '-rc\.') { $arguments += '--prerelease' }
+          $arguments += $assets
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release publication failed.' }
+
+      - name: Cleanup release files
+        if: always()
+        run: |
+          foreach ($path in @(
+            (Join-Path $env:RUNNER_TEMP 'pulsaria-tauri-release.conf.json'),
+            (Join-Path $env:RUNNER_TEMP 'pulsaria-release-notes.md'),
+            (Join-Path $env:RUNNER_TEMP 'pulsaria-release-assets')
+          )) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+          }

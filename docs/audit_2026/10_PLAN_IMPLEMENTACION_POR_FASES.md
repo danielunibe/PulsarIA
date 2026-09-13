@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 10: PLAN DE IMPLEMENTACIÓN POR FASES
+﻿# PULSARIA — AUDITORÍA 10: PLAN DE IMPLEMENTACIÓN POR FASES
 ## Roadmap Técnico de Ejecución Autónoma (Fases 7 a 15)
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 11_CONTRATO_DATOS_TIPOS.md
 

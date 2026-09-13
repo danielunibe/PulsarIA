@@ -26,7 +26,7 @@ export interface PageConfig {
   showErrors: boolean;
   /** Filtrar por estado de retención: 'keep', 'online', o 'all' */
   keepStatusFilter?: string;
-  /** Filtrar por plataforma: 'tiktok', 'youtube', etc., o 'all' */
+  /** Filtro heredado; el MVP solo admite TikTok. */
   platformFilter?: string;
 }
 
@@ -167,23 +167,16 @@ export function PagePanel({ config, onChange }: PagePanelProps) {
           { key: 'showOnlyCompleted', label: 'Solo videos completados', desc: 'Oculta tareas en progreso' },
           { key: 'showErrors', label: 'Mostrar registros de error', desc: 'Permite inspeccionar descargas fallidas' },
           { key: 'keepStatusFilter', label: `Retención: ${(config.keepStatusFilter ?? 'all') === 'all' ? 'Todas' : (config.keepStatusFilter ?? 'keep') === 'keep' ? 'Conservados' : 'Online'}` },
-          { key: 'platformFilter', label: `Plataforma: ${(config.platformFilter ?? 'all') === 'all' ? 'Todas' : (config.platformFilter ?? 'all').toUpperCase()}` },
         ].map(({ key, label, desc }) => {
           const isChecked = key === 'keepStatusFilter'
             ? (config[key as keyof PageConfig] as string) !== 'all'
-            : key === 'platformFilter'
-              ? (config[key as keyof PageConfig] as string) !== 'all'
-              : (config[key as keyof PageConfig] as boolean);
+            : (config[key as keyof PageConfig] as boolean);
 
           const handleClick = () => {
             if (key === 'keepStatusFilter') {
               const current = config[key as keyof PageConfig] as string;
               const next = current === 'all' ? 'keep' : current === 'keep' ? 'online' : 'all';
               update({ keepStatusFilter: next });
-            } else if (key === 'platformFilter') {
-              const current = (config[key as keyof PageConfig] as string);
-              const next = current === 'all' ? 'tiktok' : current === 'tiktok' ? 'youtube' : current === 'youtube' ? 'instagram' : 'all';
-              update({ platformFilter: next });
             } else {
               update({ [key]: !isChecked });
             }

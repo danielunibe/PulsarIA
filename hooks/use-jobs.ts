@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { REST_API_BASE } from '@/lib/api-config';
 
 export interface JobRecord {
@@ -8,17 +8,34 @@ export interface JobRecord {
   url: string;
   status: string;
   progress: number;
+  retry_count?: number;
   created_at: string;
   title?: string;
   author?: string;
   thumbnail?: string;
   duration?: number;
   video_path?: string;
+  audio_path?: string;
+  transcript_path?: string;
   keep_status?: string;
   platform?: string;
   error_message?: string;
   visual_analysis?: string;
   instructional_guide?: string;
+  video_bytes?: number;
+  audio_bytes?: number;
+  downloaded_at?: string;
+  last_accessed_at?: string;
+  play_count?: number;
+  open_count?: number;
+  search_hit_count?: number;
+  favorite?: boolean;
+  pinned?: boolean;
+  protected?: boolean;
+  source_state?: 'local' | 'online' | 'unavailable' | string;
+  purged_at?: string;
+  purged_reason?: string;
+  poster_path?: string;
 }
 
 export type PendingJobStatus = 'pending' | 'submitting' | 'retryable';
@@ -39,6 +56,8 @@ export interface QueueSnapshot {
   pending: PendingJob[];
   active: Array<JobRecord | PendingJob>;
   globalProgress: number;
+  /** True only after a complete, successful reconciliation with the backend. */
+  ready: boolean;
 }
 
 const COMPLETE_STATUSES = new Set(['complete', 'completed', 'done']);
@@ -68,6 +87,29 @@ function isNativeShell(): boolean {
   return '__TAURI_INTERNALS__' in window
     || window.location.protocol === 'tauri:'
     || window.location.hostname === 'tauri.localhost';
+}
+
+function userFacingError(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message.trim() : String(error ?? '').trim();
+  const normalized = raw.toLowerCase();
+  if (!raw) return fallback;
+
+  if (/failed to fetch|fetch failed|networkerror|network request failed|load failed|econnrefused|connection refused/.test(normalized)) {
+    return 'No pudimos conectar con la biblioteca local. Comprueba que Pulsaria siga ejecutándose y vuelve a intentarlo.';
+  }
+
+  const status = raw.match(/\b([45]\d{2})\b/)?.[1];
+  if (status === '401' || status === '403') {
+    return 'La solicitud no fue autorizada por el motor local. Revisa la configuración e inténtalo de nuevo.';
+  }
+  if (status === '429') {
+    return 'El motor local está ocupado. Espera un momento y vuelve a intentarlo.';
+  }
+  if (status && status.startsWith('5')) {
+    return 'El motor local devolvió un error. Revisa Salud y vuelve a intentarlo.';
+  }
+
+  return raw;
 }
 
 async function invokeTauri<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -107,6 +149,7 @@ async function enqueueThroughSources(url: string): Promise<number> {
 
 export function useJobs(): QueueSnapshot & {
   loading: boolean;
+  error: string | null;
   refresh: () => Promise<JobRecord[]>;
   enqueueLinks: (urls: string[]) => Promise<void>;
   retryJob: (jobId: number) => Promise<void>;
@@ -115,17 +158,31 @@ export function useJobs(): QueueSnapshot & {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [pending, setPending] = useState<PendingJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const nextJobs = await fetchJobsFromSources();
       setJobs(nextJobs);
+      setReady(true);
+      setError(null);
       setPending((current) => current.filter((item) => !item.jobId || !nextJobs.some((job) => job.id === item.jobId)));
       return nextJobs;
+    } catch (error) {
+      // Never leave a stale completed row in memory after IPC/REST failure.
+      // The page uses `ready` to avoid replacing this unknown state with the
+      // demo library and to keep the header count honest.
+      setJobs([]);
+      setReady(false);
+      setError(userFacingError(error, 'No se pudo actualizar la biblioteca local.'));
+      throw error;
     } finally {
       setLoading(false);
     }
   }, []);
+  const jobsRef = useRef(jobs);
+jobsRef.current = jobs;
 
   useEffect(() => {
     let mounted = true;
@@ -133,30 +190,46 @@ export function useJobs(): QueueSnapshot & {
       if (mounted) console.warn('Initial job refresh failed:', error);
     });
 
-    const interval = window.setInterval(() => {
-      void refresh().catch((error) => console.warn('Job refresh failed:', error));
-    }, 2000);
+    let pollInterval = 2000;
+    let timerId: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      if (!mounted) return;
+      await refresh().catch((error) => console.warn('Job refresh failed:', error));
+      if (!mounted) return;
+
+      const hasActiveJobs = jobsRef.current.some((j) =>
+        ['queued', 'downloading', 'transcribing', 'processing', 'retrying'].includes(j.status.toLowerCase())
+      );
+      pollInterval = hasActiveJobs
+        ? 2000
+        : Math.min(pollInterval * 1.5, 30_000);
+      timerId = setTimeout(poll, pollInterval);
+    };
+
+    timerId = setTimeout(poll, pollInterval);
 
     let cleanups: Array<() => void> = [];
     void import('@tauri-apps/api/event').then(async ({ listen }) => {
       if (!mounted) return;
       const events = ['job_progress', 'job_completed_notify', 'media_indexed'];
-      cleanups = await Promise.all(events.map(async (eventName) => {
+      const subscriptions = await Promise.all(events.map(async (eventName) => {
         try {
           return await listen(eventName, () => { void refresh().catch(() => {}); });
         } catch {
           return () => {};
         }
       }));
+      if (mounted) cleanups = subscriptions;
+      else subscriptions.forEach((cleanup) => cleanup());
     }).catch(() => {});
 
     return () => {
       mounted = false;
-      window.clearInterval(interval);
+      clearTimeout(timerId);
       cleanups.forEach((cleanup) => cleanup());
     };
   }, [refresh]);
-
   const enqueueLinks = useCallback(async (urls: string[]) => {
     const uniqueUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))];
     const now = Date.now();
@@ -177,7 +250,7 @@ export function useJobs(): QueueSnapshot & {
         await refresh();
       } catch (error) {
         setPending((current) => current.map((candidate) => candidate.clientId === item.clientId
-          ? { ...candidate, status: 'retryable', error: error instanceof Error ? error.message : String(error) }
+          ? { ...candidate, status: 'retryable', error: userFacingError(error, 'No se pudo enviar el enlace.') }
           : candidate));
       }
     }
@@ -208,7 +281,7 @@ export function useJobs(): QueueSnapshot & {
       await refresh();
     } catch (error) {
       setPending((current) => current.map((candidate) => candidate.clientId === clientId
-        ? { ...candidate, status: 'retryable', error: error instanceof Error ? error.message : String(error) }
+          ? { ...candidate, status: 'retryable', error: userFacingError(error, 'No se pudo enviar el enlace.') }
         : candidate));
     }
   }, [pending, refresh]);
@@ -227,5 +300,5 @@ export function useJobs(): QueueSnapshot & {
     return Math.round(total / active.length);
   }, [active]);
 
-  return { jobs, pending, active, globalProgress, loading, refresh, enqueueLinks, retryJob, retryPending };
+  return { jobs, pending, active, globalProgress, ready, loading, error, refresh, enqueueLinks, retryJob, retryPending };
 }

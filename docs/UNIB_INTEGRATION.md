@@ -1,4 +1,4 @@
-﻿# Documentación de Integración UNIB — Pulsar Eventide
+﻿# Documentación de Integración UNIB — Pulsaria
 
 ## 1. ¿Qué es UNIB?
 
@@ -23,7 +23,7 @@ UNIB Core v0.0 define:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    PULSAR EVENTIDE                          │
+│                    PULSARIA                          │
 │  (Dueño del dominio multimedia)                             │
 │                                                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │

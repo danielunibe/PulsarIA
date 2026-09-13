@@ -1,4 +1,4 @@
-# 🤖 PULSAR — KILOCODE MASTER BRIEF
+﻿# 🤖 PULSAR — KILOCODE MASTER BRIEF
 ## Instrucciones Maestras para Sesión de Desarrollo Autónomo (Loop Nocturno)
 
 > **Lee este documento completo antes de escribir una sola línea de código.**
@@ -8,7 +8,7 @@
 
 ## 📌 ¿QUÉ ES ESTE PROYECTO?
 
-**Pulsar (Pulsar Eventide)** es una aplicación de escritorio nativa (Rust + Tauri 2 + Next.js 15) que:
+**Pulsar (Pulsaria)** es una aplicación de escritorio nativa (Rust + Tauri 2 + Next.js 15) que:
 - Descarga videos de TikTok y otras plataformas mediante workers Python (`yt-dlp`).
 - Transcribe el audio de cada video con `faster-whisper` (modelo Whisper).
 - Indexa cada frase transcrita en un motor vectorial local (ONNX MiniLM 384d + HNSW shards en Rust) para búsqueda semántica por concepto.
@@ -155,7 +155,7 @@ Este es el feature estrella que el usuario quiere. Un sistema que **automáticam
 
 **Cómo funciona:**
 1. Una vez que un video está completamente procesado (transcripción indexada + embeddings), se clasifica en uno o más temas.
-2. Los temas se detectan automáticamente por clustering de embeddings (K-Means o cosine similarity en Rust) O mediante un prompt a Gemini API con el resumen del video.
+2. Los temas se detectan automáticamente por clustering de embeddings (K-Means o cosine similarity en Rust), con generación opcional en el modelo local cuando esté preparado.
 3. El usuario también puede crear playlists manualmente y arrastar/añadir videos.
 4. Las playlists se persisten en una nueva tabla SQLite `playlists`.
 
@@ -324,7 +324,7 @@ Nuevo comando Tauri: `export_video_data(job_id: i64, format: String)` que retorn
 Usar la API de notificaciones nativas de Tauri cuando un job pasa a estado `complete`:
 ```rust
 use tauri::notification::Notification;
-Notification::new("Pulsar Eventide")
+Notification::new("Pulsaria")
     .title("Video procesado")
     .body(format!("'{}' está listo en tu biblioteca", title))
     .show().ok();

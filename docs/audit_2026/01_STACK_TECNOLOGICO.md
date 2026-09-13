@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 01: STACK TECNOLÓGICO
+﻿# PULSARIA — AUDITORÍA 01: STACK TECNOLÓGICO
 ## Análisis Profundo de Dependencias, Versiones e Integración de IA
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 02_ARQUITECTURA_SISTEMA.md
 

@@ -1,5 +1,5 @@
-"""
-Pulsar Eventide — Worker Orchestrator (main.py)
+﻿"""
+Pulsaria — Worker Orchestrator (main.py)
 =============================================
 
 Orquestador principal del pipeline de procesamiento de videos.
@@ -35,7 +35,7 @@ from pathlib import Path
 from models import JobInput
 from events import emit_event, emit_error
 from downloader import download_video, extract_metadata, extract_playlist_videos
-from audio_extractor import extract_audio
+from audio_extractor import extract_audio, resolve_ffmpeg_path, resolve_ffprobe_path
 from transcriber import transcribe_audio
 from visual_analyzer import analyze_video
 
@@ -49,9 +49,12 @@ from visual_analyzer import analyze_video
 def processing_base_dir() -> Path:
     configured_dir = os.environ.get("PULSAR_DOWNLOAD_DIR")
     if configured_dir:
-        base = Path(configured_dir).expanduser() / "processing"
+        # Staging is the only writable media area used during a job. Rust
+        # promotes successful video/audio files to media/<job_id> only after
+        # the transcript and analysis have been persisted.
+        base = Path(configured_dir).expanduser() / ".pulsaria" / "staging"
     else:
-        base = Path(__file__).resolve().parent.parent / "data" / "processing"
+        base = Path(__file__).resolve().parent.parent / "data" / ".pulsaria" / "staging"
     # Bug #69 FIX: Validate directory early for clear error messages
     try:
         base.mkdir(parents=True, exist_ok=True)
@@ -62,6 +65,16 @@ def processing_base_dir() -> Path:
         print(f"ERROR: Cannot access processing directory {base}: {e}", file=sys.stderr, flush=True)
         raise
     return base
+
+
+def multimedia_preflight() -> dict[str, str]:
+    """Validate the two required media executables before network work starts."""
+    ffmpeg_path = resolve_ffmpeg_path()
+    ffprobe_path = resolve_ffprobe_path(ffmpeg_path)
+    return {
+        "ffmpeg": ffmpeg_path,
+        "ffprobe": ffprobe_path,
+    }
 
 
 def process_single_job(job_id: int, url: str) -> None:
@@ -83,9 +96,17 @@ def process_single_job(job_id: int, url: str) -> None:
     Raises:
         Emite evento 'error' en stdout si falla cualquier paso.
     """
-    base_dir = processing_base_dir()
-
     try:
+        base_dir = processing_base_dir()
+        runtime = multimedia_preflight()
+        emit_event(
+            name="runtime_preflight",
+            job_id=job_id,
+            step="runtime_preflight",
+            progress=5,
+            message=json.dumps(runtime),
+        )
+
         # ------------------- 1. DOWNLOAD & METADATA PHASE -------------------
         emit_event("download_started", job_id=job_id, step="downloading", progress=15)
         raw_meta = extract_metadata(url=url)
@@ -124,9 +145,14 @@ def process_single_job(job_id: int, url: str) -> None:
         audio_path = extract_audio(video_path=video_path)
 
         # ------------------- 3. TRANSCRIPTION PHASE -------------------
-        transcript_result = transcribe_audio(audio_path=audio_path)
+        transcript_result = transcribe_audio(audio_path=audio_path, job_id=job_id)
         transcript_text = transcript_result["text"] if isinstance(transcript_result, dict) else transcript_result
         segments = transcript_result.get("segments", []) if isinstance(transcript_result, dict) else []
+        transcript_paths = {
+            key: transcript_result[key]
+            for key in ("transcript_path", "legacy_transcript_path")
+            if isinstance(transcript_result, dict) and transcript_result.get(key)
+        }
 
         emit_event(
             name="transcription_complete",
@@ -134,6 +160,7 @@ def process_single_job(job_id: int, url: str) -> None:
             step="transcription_complete",
             progress=88,
             metadata=media_metadata,
+            message=json.dumps(transcript_paths),
             text=transcript_text,
             segments=segments
         )
@@ -153,6 +180,8 @@ def process_single_job(job_id: int, url: str) -> None:
                 video_path=video_path,
                 duration_seconds=media_metadata.get("duration"),
                 transcript=transcript_text,
+                artifacts_dir=os.environ.get("PULSAR_ARTIFACTS_DIR") or str(base_dir),
+                job_id=job_id,
             )
             visual_analysis = {
                 key: value for key, value in visual_result.items() if key != "json"
@@ -216,7 +245,7 @@ def process_single_job(job_id: int, url: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Pulsar Multimedia Processing Worker")
+    parser = argparse.ArgumentParser(description="Pulsaria Multimedia Processing Worker")
     parser.add_argument("--job_id", type=int, help="Job ID para ejecución individual")
     parser.add_argument("--url", type=str, help="URL del video para ejecución individual")
     parser.add_argument("--expand-url", type=str, help="Expandir un perfil, playlist o feed público a URLs de videos")
@@ -245,6 +274,28 @@ def main() -> None:
             continue
 
         try:
+            payload = json.loads(raw_input)
+            env_mapping = {
+                "formats": "PULSAR_FORMATS",
+                "download_dir": "PULSAR_DOWNLOAD_DIR",
+                "cookies_browser": "PULSAR_COOKIES_FROM_BROWSER",
+                "retention": "PULSAR_DEFAULT_RETENTION",
+                "processing_quality": "PULSAR_PROCESSING_QUALITY",
+                "whisper_model": "WHISPER_MODEL",
+                "whisper_device": "WHISPER_DEVICE",
+                "whisper_compute_type": "WHISPER_COMPUTE_TYPE",
+                "artifacts_dir": "PULSAR_ARTIFACTS_DIR",
+                "transcripts_dir": "PULSAR_TRANSCRIPTS_DIR",
+                "transcript_path": "PULSAR_TRANSCRIPT_PATH",
+            }
+            for payload_key, env_key in env_mapping.items():
+                if payload_key not in payload:
+                    continue
+                value = payload.get(payload_key)
+                if value:
+                    os.environ[env_key] = str(value)
+                else:
+                    os.environ.pop(env_key, None)
             job = JobInput.from_json(raw_input)
 
             process_single_job(job.job_id, job.url)

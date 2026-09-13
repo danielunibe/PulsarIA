@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { TikTokProcessor } from './TikTokProcessor';
 import { useSettings } from '@/lib/settings-context';
 import { isCompletedJob, isFailedJob, resolveAssetUrl, type JobRecord, type PendingJob } from '@/hooks/use-jobs';
+import { useI18n } from '@/lib/i18n';
 
 interface QueueSectionProps {
   jobs: JobRecord[];
@@ -31,10 +32,12 @@ const FORMAT_META: Record<string, { label: string; color: string; step: number }
 };
 
 function GlobalProgress({ percentage }: { percentage: number }) {
+  const { t } = useI18n();
+
   return (
     <div className="flex shrink-0 items-center gap-2 rounded-[10px] border border-white/10 bg-white/[.04] px-2.5 py-1.5">
       <span className="font-mono text-[12px] font-bold tabular-nums text-white">{percentage}%</span>
-      <span className="text-[8px] font-black uppercase tracking-[.12em] text-white/45">Progreso</span>
+      <span className="text-[8px] font-black uppercase tracking-[.12em] text-white/45">{t('progress')}</span>
     </div>
   );
 }
@@ -62,8 +65,10 @@ function taskKey(task: JobRecord | PendingJob) {
 
 export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetryPending }: QueueSectionProps) {
   const { settings } = useSettings();
+  const { t } = useI18n();
   const [resolvedThumbs, setResolvedThumbs] = useState<Record<string, string | undefined>>({});
   const [retryingKey, setRetryingKey] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const activeJobs = useMemo(() => jobs.filter((job) => !isCompletedJob(job) && !isFailedJob(job)), [jobs]);
   const boundIds = useMemo(() => new Set(pending.map((item) => item.jobId).filter((id): id is number => typeof id === 'number')), [pending]);
@@ -94,14 +99,14 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
       {tasks.length > 0 && <div className="flex flex-col gap-3 px-1">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-baseline gap-2">
-            <h2 className="truncate text-[11px] font-black uppercase tracking-[.16em] text-white/75">Cola de procesamiento</h2>
+            <h2 className="truncate text-[11px] font-black uppercase tracking-[.16em] text-white/75">{t('processingQueue')}</h2>
             <span className="shrink-0 text-[9px] font-mono text-white/35">{tasks.length}</span>
           </div>
           <GlobalProgress percentage={globalProgress} />
         </div>
 
         {formats.length > 0 && <div className="flex flex-wrap items-center gap-1.5 px-0.5">
-          <span className="mr-1 text-[8px] font-bold uppercase tracking-wider text-white/30">Formatos</span>
+          <span className="mr-1 text-[8px] font-bold uppercase tracking-wider text-white/30">{t('formats')}</span>
           {formats.map((format) => {
             const meta = FORMAT_META[format];
             if (!meta) return null;
@@ -109,7 +114,7 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
           })}
         </div>}
 
-        <div className="grid grid-cols-4 gap-1 px-0.5" aria-label="Fases del procesamiento">
+        <div className="grid grid-cols-4 gap-1 px-0.5" aria-label={t('processingStages')}>
           {['Descarga', 'Audio', 'Transcripción', 'Indexado'].map((label, index) => <span key={label} className={`h-1 rounded-full ${index === 0 ? 'bg-[#25f4ee]' : index < Math.ceil(globalProgress / 25) ? 'bg-[#8a5cff]/70' : 'bg-white/10'}`} title={label} />)}
         </div>
       </div>}
@@ -118,12 +123,12 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
         {tasks.map((task) => {
           const isPending = 'clientId' in task;
           const status = isPending ? task.status : task.status;
-          const title = task.title || ('url' in task ? task.url : 'Preparando enlace');
+          const title = task.title || ('url' in task ? task.url : t('preparingLink'));
           return (
             <motion.div key={taskKey(task)} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
               <TikTokProcessor
                 title={title}
-                author={isPending ? 'Enlace pendiente' : task.author || 'Pulsaria Engine'}
+                author={isPending ? t('pendingLink') : task.author || 'Pulsaria Engine'}
                 duration={!isPending && task.duration ? String(task.duration) : '--:--'}
                 thumbnailUrl={resolvedThumbs[taskKey(task)]}
                 currentStepId={stageFor(status)}
@@ -133,7 +138,7 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
           );
         })}
         {(failedJobs.length > 0 || retryablePending.length > 0) && (
-          <div className="flex flex-col gap-2" aria-label="Trabajos que se pueden reintentar">
+          <div className="flex flex-col gap-2" aria-label={t('retryableJobs')}>
             {[...failedJobs.map((job) => ({ key: `failed-${job.id}`, title: job.title || job.url, onRetry: () => onRetryJob(job.id) })), ...retryablePending.map((item) => ({ key: `retry-${item.clientId}`, title: item.url, onRetry: () => onRetryPending(item.clientId) }))].map((item) => (
               <div key={item.key} className="flex items-center justify-between gap-3 rounded-[14px] border border-white/[.08] bg-white/[.025] px-3 py-2.5">
                 <div className="min-w-0">
@@ -143,17 +148,21 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
                   type="button"
                   disabled={retryingKey !== null}
                   onClick={() => {
+                    setRetryError(null);
                     setRetryingKey(item.key);
-                    void item.onRetry().catch(() => undefined).finally(() => setRetryingKey(null));
+                    void item.onRetry().catch((error: unknown) => {
+                      setRetryError(error instanceof Error ? error.message : String(error));
+                    }).finally(() => setRetryingKey(null));
                   }}
                   className="shrink-0 rounded-[10px] border border-white/15 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wider text-white/65 transition hover:border-[#25f4ee]/40 hover:text-[#25f4ee] disabled:cursor-wait disabled:opacity-45"
                 >
-                  {retryingKey === item.key ? 'Reintentando…' : 'Reintentar'}
+                  {retryingKey === item.key ? t('retrying') : t('retry')}
                 </button>
               </div>
             ))}
           </div>
         )}
+        {retryError && <p role="alert" className="rounded-[12px] border border-[#fe2c55]/25 bg-[#fe2c55]/10 px-3 py-2 text-[10px] text-[#fe2c55]">{retryError}</p>}
       </div>
     </section>
   );

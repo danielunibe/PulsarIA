@@ -1,5 +1,5 @@
-"""
-Pulsar Eventide — Event Emitter (events.py)
+﻿"""
+Pulsaria — Event Emitter (events.py)
 ============================================
 
 Canal de comunicación entre workers Python y el backend Rust.

@@ -1,7 +1,7 @@
-import axios, { AxiosInstance } from "axios";
+﻿import axios, { AxiosInstance } from "axios";
 
 // ============================================================
-// Pulsar Eventide — Official TypeScript SDK
+// Pulsaria — Official TypeScript SDK
 // Sprint 5, Fase 28
 //
 // Usage:

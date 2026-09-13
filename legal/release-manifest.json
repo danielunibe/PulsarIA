@@ -1,0 +1,20 @@
+{
+  "product_name": "Pulsaria",
+  "public_owner": "TO BE COMPLETED BEFORE RELEASE",
+  "legal_contact_email": "TO BE COMPLETED BEFORE RELEASE",
+  "notice_address": "TO BE COMPLETED BEFORE RELEASE",
+  "source_license": "Pulsaria Source-Visible Beta License",
+  "binary_eula": "EULA.es.md",
+  "supported_languages": ["es-MX", "en-US"],
+  "content_scope": "User-authorized content only; platform terms and applicable law remain the user's responsibility.",
+  "telemetry_policy": "zero-telemetry",
+  "outbound_network_policy": "Explicit model download, user-requested GitHub/update connections, user-authorized content imports, and optional manual Gemini synthesis only after disclosure; no automatic remote inference.",
+  "third_party_notice": "THIRD_PARTY_NOTICES.md",
+  "llm_sidecar_version": "llama.cpp b10903",
+  "llm_model_id": "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+  "llm_model_revision": "91cad51170dc346986eccefdc2dd33a9da36ead9",
+  "llm_model_sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+  "llm_model_license": "Apache-2.0",
+  "release_version": "0.1.0",
+  "legal_approval": "PENDING HUMAN REVIEW"
+}

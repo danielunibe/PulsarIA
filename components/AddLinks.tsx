@@ -1,14 +1,16 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { FaFileLines, FaLink, FaPlus, FaRocket, FaXmark } from 'react-icons/fa6';
+import { useI18n } from '@/lib/i18n';
 
 interface AddLinksProps {
   onSubmitLinks: (urls: string[]) => Promise<void>;
 }
 
-const ACCEPTED_URL = /^https:\/\/(?:www\.|vm\.|vt\.)?(?:tiktok\.com\/|youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/|instagram\.com\/(?:reel|p)\/)/i;
+const ACCEPTED_URL = /^https:\/\/(?:www\.|vm\.|vt\.)?tiktok\.com\//i;
+const CONTENT_RIGHTS_ACCEPTANCE_KEY = 'pulsaria.content-rights.v1';
 
 function parseLinks(raw: string): { valid: string[]; invalid: number } {
   const unique = [...new Set(raw.split(/\r?\n|,|;/).map((value) => value.trim()).filter(Boolean))];
@@ -17,18 +19,32 @@ function parseLinks(raw: string): { valid: string[]; invalid: number } {
 }
 
 export function AddLinks({ onSubmitLinks }: AddLinksProps) {
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<'link' | 'file'>('link');
   const [localLinks, setLocalLinks] = useState<string[]>(['']);
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [validation, setValidation] = useState<{ valid: number; invalid: number } | null>(null);
+  const [rightsAccepted, setRightsAccepted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const hasData = activeTab === 'link'
-    ? localLinks.some((link) => link.trim().length > 0)
-    : Boolean(file);
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(CONTENT_RIGHTS_ACCEPTANCE_KEY) || 'null') as { version?: string } | null;
+      setRightsAccepted(stored?.version === '1.0');
+    } catch {
+      setRightsAccepted(false);
+    }
+  }, []);
 
   const linkCount = useMemo(() => localLinks.filter((link) => link.trim()).length, [localLinks]);
+  const parsedLinkInput = useMemo(() => parseLinks(localLinks.join('\n')), [localLinks]);
+  const hasData = activeTab === 'link'
+    ? parsedLinkInput.valid.length > 0
+    : Boolean(file);
+  const visibleValidation = activeTab === 'link' && linkCount > 0
+    ? { valid: parsedLinkInput.valid.length, invalid: parsedLinkInput.invalid }
+    : validation;
 
   const updateLink = (index: number, value: string) => {
     setLocalLinks((current) => current.map((item, itemIndex) => itemIndex === index ? value : item));
@@ -43,7 +59,7 @@ export function AddLinks({ onSubmitLinks }: AddLinksProps) {
   };
 
   const handleSubmit = async () => {
-    if (submitting || !hasData) return;
+    if (submitting || !hasData || !rightsAccepted) return;
     let raw = localLinks.join('\n');
     if (activeTab === 'file' && file) raw = await file.text();
 
@@ -62,6 +78,15 @@ export function AddLinks({ onSubmitLinks }: AddLinksProps) {
     }
   };
 
+  const handleRightsAcceptance = (accepted: boolean) => {
+    setRightsAccepted(accepted);
+    if (!accepted) {
+      localStorage.removeItem(CONTENT_RIGHTS_ACCEPTANCE_KEY);
+      return;
+    }
+    localStorage.setItem(CONTENT_RIGHTS_ACCEPTANCE_KEY, JSON.stringify({ version: '1.0', acceptedAt: new Date().toISOString() }));
+  };
+
   return (
     <motion.section
       className="relative w-full flex flex-col gap-3 flex-shrink-0 overflow-hidden rounded-[20px] border p-4 font-sans"
@@ -75,27 +100,27 @@ export function AddLinks({ onSubmitLinks }: AddLinksProps) {
         boxShadow: '0 14px 30px rgba(0,0,0,.28)',
       }}
     >
-      <div role="tablist" aria-label="Fuente de contenido" className="relative z-10 grid grid-cols-2 gap-1 rounded-[12px] border border-white/10 bg-black/25 p-1">
+      <div role="tablist" aria-label={t('contentSource')} className="relative z-10 grid grid-cols-2 gap-1 rounded-[12px] border border-white/10 bg-black/25 p-1">
         <button type="button" role="tab" aria-selected={activeTab === 'link'} disabled={submitting} onClick={() => setActiveTab('link')} className={`flex items-center justify-center gap-2 rounded-[10px] py-2 text-[10px] font-black uppercase tracking-wider transition ${activeTab === 'link' ? 'border border-[#fe2c55]/50 bg-[#fe2c55]/15 text-white' : 'text-white/40 hover:text-white/70'}`}>
-          <FaLink size={12} /> Enlace
+          <FaLink size={12} /> {t('link')}
         </button>
         <button type="button" role="tab" aria-selected={activeTab === 'file'} disabled={submitting} onClick={() => setActiveTab('file')} className={`flex items-center justify-center gap-2 rounded-[10px] py-2 text-[10px] font-black uppercase tracking-wider transition ${activeTab === 'file' ? 'border border-[#25f4ee]/45 bg-[#25f4ee]/10 text-white' : 'text-white/40 hover:text-white/70'}`}>
-          <FaFileLines size={12} /> Archivo
+          <FaFileLines size={12} /> {t('file')}
         </button>
       </div>
 
       {activeTab === 'link' ? (
         <div className="relative z-10 flex flex-col gap-2">
-          <p className="px-1 text-[10px] leading-relaxed text-white/45">Pega uno o varios enlaces. Se enlistarán al pulsar el botón y la cola mostrará el proceso en directo.</p>
+          <p className="px-1 text-[10px] leading-relaxed text-white/45">{t('pasteLinks')}</p>
           <div className="flex max-h-[132px] flex-col gap-2 overflow-y-auto pr-1">
             {localLinks.map((link, index) => (
               <div key={`${index}-${localLinks.length}`} className="flex items-center gap-2">
-                <input type="url" aria-label={`Enlace ${index + 1}`} value={link} onChange={(event) => updateLink(index, event.target.value)} placeholder="Pegar enlace de TikTok, YouTube o Instagram" disabled={submitting} className="min-w-0 flex-1 rounded-[12px] border border-white/10 bg-white/[.04] px-3 py-2.5 text-[11px] font-medium text-white outline-none transition focus:border-[#fe2c55]/55 disabled:opacity-50" />
+                <input type="url" aria-label={`Enlace ${index + 1}`} value={link} onChange={(event) => updateLink(index, event.target.value)} placeholder="Pegar video, perfil, favoritos o colección de TikTok" disabled={submitting} className="min-w-0 flex-1 rounded-[12px] border border-white/10 bg-white/[.04] px-3 py-2.5 text-[11px] font-medium text-white outline-none transition focus:border-[#fe2c55]/55 disabled:opacity-50" />
                 {localLinks.length > 1 && <button type="button" aria-label={`Quitar enlace ${index + 1}`} onClick={() => removeRow(index)} disabled={submitting} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-white/10 text-white/35 transition hover:border-[#fe2c55]/40 hover:text-white disabled:opacity-40"><FaXmark size={12} /></button>}
               </div>
             ))}
           </div>
-          <button type="button" onClick={addRow} disabled={submitting} className="flex h-8 items-center justify-center gap-2 rounded-[12px] border border-dashed border-white/15 bg-white/[.025] text-[9px] font-black uppercase tracking-[.14em] text-white/45 transition hover:border-[#25f4ee]/45 hover:text-white disabled:opacity-40"><FaPlus size={9} /> Añadir otro enlace</button>
+          <button type="button" onClick={addRow} disabled={submitting} className="flex h-8 items-center justify-center gap-2 rounded-[12px] border border-dashed border-white/15 bg-white/[.025] text-[9px] font-black uppercase tracking-[.14em] text-white/45 transition hover:border-[#25f4ee]/45 hover:text-white disabled:opacity-40"><FaPlus size={9} /> {t('addLink')}</button>
         </div>
       ) : (
         <div className="relative z-10 flex flex-col gap-2">
@@ -107,13 +132,23 @@ export function AddLinks({ onSubmitLinks }: AddLinksProps) {
         </div>
       )}
 
-      {validation && <div role="status" className="relative z-10 rounded-[12px] border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] text-white/60"><span className="font-bold text-[#25f4ee]">{validation.valid} enlace{validation.valid === 1 ? '' : 's'} listo{validation.valid === 1 ? '' : 's'} para enviar.</span>{validation.invalid > 0 && <span className="ml-1 text-white/45">{validation.invalid} omitido{validation.invalid === 1 ? '' : 's'} por formato no compatible.</span>}</div>}
+      {visibleValidation && <div role="status" className="relative z-10 rounded-[12px] border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] text-white/60"><span className="font-bold text-[#25f4ee]">{visibleValidation.valid} enlace{visibleValidation.valid === 1 ? '' : 's'} listo{visibleValidation.valid === 1 ? '' : 's'} para enviar.</span>{visibleValidation.invalid > 0 && <span className="ml-1 text-white/45">{visibleValidation.invalid} omitido{visibleValidation.invalid === 1 ? '' : 's'} por formato no compatible.</span>}</div>}
+
+      <div className="relative z-10 rounded-[12px] border border-amber-300/20 bg-amber-300/[.05] px-3 py-2.5 text-[9px] leading-relaxed text-white/60">
+        <p className="font-black uppercase tracking-wider text-amber-200">{t('contentRightsTitle')}</p>
+        <p className="mt-1">{t('contentRightsDescription')}</p>
+        <label className="mt-2 flex cursor-pointer items-start gap-2 text-white/75">
+          <input type="checkbox" checked={rightsAccepted} onChange={(event) => handleRightsAcceptance(event.target.checked)} disabled={submitting} className="mt-0.5 accent-amber-300" />
+          <span>{t('contentRightsAck')}</span>
+        </label>
+        <a className="mt-1 inline-block text-amber-200 underline decoration-amber-200/40 underline-offset-2" href="https://github.com/danielunibe/PulsarIA/blob/main/CONTENT_POLICY.es.md" target="_blank" rel="noreferrer">{t('readContentPolicy')}</a>
+      </div>
 
       <div className="relative z-10 flex items-center justify-between gap-3 text-[9px] uppercase tracking-wider text-white/35"><span>{activeTab === 'link' ? `${linkCount} enlace${linkCount === 1 ? '' : 's'} en el formulario` : file ? 'Archivo listo' : 'Sin archivo seleccionado'}</span><span className="text-[#25f4ee]/70">La cola se inicia con el botón</span></div>
 
-      <motion.button type="button" onClick={() => void handleSubmit()} disabled={!hasData || submitting} whileHover={hasData && !submitting ? { y: -1 } : undefined} whileTap={hasData && !submitting ? { scale: .985 } : undefined} className="relative z-10 flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 py-3 text-[11px] font-black uppercase tracking-[.14em] text-white transition disabled:cursor-not-allowed disabled:opacity-35" style={{ background: hasData && !submitting ? 'linear-gradient(135deg,#fe2c55,#8a5cff)' : 'rgba(255,255,255,.06)', boxShadow: hasData && !submitting ? '0 8px 24px rgba(254,44,85,.22)' : 'none' }}>
+      <motion.button type="button" onClick={() => void handleSubmit()} disabled={!hasData || !rightsAccepted || submitting} whileHover={hasData && rightsAccepted && !submitting ? { y: -1 } : undefined} whileTap={hasData && rightsAccepted && !submitting ? { scale: .985 } : undefined} className="relative z-10 flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 py-3 text-[11px] font-black uppercase tracking-[.14em] text-white transition disabled:cursor-not-allowed disabled:opacity-35" style={{ background: hasData && rightsAccepted && !submitting ? 'linear-gradient(135deg,#fe2c55,#8a5cff)' : 'rgba(255,255,255,.06)', boxShadow: hasData && rightsAccepted && !submitting ? '0 8px 24px rgba(254,44,85,.22)' : 'none' }}>
         <FaRocket size={13} />
-        {submitting ? 'Enviando a la cola…' : 'Procesar contenido'}
+        {submitting ? t('sendingToQueue') : t('processContent')}
       </motion.button>
     </motion.section>
   );

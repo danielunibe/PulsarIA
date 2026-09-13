@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 03: ESTADO ACTUAL DE COMPONENTES
+﻿# PULSARIA — AUDITORÍA 03: ESTADO ACTUAL DE COMPONENTES
 ## Desglose Exhaustivo de Componentes Frontend, Estado, Props y Flujos
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 04_BUGS_CRITICOS.md
 

@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — SESSION REPORT
+﻿# PULSARIA — SESSION REPORT
 ## Sesión: 2026-08-23 | Tipo: Auditoría + Correcciones + Documentación
 
 ---
@@ -51,7 +51,7 @@
 ### BUG-04: Nombre de producto incorrecto en toda la configuración
 - **Problema:** tauri.conf.json: "TikTok Processor", Cargo.toml: "tiktok-processor", package.json: "ai-studio-applet"
 - **Impacto:** Ventana muestra nombre incorrecto, binario compilado tiene nombre erróneo
-- **Corrección:** Todos actualizados a "pulsar-eventide" / "Pulsar Eventide"
+- **Corrección:** Todos actualizados a "pulsaria" / "Pulsaria"
 
 ### BUG-05: StatsPanel no integrado en Dashboard
 - **Problema:** StatsPanel.tsx existía y era funcional pero no estaba importado ni renderizado en page.tsx
@@ -116,7 +116,7 @@
 | TypeScript Frontend | ✅ Sin errores de compilación |
 | Schema DB (BDs nuevas) | ✅ Todas las columnas presentes |
 | Schema DB (BDs existentes) | ✅ Migraciones automáticas en init_db() |
-| Nombre de producto | ✅ "Pulsar Eventide" en todos los archivos |
+| Nombre de producto | ✅ "Pulsaria" en todos los archivos |
 | StatsPanel integrado | ✅ Visible en Dashboard |
 | Thumbnails | ✅ Usan URL real del video si disponible |
 | Pipeline end-to-end | ⚪ PENDIENTE verificación con video real |
@@ -187,6 +187,6 @@ Sesión ejecutando KILOCODE_MASTER_PROMPT_V3.md. Completados BLOQUE 0 (validaci�
 
 ### Próximos Pasos
 1. Ejecutar BLOQUE 2 manualmente: arrancar app con `npm run tauri`, agregar URL TikTok, verificar pipeline end-to-end.
-2. Configurar `NEXT_PUBLIC_GOOGLE_API_KEY` para activar Gemini real.
+2. Preparar el modelo LLM local desde Ajustes. No usar claves cloud ni variables `NEXT_PUBLIC_*`, porque esas variables se exponen en el bundle web.
 3. Evaluar rendimiento de clustering con bibliotecas grandes.
 4. Considerar migración de `julia_exported` a tabla dedicada si crece el volumen.

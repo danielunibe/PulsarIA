@@ -1,4 +1,4 @@
-﻿//! # Pulsar Eventide — Motor Multimodal de Escritorio
+//! # Pulsaria — Motor Multimodal de Escritorio
 //!
 //! Aplicación de escritorio (Rust + Tauri 2 + Next.js 15) que descarga,
 //! transcribe, indexa semánticamente y consulta videos cortos.
@@ -40,7 +40,8 @@
 mod commands;
 mod db;
 mod embedding;
-mod queue;
+mod runtime;
+mod storage;
 mod url_utils;
 
 pub mod api;
@@ -51,21 +52,24 @@ pub mod infrastructure;
 pub mod maintenance;
 pub mod resilience;
 
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use crate::commands::{WorkerConfig, SystemMetrics};
 use crate::api::gateway;
-use crate::infrastructure::persistence::sqlite_repo;
-use crate::infrastructure::vector_shards;
-use crate::application::search_service;
+use crate::api::middleware::security;
 use crate::application::queue_service;
 use crate::application::reranker;
-use crate::infrastructure::semantic_cache;
+use crate::application::search_service;
+use crate::commands::{SystemMetrics, WorkerConfig};
 use crate::distributed::query_coordinator;
-use crate::maintenance::reindex_pipeline;
+use crate::infrastructure::persistence::sqlite_repo;
 use crate::infrastructure::scheduler;
-use crate::api::middleware::security;
-
+use crate::infrastructure::semantic_cache;
+use crate::infrastructure::vector_shards;
+use crate::maintenance::reindex_pipeline;
+use std::sync::Arc;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::Manager;
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
@@ -74,6 +78,7 @@ async fn main() {
     commands::load_persisted_cookie_browser();
     commands::load_persisted_retention();
     commands::load_persisted_formats();
+    commands::load_persisted_storage_settings();
     let processing_settings = commands::load_persisted_processing_settings();
     let prometheus_handle = crate::infrastructure::observability::init_observability();
 
@@ -81,25 +86,41 @@ async fn main() {
         crate::infrastructure::observability::metrics_server::serve_metrics(prometheus_handle)
             .await;
     });
-
     let data_dir = db::data_dir_path();
     std::env::set_var("PULSAR_DATA_DIR", &data_dir);
     let conn = db::init_db().expect("Failed to initialize SQLite library.db");
+    if let Err(error) = db::repair_library(&conn) {
+        tracing::error!("Automatic library reconciliation failed: {}", error);
+    }
     let std_db = Arc::new(std::sync::Mutex::new(conn));
-    let job_repo =
-        Arc::new(sqlite_repo::SqliteRepo::new(std_db.clone()));
+    let job_repo = Arc::new(sqlite_repo::SqliteRepo::new(std_db.clone()));
 
     let model_dir = commands::resolve_model_dir();
 
     let start_load = std::time::Instant::now();
-    let onnx_manager = embedding::ONNXModelManager::new(
+    let mut onnx_load_error = None;
+    let onnx_manager = match embedding::ONNXModelManager::new(
         &model_dir.join("model.onnx"),
         &model_dir.join("tokenizer.json"),
-    ).ok();
+    ) {
+        Ok(manager) => Some(manager),
+        Err(e) => {
+            tracing::error!("ONNX model failed to load: {}", e);
+            onnx_load_error = Some(format!(
+                "ONNX model load failed: {}. Semantic search disabled.",
+                e
+            ));
+            None
+        }
+    };
     let load_time_ms = start_load.elapsed().as_millis() as f32;
 
     let metrics = SystemMetrics {
-        model_load_time_ms: if onnx_manager.is_some() { load_time_ms } else { 0.0 },
+        model_load_time_ms: if onnx_manager.is_some() {
+            load_time_ms
+        } else {
+            0.0
+        },
         ..Default::default()
     };
 
@@ -110,8 +131,7 @@ async fn main() {
         .unwrap_or_else(|_| "4".to_string())
         .parse()
         .unwrap_or(4);
-    let vector_index =
-        Arc::new(vector_shards::VectorShardManager::new(shard_count));
+    let vector_index = Arc::new(vector_shards::VectorShardManager::new(shard_count));
 
     let reranker_enabled =
         std::env::var("RERANKER_ENABLED").unwrap_or_else(|_| "false".to_string()) == "true";
@@ -125,9 +145,12 @@ async fn main() {
     let is_distributed =
         std::env::var("DISTRIBUTED_MODE").unwrap_or_else(|_| "false".to_string()) == "true";
     let cluster_nodes = std::env::var("CLUSTER_NODES").unwrap_or_else(|_| "".to_string());
-    let query_coordinator = Arc::new(
-        query_coordinator::QueryCoordinator::new(cluster_nodes, vector_index.clone(), is_distributed, std_db.clone()),
-    );
+    let query_coordinator = Arc::new(query_coordinator::QueryCoordinator::new(
+        cluster_nodes,
+        vector_index.clone(),
+        is_distributed,
+        std_db.clone(),
+    ));
 
     let search_service = Arc::new(search_service::SearchService::new(
         crate::domain::models::SearchConfig {
@@ -143,8 +166,25 @@ async fn main() {
         semantic_cache.clone(),
     ));
 
-    let queue_service = Arc::new(queue_service::QueueService::new(job_repo.clone(), search_service.clone()));
-    let reindex_pipeline = Arc::new(reindex_pipeline::ReindexPipeline::new(search_service.clone()));
+    let queue_service = Arc::new(queue_service::QueueService::new(
+        job_repo.clone(),
+        search_service.clone(),
+    ));
+    match queue_service.resume_pending_jobs().await {
+        Ok(resumed) if resumed > 0 => {
+            tracing::info!(
+                "Reanudados {} trabajos pendientes al iniciar Pulsaria",
+                resumed
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!("No se pudieron reanudar los trabajos pendientes: {}", error);
+        }
+    }
+    let reindex_pipeline = Arc::new(reindex_pipeline::ReindexPipeline::new(
+        search_service.clone(),
+    ));
     let reindex_clone = reindex_pipeline.clone();
     tokio::spawn(async move {
         loop {
@@ -153,25 +193,42 @@ async fn main() {
         }
     });
 
-    if let Err(e) = scheduler::start_maintenance_scheduler(search_service.clone(), job_repo.clone()).await {
+    if let Err(e) = scheduler::start_maintenance_scheduler(
+        search_service.clone(),
+        job_repo.clone(),
+        queue_service.clone(),
+    )
+    .await
+    {
         tracing::error!("Maintenance scheduler failed to start: {}", e);
     }
 
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| "default_insecure_pulsar_secret".to_string());
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
+        // The loopback API still needs an unpredictable per-session secret
+        // when a deployment does not provide one explicitly. A timestamp/PID
+        // hash is observable and too easy to reproduce.
+        let mut bytes = [0u8; 32];
+        rand::fill(&mut bytes);
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    });
     let rps_limit: f32 = std::env::var("RATE_LIMIT_PER_SEC")
         .unwrap_or_else(|_| "10.0".to_string())
         .parse()
         .unwrap_or(10.0);
     let rate_limiter = Arc::new(security::RateLimiter::new(100, rps_limit));
 
-    let security_config = Arc::new(security::SecurityConfig { jwt_secret, rate_limiter });
+    let security_config = Arc::new(security::SecurityConfig {
+        jwt_secret,
+        rate_limiter,
+    });
+    let api_runtime = api::ApiRuntimeState::default();
 
     let api_state = gateway::ApiState {
         queue_service: queue_service.clone(),
         search_service: search_service.clone(),
         job_repo: job_repo.clone(),
         security: security_config.clone(),
+        runtime: api_runtime.clone(),
     };
 
     tokio::spawn(async move {
@@ -182,31 +239,102 @@ async fn main() {
         gateway::start_api_server(api_port, api_state).await;
     });
 
-    let qm = Arc::new(Mutex::new(queue::QueueManager::with_onnx(std_db.clone(), onnx_arc.clone(), search_service.clone())));
-
     let arc_config = Arc::new(Mutex::new(search_config));
     let arc_metrics = Arc::new(Mutex::new(metrics));
+    let local_llm = Arc::new(
+        infrastructure::local_llm::LocalLlmManager::new()
+            .expect("local LLM manifest must be valid"),
+    );
 
     let collection_db = std_db.clone();
-    let collection_queue = qm.clone();
+    let collection_queue = queue_service.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--background"]),
+        ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            let show_item = MenuItem::with_id(app, "show", "Abrir Pulsaria", true, None::<&str>)?;
+            let quit_item =
+                MenuItem::with_id(app, "quit", "Salir de Pulsaria", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            TrayIconBuilder::new()
+                .icon(
+                    app.default_window_icon()
+                        .cloned()
+                        .expect("Pulsaria icon is required"),
+                )
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+            if let Err(error) = app.autolaunch().enable() {
+                tracing::warn!("Could not enable Windows autostart: {}", error);
+            }
+            if std::env::args().any(|argument| argument == "--background") {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
             let handle = app.handle().clone();
+            if let Some(ref err) = onnx_load_error {
+                commands::emit_log(&handle, err.clone());
+            }
             let sync_db = collection_db.clone();
             let sync_queue = collection_queue.clone();
             let sync_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
+                // Espera inicial para que el backend est� completamente listo
                 tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
-                commands::collection_sync_loop(sync_db, sync_queue, sync_handle).await;
+                crate::application::collection_service::start_collection_sync_loop(
+                    sync_db,
+                    sync_queue,
+                    sync_handle,
+                )
+                .await;
             });
-            commands::emit_log(&handle, "Backend AAA-Ready initialized".into());
+            commands::emit_log(
+                &handle,
+                "Backend initialized; REST gateway status is reported in Salud".into(),
+            );
             Ok(())
         })
         .manage(commands::AppState {
             db: std_db.clone(),
-            queue: qm,
+            queue: queue_service.clone(),
+            api_runtime: api_runtime.clone(),
             onnx: onnx_arc,
             search: search_service.clone(),
             config: arc_config,
@@ -214,18 +342,44 @@ async fn main() {
             worker_config: Arc::new(tokio::sync::RwLock::new(WorkerConfig {
                 download_dir: std::env::var("PULSAR_DOWNLOAD_DIR").unwrap_or_default(),
                 cookies_browser: std::env::var("PULSAR_COOKIES_FROM_BROWSER").unwrap_or_default(),
-                retention: std::env::var("PULSAR_DEFAULT_RETENTION").unwrap_or_else(|_| "keep".to_string()),
+                retention: std::env::var("PULSAR_DEFAULT_RETENTION")
+                    .unwrap_or_else(|_| "keep".to_string()),
                 formats: std::env::var("PULSAR_FORMATS")
                     .ok()
                     .and_then(|f| serde_json::from_str(&f).ok())
                     .unwrap_or_else(|| vec!["mp4".into(), "mp3".into(), "txt".into()]),
                 processing: processing_settings.clone(),
+                intent: std::env::var("PULSAR_SETUP_INTENT")
+                    .unwrap_or_else(|_| "balanced".to_string()),
+                quota_bytes: crate::storage::configured_quota_bytes(),
+                reserve_bytes: crate::storage::configured_reserve_bytes().unwrap_or_default(),
             })),
+            model_prepare_pid: Arc::new(Mutex::new(None)),
+            local_llm,
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let local_llm = window
+                    .app_handle()
+                    .state::<commands::AppState>()
+                    .local_llm
+                    .clone();
+                tauri::async_runtime::spawn(async move {
+                    local_llm.shutdown().await;
+                });
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::add_job,
             commands::get_jobs,
             commands::retry_job,
+            commands::get_collection_sources,
+            commands::set_collection_source_active,
+            commands::delete_collection_source,
+            commands::sync_collection_source_now,
+            commands::get_health_events,
+            commands::get_runtime_health,
+            commands::repair_library,
             commands::get_base_path,
             commands::search_literal_transcripts,
             commands::search_transcripts,
@@ -237,8 +391,23 @@ async fn main() {
             commands::debug_search_transcripts,
             commands::get_system_metrics,
             commands::get_hardware_profile,
+            commands::get_runtime_preflight,
+            commands::get_storage_status,
+            commands::recommend_storage_setup,
+            commands::preview_media_purge,
+            commands::apply_media_purge,
+            commands::undo_media_purge,
+            commands::empty_media_trash,
+            commands::set_media_protection,
+            commands::record_media_access,
+            commands::get_job_artifacts,
+            commands::save_video_frame,
             commands::get_processing_settings,
             commands::set_processing_settings,
+            commands::save_mvp_settings,
+            commands::get_whisper_model_status,
+            commands::prepare_whisper_model,
+            commands::cancel_whisper_model_preparation,
             commands::rebuild_index,
             commands::vacuum_db,
             commands::recompute_embeddings,
@@ -256,9 +425,16 @@ async fn main() {
             commands::import_semantic,
             commands::set_download_dir,
             commands::get_download_dir,
+            commands::set_cookie_browser,
+            commands::set_default_retention,
             commands::set_formats,
             commands::get_formats,
-            commands::export_library_json
+            commands::export_library_json,
+            commands::get_local_llm_status,
+            commands::ensure_local_llm,
+            commands::cancel_local_llm_download,
+            commands::generate_local_response,
+            commands::generate_gemini_response
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

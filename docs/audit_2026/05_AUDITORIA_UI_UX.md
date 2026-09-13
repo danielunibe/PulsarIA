@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 05: AUDITORÍA DE EXPERIENCIA DE USUARIO (UI/UX)
+﻿# PULSARIA — AUDITORÍA 05: AUDITORÍA DE EXPERIENCIA DE USUARIO (UI/UX)
 ## Defectos Visuales, Micro-Interacciones, Accesibilidad y Ergonomía
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 06_AUDITORIA_BACKEND_RUST.md
 
@@ -6,7 +6,7 @@
 
 ## 1. RESUMEN DE HALLAZGOS UI/UX
 
-La interfaz de Pulsar Eventide destaca por su estética AAA (Aurora WebGL, Glassmorphism, paleta HSL seleccionada). Sin embargo, la auditoría técnica ha detectado varias fricciones y fallas de interacción que degradan la experiencia de uso.
+La interfaz de Pulsaria destaca por su estética AAA (Aurora WebGL, Glassmorphism, paleta HSL seleccionada). Sin embargo, la auditoría técnica ha detectado varias fricciones y fallas de interacción que degradan la experiencia de uso.
 
 ---
 

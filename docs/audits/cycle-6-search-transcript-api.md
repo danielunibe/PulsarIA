@@ -1,4 +1,4 @@
-# Ciclo 6 — búsqueda, transcript, UNIB y API local
+﻿# Ciclo 6 — búsqueda, transcript, UNIB y API local
 
 ## Objetivo y criterio de salida
 
@@ -58,7 +58,7 @@ Se ejecutaron `cargo fmt -- --check` y `cargo test -- --nocapture` sobre `src-ta
 
 ### Runtime nativo y REST
 
-Se reconstruyó y relanzó `target-tauri/debug/pulsar-eventide.exe`. El proceso escuchó en `127.0.0.1:8080` sin tocar el listener ajeno de `127.0.0.1:3000`. La sonda final informó:
+Se reconstruyó y relanzó `target-tauri/debug/pulsaria.exe`. El proceso escuchó en `127.0.0.1:8080` sin tocar el listener ajeno de `127.0.0.1:3000`. La sonda final informó:
 
 ```text
 final_runtime=ok health=ok jobs=1 literal_shape=True semantic_shape=True transcribe_invalid_status=400

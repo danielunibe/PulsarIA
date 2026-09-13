@@ -1,4 +1,4 @@
-# 🔍 PULSAR EVENTIDE — AUDITORÍA TÉCNICA COMPLETA
+﻿# 🔍 PULSARIA — AUDITORÍA TÉCNICA COMPLETA
 ## Fecha: 2026-08-23 | Auditor: Antigravity IDE
 ### Estado: Post-sesión agosto 2026 — Pre-entrega a Kilo Code
 
@@ -126,22 +126,22 @@ python-workers/
 ### FALLO 1: tauri.conf.json — Nombre de Producto Incorrecto
 Archivo: src-tauri/tauri.conf.json
 Problema: productName="tiktok-processor" y title="TikTok Processor" son nombres del prototipo original.
-Impacto: La ventana muestra "TikTok Processor" en lugar de "Pulsar Eventide".
+Impacto: La ventana muestra "TikTok Processor" en lugar de "Pulsaria".
 Correccion:
-  productName -> "pulsar-eventide"
-  title -> "Pulsar Eventide"
-  identifier -> "com.pulsar-eventide.app"
+  productName -> "pulsaria"
+  title -> "Pulsaria"
+  identifier -> "com.pulsaria.app"
 
 ### FALLO 2: Cargo.toml — Nombre del Paquete Incorrecto
 Archivo: src-tauri/Cargo.toml
 Problema: name = "tiktok-processor" — nombre heredado del prototipo.
 Impacto: Binario compilado se llama tiktok-processor.exe
-Correccion: name = "pulsar-eventide"
+Correccion: name = "pulsaria"
 
 ### FALLO 3: package.json — Nombre del Proyecto Incorrecto
 Archivo: package.json
 Problema: "name": "ai-studio-applet" — nombre generico
-Correccion: "name": "pulsar-eventide"
+Correccion: "name": "pulsaria"
 
 ### FALLO 4: Schema DB — Columnas faltantes en tabla `media`
 Archivo: src-tauri/src/db.rs lineas 76-91
@@ -262,9 +262,9 @@ Por: COUNT(pi.job_id)
 ```json
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "pulsar-eventide",
+  "productName": "pulsaria",
   "version": "0.1.0",
-  "identifier": "com.pulsar-eventide.app",
+  "identifier": "com.pulsaria.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:3000",
@@ -273,7 +273,7 @@ Por: COUNT(pi.job_id)
   },
   "app": {
     "windows": [{
-      "title": "Pulsar Eventide",
+      "title": "Pulsaria",
       "width": 1280,
       "height": 800,
       "minWidth": 1000,
@@ -287,11 +287,11 @@ Por: COUNT(pi.job_id)
 
 ### C5: Cargo.toml — Nombre correcto
 
-name = "pulsar-eventide"
+name = "pulsaria"
 
 ### C6: package.json — Nombre correcto
 
-"name": "pulsar-eventide"
+"name": "pulsaria"
 
 ### C7: app/page.tsx — Integrar StatsPanel
 

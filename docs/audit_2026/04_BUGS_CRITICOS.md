@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 04: BUGS CRÍTICOS Y DEFECTOS DE CÓDIGO
+﻿# PULSARIA — AUDITORÍA 04: BUGS CRÍTICOS Y DEFECTOS DE CÓDIGO
 ## Catálogo Detallado de Fallos, Causa Raíz, Severidad y Solución Técnica
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 05_AUDITORIA_UI_UX.md
 

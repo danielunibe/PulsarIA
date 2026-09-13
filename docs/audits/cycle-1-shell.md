@@ -1,12 +1,12 @@
-# Ciclo 1 — Arranque nativo y shell de Pulsaria
+﻿# Ciclo 1 — Arranque nativo y shell de Pulsaria
 
 ## Objetivo
 
-Verificar que Pulsaria/Pulsar Eventide puede iniciar como aplicación Tauri en Windows, cargar la UI existente, levantar el gateway local y dejar disponibles los puntos de navegación principales antes de auditar cada acción de ingesta.
+Verificar que Pulsaria puede iniciar como aplicación Tauri en Windows, cargar la UI existente, levantar el gateway local y dejar disponibles los puntos de navegación principales antes de auditar cada acción de ingesta.
 
 ## Resultado
 
-El ciclo queda **aprobado con correcciones aplicadas**. La aplicación nativa llegó a compilar y ejecutar `pulsar-eventide.exe`; Next respondió `HTTP 200` sin `Module not found` ni `Internal Server Error`; y el gateway respondió `HTTP 200` tanto en `/health` como en `/api/v1/health` con `{"status":"ok","version":"0.0.0"}`.
+El ciclo queda **aprobado con correcciones aplicadas**. La aplicación nativa llegó a compilar y ejecutar `pulsaria.exe`; Next respondió `HTTP 200` sin `Module not found` ni `Internal Server Error`; y el gateway respondió `HTTP 200` tanto en `/health` como en `/api/v1/health` con `{"status":"ok","version":"0.0.0"}`.
 
 | Elemento verificado | Resultado | Corrección aplicada |
 |---|---:|---|

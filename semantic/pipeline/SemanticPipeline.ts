@@ -1,4 +1,4 @@
-import {
+﻿import {
   EntityType,
   SemanticEntity,
   makeStableId,
@@ -175,7 +175,7 @@ export class SemanticPipeline {
     const document: UnibDocument = {
       headers: {
         version: '0.0',
-        owner: 'pulsar-eventide',
+        owner: 'pulsaria',
         mode,
         created,
       },

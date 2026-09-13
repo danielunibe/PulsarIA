@@ -1,6 +1,6 @@
-# Changelog
+﻿# Changelog
 
-Todos los cambios notables en Pulsar Eventide.
+Todos los cambios notables en Pulsaria.
 
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/), y el proyecto adhiere a [Semantic Versioning](https://semver.org/).
 
@@ -28,7 +28,7 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/), y el proy
 #### Persistencia
 - Base de datos SQLite con esquema auto-migrante
 - Tablas: `jobs`, `media`, `transcript_embeddings`, `transcript_segments`, `playlists`, `playlist_items`, `collection_sources`
-- Persistencia de configuración de búsqueda en `%APPDATA%/Pulsar Eventide`
+- Persistencia de configuración de búsqueda en `%APPDATA%/Pulsaria`
 
 #### Frontend
 - Dashboard principal con grid de videos y cola de procesamiento
@@ -61,7 +61,7 @@ El formato se basa en [Keep a Changelog](https://keepachangelog.com/), y el proy
 
 #### Empaquetado
 - Instalador Windows NSIS con Python embebible, workers, modelos ONNX y FFmpeg
-- Configuración de usuario en `%APPDATA%/Pulsar Eventide`
+- Configuración de usuario en `%APPDATA%/Pulsaria`
 - Videos procesados en la carpeta de Descargas (configurable)
 
 ### Corregido

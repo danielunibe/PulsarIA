@@ -62,12 +62,10 @@ export function VideoCard({
     } = useVideoPlayer({ isActive, isFullPlaying, videoSrc, onPlayStart, onPlayStop });
 
     // Derived display values
-    const isActiveOrHovered = hovered || isActive;
     const activeVideoRenderSrc = isActive ? videoSrc : videoUrl;
     const [failedVideoSrc, setFailedVideoSrc] = useState<string | null>(null);
     const videoLoadFailed = Boolean(activeVideoRenderSrc && failedVideoSrc === activeVideoRenderSrc);
     const canInteract = isActive && !videoLoadFailed;
-    const iconTransition = isActiveOrHovered ? 'all 0.2s ease' : 'all 1s ease 0.3s';
 
     const openOriginal = async (event: React.MouseEvent) => {
         event.stopPropagation();
@@ -106,10 +104,8 @@ export function VideoCard({
                 backdropFilter: isActive ? 'none' : 'blur(12px)',
                 WebkitBackdropFilter: isActive ? 'none' : 'blur(12px)',
                 borderRadius: '20px',
-                boxShadow: canInteract
-                    ? '0 12px 24px rgba(0,0,0,.34)'
-                    : '0 8px 18px rgba(0,0,0,.24)',
-                transition: 'transform 0.35s ease, box-shadow 0.35s ease, background 0.5s ease',
+                boxShadow: 'none',
+                transition: 'transform 0.35s ease, background 0.5s ease',
             }}
             onClick={canInteract ? (e) => {
                 if (onlineOnly) {
@@ -176,7 +172,6 @@ export function VideoCard({
                     title={title}
                     tags={tags}
                     isFullPlaying={isFullPlaying}
-                    iconTransition={iconTransition}
                     onPlayClick={handlePlayClick}
                 />
             )}

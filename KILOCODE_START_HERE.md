@@ -1,5 +1,5 @@
 ﻿# ðŸ¤– KILOCODE â€” ARCHIVO DE ARRANQUE AUTÃ“NOMO
-## Pulsar Eventide Â· SesiÃ³n de ProgramaciÃ³n Nocturna en Bucle
+## Pulsaria Â· SesiÃ³n de ProgramaciÃ³n Nocturna en Bucle
 ### Lee este archivo completo primero. Luego ejecuta. No pares hasta terminar.
 
 ---
@@ -11,7 +11,7 @@
 
 ## ðŸ“ CONTEXTO DEL PROYECTO
 
-**Nombre:** Pulsar Eventide  
+**Nombre:** Pulsaria  
 **Ruta:** `C:\Users\danie\Desktop\Pulsaria`  
 **Tipo:** App de escritorio nativa (Rust + Tauri 2 + Next.js 15 + React 19)  
 **PropÃ³sito:** Descarga videos de TikTok/YouTube/Instagram, transcribe su audio con IA, indexa el contenido en un motor vectorial local (ONNX + HNSW en Rust) y permite bÃºsqueda semÃ¡ntica por concepto. El nuevo feature estrella es **organizar los videos en Playlists TemÃ¡ticas Inteligentes** generadas automÃ¡ticamente.
@@ -1168,7 +1168,7 @@ use tauri::Manager;
 {
     let _ = app_handle.notification()
         .builder()
-        .title("Pulsar Eventide")
+        .title("Pulsaria")
         .body(format!("Video procesado y listo en tu biblioteca."))
         .show();
 }

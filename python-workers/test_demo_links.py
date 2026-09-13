@@ -1,54 +1,64 @@
-import subprocess
+"""Deterministic worker contract tests. Live TikTok checks are opt-in."""
+
+from __future__ import annotations
+
 import json
+import os
+import subprocess
 import sys
+import tempfile
+import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import downloader
+
 
 WORKER_DIR = Path(__file__).resolve().parent
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-urls = [
-    (201, 'https://www.tiktok.com/@albert86383/video/7661746643284413704'),
-    (202, 'https://www.tiktok.com/@dreamyxscape/video/7655530103786474766'),
-    (203, 'https://www.tiktok.com/@dreamyxscape/video/7677416688568093965'),
-    (204, 'https://www.tiktok.com/@dreamyxscape/video/7664446578878369038'),
-    (205, 'https://www.tiktok.com/@sanjariuss/video/7440985300647611666'),
-    (206, 'https://www.tiktok.com/@jamestralie/video/7544037721120017694')
-]
+class DownloaderContractTests(unittest.TestCase):
+    def test_import_has_no_network_or_process_side_effect(self) -> None:
+        self.assertTrue(callable(downloader.extract_metadata))
 
-failures = []
+    @patch("downloader.subprocess.run")
+    def test_metadata_contract(self, run) -> None:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout=json.dumps({
+                "title": "Video de prueba", "uploader": "creator",
+                "thumbnail": "https://example.invalid/thumb.jpg", "duration": 12,
+                "upload_date": "20260831", "extractor_key": "TikTok",
+            }), stderr="",
+        )
+        metadata = downloader.extract_metadata("https://www.tiktok.com/@creator/video/123")
+        self.assertEqual(metadata["title"], "Video de prueba")
+        self.assertEqual(metadata["platform"], "tiktok")
 
-for job_id, url in urls:
-    print(f"\n==========================================")
-    print(f"TESTING JOB {job_id}: {url}")
-    print(f"==========================================")
-    proc = subprocess.run(
-        [sys.executable, 'main.py', '--job_id', str(job_id), '--url', url],
-        cwd=WORKER_DIR,
-        capture_output=True,
-        text=True,
-    )
-    lines = [line.strip() for line in proc.stdout.strip().split('\n') if line.strip().startswith('{')]
-    
-    for l in lines:
-        try:
-            ev = json.loads(l)
-            print(f"  -> Event: {ev.get('event', ev.get('step'))} | Progress: {ev.get('progress')}%")
-        except Exception:
-            pass
-            
-    if lines:
-        last = json.loads(lines[-1])
-        meta = last.get('metadata', {})
-        print(f"RESULT: {last.get('event')} | Title: '{meta.get('title', 'N/A')}' | Duration: {meta.get('duration')}s | Code: {proc.returncode}")
-        if proc.returncode != 0 or last.get('event') != 'completed':
-            failures.append(job_id)
-    else:
-        print(f"RESULT ERROR: No events. STDERR: {proc.stderr[:300]}")
-        failures.append(job_id)
+    @patch("downloader.subprocess.run")
+    def test_tiktok_errors_keep_actionable_detail(self, run) -> None:
+        run.side_effect = subprocess.CalledProcessError(
+            1, ["yt-dlp"], stderr="TikTok session cookies are expired"
+        )
+        with self.assertRaisesRegex(RuntimeError, "session cookies are expired"):
+            downloader.extract_metadata("https://www.tiktok.com/@creator/video/123")
 
-print(f"\nSUMMARY: passed={len(urls) - len(failures)} failed={len(failures)}")
-if failures:
-    print(f"FAILED JOBS: {', '.join(str(job_id) for job_id in failures)}")
-    raise SystemExit(1)
+
+@unittest.skipUnless(os.environ.get("PULSARIA_LIVE_TIKTOK_URL"), "live TikTok URL not supplied")
+class LiveTikTokCertification(unittest.TestCase):
+    def test_user_supplied_url_completes(self) -> None:
+        url = os.environ["PULSARIA_LIVE_TIKTOK_URL"]
+        with tempfile.TemporaryDirectory(prefix="pulsaria-live-") as directory:
+            environment = os.environ.copy()
+            environment["PULSAR_DOWNLOAD_DIR"] = directory
+            result = subprocess.run(
+                [sys.executable, str(WORKER_DIR / "main.py"), "--job_id", "990001", "--url", url],
+                cwd=WORKER_DIR, env=environment, capture_output=True, text=True, timeout=900,
+            )
+            events = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(events and events[-1].get("event") == "completed", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

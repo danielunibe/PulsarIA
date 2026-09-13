@@ -52,6 +52,10 @@ pub struct WorkerResult {
 struct WorkerEvent {
     event: String,
     #[serde(default)]
+    step: Option<String>,
+    #[serde(default)]
+    progress: Option<i32>,
+    #[serde(default)]
     message: Option<String>,
     #[serde(default)]
     text: Option<String>,
@@ -69,6 +73,14 @@ struct WorkerEvent {
 struct WorkerPayload<'a> {
     job_id: i64,
     url: &'a str,
+    formats: String,
+    download_dir: String,
+    cookies_browser: String,
+    retention: String,
+    processing_quality: String,
+    whisper_model: String,
+    whisper_device: String,
+    whisper_compute_type: String,
 }
 
 pub struct PythonWorker {
@@ -94,6 +106,7 @@ impl PythonWorker {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        command.kill_on_drop(true);
         #[cfg(windows)]
         command.creation_flags(0x08000000);
         let mut child = command
@@ -133,14 +146,31 @@ impl PythonWorker {
         })
     }
 
-    #[instrument(skip(self, job), fields(job_id = job.job_id))]
-    pub async fn run_job(
+    #[instrument(skip(self, job, on_progress), fields(job_id = job.job_id))]
+    pub async fn run_job<F>(
         &mut self,
         job: &JobMessage,
-    ) -> Result<Option<WorkerResult>, PythonRunnerError> {
+        mut on_progress: F,
+    ) -> Result<Option<WorkerResult>, PythonRunnerError>
+    where
+        F: FnMut(&str, i32, Option<&WorkerMetadata>),
+    {
         let payload = WorkerPayload {
             job_id: job.job_id,
             url: &job.url,
+            formats: std::env::var("PULSAR_FORMATS")
+                .unwrap_or_else(|_| "[\"mp4\",\"mp3\",\"txt\"]".into()),
+            download_dir: std::env::var("PULSAR_DOWNLOAD_DIR").unwrap_or_default(),
+            cookies_browser: job.cookies_browser.clone().unwrap_or_else(|| {
+                std::env::var("PULSAR_COOKIES_FROM_BROWSER").unwrap_or_default()
+            }),
+            retention: std::env::var("PULSAR_DEFAULT_RETENTION").unwrap_or_else(|_| "keep".into()),
+            processing_quality: std::env::var("PULSAR_PROCESSING_QUALITY")
+                .unwrap_or_else(|_| "78".into()),
+            whisper_model: std::env::var("WHISPER_MODEL").unwrap_or_else(|_| "tiny".into()),
+            whisper_device: std::env::var("WHISPER_DEVICE").unwrap_or_else(|_| "cpu".into()),
+            whisper_compute_type: std::env::var("WHISPER_COMPUTE_TYPE")
+                .unwrap_or_else(|_| "int8".into()),
         };
         let mut payload_json = serde_json::to_string(&payload)
             .map_err(|error| PythonRunnerError::JsonParseError(error.to_string()))?;
@@ -190,6 +220,19 @@ impl PythonWorker {
                 }
             };
 
+            let normalized_step = event.step.as_deref().unwrap_or(&event.event);
+
+            // Metadata is emitted before the expensive download/transcription
+            // stages. Keep the latest copy in memory before invoking the
+            // callback so the queue can expose title/author/thumbnail while
+            // the job is still processing.
+            if let Some(event_metadata) = event.metadata.as_ref() {
+                metadata = Some(event_metadata.clone());
+            }
+            if let Some(progress) = event.progress {
+                on_progress(normalized_step, progress.clamp(0, 100), metadata.as_ref());
+            }
+
             if event.event == "transcription_started" {
                 transcription_start = Some(std::time::Instant::now());
             }
@@ -201,9 +244,6 @@ impl PythonWorker {
             }
             if let Some(text) = event.text {
                 final_transcript = Some(text);
-            }
-            if event.metadata.is_some() {
-                metadata = event.metadata;
             }
             if let Some(event_segments) = event.segments {
                 segments = event_segments;

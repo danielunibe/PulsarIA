@@ -1,11 +1,11 @@
-import os
+﻿import os
 from pathlib import Path
 
 docs_dir = Path("docs/audit_2026")
 docs_dir.mkdir(parents=True, exist_ok=True)
 
 # 02
-doc_02 = """# PULSAR EVENTIDE — AUDITORÍA 02: ARQUITECTURA DEL SISTEMA
+doc_02 = """# PULSARIA — AUDITORÍA 02: ARQUITECTURA DEL SISTEMA
 ## Análisis Estructural Profundo, Flujos IPC, Dualidad de Backends y Persistencia
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 03_ESTADO_ACTUAL_COMPONENTES.md
 
@@ -13,7 +13,7 @@ doc_02 = """# PULSAR EVENTIDE — AUDITORÍA 02: ARQUITECTURA DEL SISTEMA
 
 ## 1. VISIÓN GENERAL DE LA ARQUITECTURA
 
-Pulsar Eventide está concebido como una estación de trabajo de escritorio local y privada para la digestión, vectorización y consulta semántica de videos cortos y largos (TikTok, YouTube Shorts, Instagram Reels, enlaces web genéricos).
+Pulsaria está concebido como una estación de trabajo de escritorio local y privada para la digestión, vectorización y consulta semántica de videos cortos y largos (TikTok, YouTube Shorts, Instagram Reels, enlaces web genéricos).
 
 ```
 +---------------------------------------------------------------------------------------+
@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS playlist_items (
 print("02 OK")
 
 # 03
-doc_03 = """# PULSAR EVENTIDE — AUDITORÍA 03: ESTADO ACTUAL DE COMPONENTES
+doc_03 = """# PULSARIA — AUDITORÍA 03: ESTADO ACTUAL DE COMPONENTES
 ## Desglose Exhaustivo de Componentes Frontend, Estado, Props y Flujos
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 04_BUGS_CRITICOS.md
 
@@ -284,7 +284,7 @@ doc_03 = """# PULSAR EVENTIDE — AUDITORÍA 03: ESTADO ACTUAL DE COMPONENTES
 print("03 OK")
 
 # 04
-doc_04 = """# PULSAR EVENTIDE — AUDITORÍA 04: BUGS CRÍTICOS Y DEFECTOS DE CÓDIGO
+doc_04 = """# PULSARIA — AUDITORÍA 04: BUGS CRÍTICOS Y DEFECTOS DE CÓDIGO
 ## Catálogo Detallado de Fallos, Causa Raíz, Severidad y Solución Técnica
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 05_AUDITORIA_UI_UX.md
 
@@ -377,7 +377,7 @@ doc_04 = """# PULSAR EVENTIDE — AUDITORÍA 04: BUGS CRÍTICOS Y DEFECTOS DE C�
 print("04 OK")
 
 # 05
-doc_05 = """# PULSAR EVENTIDE — AUDITORÍA 05: AUDITORÍA DE EXPERIENCIA DE USUARIO (UI/UX)
+doc_05 = """# PULSARIA — AUDITORÍA 05: AUDITORÍA DE EXPERIENCIA DE USUARIO (UI/UX)
 ## Defectos Visuales, Micro-Interacciones, Accesibilidad y Ergonomía
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 06_AUDITORIA_BACKEND_RUST.md
 
@@ -385,7 +385,7 @@ doc_05 = """# PULSAR EVENTIDE — AUDITORÍA 05: AUDITORÍA DE EXPERIENCIA DE US
 
 ## 1. RESUMEN DE HALLAZGOS UI/UX
 
-La interfaz de Pulsar Eventide destaca por su estética AAA (Aurora WebGL, Glassmorphism, paleta HSL seleccionada). Sin embargo, la auditoría técnica ha detectado varias fricciones y fallas de interacción que degradan la experiencia de uso.
+La interfaz de Pulsaria destaca por su estética AAA (Aurora WebGL, Glassmorphism, paleta HSL seleccionada). Sin embargo, la auditoría técnica ha detectado varias fricciones y fallas de interacción que degradan la experiencia de uso.
 
 ---
 
@@ -426,7 +426,7 @@ La interfaz de Pulsar Eventide destaca por su estética AAA (Aurora WebGL, Glass
 print("05 OK")
 
 # 06
-doc_06 = """# PULSAR EVENTIDE — AUDITORÍA 06: BACKEND RUST Y PERSISTENCIA SQLITE
+doc_06 = """# PULSARIA — AUDITORÍA 06: BACKEND RUST Y PERSISTENCIA SQLITE
 ## Análisis de Código Fuente Rust, Mutexes, Comandos IPC y Rendimiento
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 07_AUDITORIA_PIPELINE_PYTHON.md
 
@@ -505,7 +505,7 @@ El archivo registra 23 comandos en `.invoke_handler(tauri::generate_handler![...
 print("06 OK")
 
 # 07
-doc_07 = """# PULSAR EVENTIDE — AUDITORÍA 07: PIPELINE DE WORKERS PYTHON
+doc_07 = """# PULSARIA — AUDITORÍA 07: PIPELINE DE WORKERS PYTHON
 ## Descarga, Extracción de Audio, Transcripción y Protocolo de Comunicación IPC
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 08_AUDITORIA_IA_MODELOS.md
 
@@ -562,7 +562,7 @@ python-workers/
 print("07 OK")
 
 # 08
-doc_08 = """# PULSAR EVENTIDE — AUDITORÍA 08: INTELIGENCIA ARTIFICIAL Y MODELOS
+doc_08 = """# PULSARIA — AUDITORÍA 08: INTELIGENCIA ARTIFICIAL Y MODELOS
 ## Evaluación de Whisper, ONNX MiniLM, Integración con Google Gemini y Estrategia Multimodal
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 09_FEATURES_FALTANTES.md
 
@@ -621,7 +621,7 @@ El proyecto ya cuenta con la dependencia `@google/genai: ^1.17.0` instalada en `
 print("08 OK")
 
 # 09
-doc_09 = """# PULSAR EVENTIDE — AUDITORÍA 09: MATRIZ DE FEATURES FALTANTES
+doc_09 = """# PULSARIA — AUDITORÍA 09: MATRIZ DE FEATURES FALTANTES
 ## Requisitos Funcionales, Módulos Pendientes y Especificación Técnica
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 10_PLAN_IMPLEMENTACION_POR_FASES.md
 
@@ -673,7 +673,7 @@ doc_09 = """# PULSAR EVENTIDE — AUDITORÍA 09: MATRIZ DE FEATURES FALTANTES
 print("09 OK")
 
 # 10
-doc_10 = """# PULSAR EVENTIDE — AUDITORÍA 10: PLAN DE IMPLEMENTACIÓN POR FASES
+doc_10 = """# PULSARIA — AUDITORÍA 10: PLAN DE IMPLEMENTACIÓN POR FASES
 ## Roadmap Técnico de Ejecución Autónoma (Fases 7 a 15)
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 11_CONTRATO_DATOS_TIPOS.md
 
@@ -747,7 +747,7 @@ doc_10 = """# PULSAR EVENTIDE — AUDITORÍA 10: PLAN DE IMPLEMENTACIÓN POR FAS
 print("10 OK")
 
 # 11
-doc_11 = """# PULSAR EVENTIDE — AUDITORÍA 11: CONTRATO DE DATOS Y TIPOS
+doc_11 = """# PULSARIA — AUDITORÍA 11: CONTRATO DE DATOS Y TIPOS
 ## Especificación de Tipos TypeScript, Structs Rust y Protocolo de Comunicación
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: KILOCODE_BASE_DOCUMENT.md
 
@@ -866,7 +866,7 @@ print("11 OK")
 
 # KILOCODE BASE DOCUMENT
 doc_base = """# 🚀 KILOCODE — DOCUMENTO BASE DE DESARROLLO AUTÓNOMO EN BUCLE
-## Pulsar Eventide · Orquestador de Múltiples Agentes y Ejecución Continua
+## Pulsaria · Orquestador de Múltiples Agentes y Ejecución Continua
 ### Ubicación: `C:\\\\Users\\\\danie\\\\Desktop\\\\Pulsaria\\\\docs\\\\audit_2026\\\\KILOCODE_BASE_DOCUMENT.md`
 
 ---

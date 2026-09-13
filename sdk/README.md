@@ -1,10 +1,10 @@
-# Pulsar Eventide SDK
+﻿# Pulsaria SDK
 
-SDK TypeScript para integración externa con el ecosistema de Pulsar Eventide.
+SDK TypeScript para integración externa con el ecosistema de Pulsaria.
 
 ## ¿Qué es?
 
-El SDK proporciona clientes tipados para interactuar con la API REST de Pulsar Eventide, permitiendo que aplicaciones externas (como Julia o servicios personalizados) consulten la biblioteca de videos procesados.
+El SDK proporciona clientes tipados para interactuar con la API REST de Pulsaria, permitiendo que aplicaciones externas (como Julia o servicios personalizados) consulten la biblioteca de videos procesados.
 
 ## Instalación
 
@@ -50,7 +50,7 @@ const results = await client.searchTranscripts('machine learning', {
 
 ## Configuración
 
-El servidor API de Pulsar Eventide escucha en `127.0.0.1:8080` por defecto. El puerto puede configurarse en el código fuente de `src-tauri/src/api/gateway.rs`.
+El servidor API de Pulsaria escucha en `127.0.0.1:8080` por defecto. El puerto puede configurarse en el código fuente de `src-tauri/src/api/gateway.rs`.
 
 ## Notas
 

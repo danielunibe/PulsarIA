@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Pulsar Eventide — Pipeline Comparison Benchmark
+Pulsaria — Pipeline Comparison Benchmark
 Sprint Hardening — Área A2
 
 Compara las 4 estrategias de query del Adaptive Query Planner:

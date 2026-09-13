@@ -1,4 +1,6 @@
 'use client';
+import { useReducedMotion } from 'motion/react';
+import type { CSSProperties } from 'react';
 
 // ============================================================
 // AuroraBackground — Aceternity UI Aurora Style (colores TikTok)
@@ -16,11 +18,20 @@
  * Colores: cian (#25f4ee), magenta (#fe2c55), violeta (#8b5cf6)
  * sobre fondo oscuro (#06080f).
  */
-export function AuroraBackground() {
+interface AuroraBackgroundProps {
+    /** Render inside a bounded surface such as the first-run overlay. */
+    contained?: boolean;
+    className?: string;
+    style?: CSSProperties;
+}
+
+export function AuroraBackground({ contained = false, className = '', style }: AuroraBackgroundProps = {}) {
+    const reducedMotion = useReducedMotion();
+
     return (
         <div
-            className="fixed inset-0 w-full h-full pointer-events-none overflow-hidden"
-            style={{ zIndex: -10, backgroundColor: '#06080f' }}
+            className={`${contained ? 'absolute' : 'fixed'} inset-0 w-full h-full pointer-events-none overflow-hidden ${className}`}
+            style={{ zIndex: contained ? 0 : -10, backgroundColor: '#06080f', ...style }}
             aria-hidden="true"
         >
             <div
@@ -32,7 +43,7 @@ export function AuroraBackground() {
                         `radial-gradient(ellipse 55% 45% at 50% 10%, rgba(139,92,246,0.18) 0%, transparent 60%)`,
                     ].join(', '),
                     backgroundSize: '300% 300%',
-                    animation: 'aurora 18s ease-in-out infinite alternate',
+                    animation: reducedMotion ? 'none' : 'aurora 18s ease-in-out infinite alternate',
                     willChange: 'background-position',
                     transform: 'translateZ(0)',
                 }}
@@ -47,7 +58,7 @@ export function AuroraBackground() {
                         `radial-gradient(ellipse 60% 45% at 22% 75%, rgba(254,44,85,0.28) 0%, transparent 55%)`,
                     ].join(', '),
                     backgroundSize: '260% 260%',
-                    animation: 'aurora 24s ease-in-out infinite alternate-reverse',
+                    animation: reducedMotion ? 'none' : 'aurora 24s ease-in-out infinite alternate-reverse',
                     mixBlendMode: 'screen',
                     opacity: 0.9,
                     willChange: 'background-position',

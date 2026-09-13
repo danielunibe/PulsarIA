@@ -1,11 +1,11 @@
 /// Motor de inferencia de embeddings ONNX para búsqueda semántica.
-/// 
+///
 /// Gestiona el modelo `all-MiniLM-L6-v2` exportado a ONNX y su tokenizer asociado.
 /// Produce vectores densos de 384 dimensiones normalizados L2, listos para indexación
 /// HNSW y búsqueda por similitud coseno.
-/// 
+///
 /// # Uso
-/// 
+///
 /// ```ignore
 /// let mut manager = ONNXModelManager::new(
 /// &PathBuf::from("assets/models/all-MiniLM-L6-v2/model.onnx"),
@@ -14,13 +14,31 @@
 /// let embedding: Vec<f32> = manager.generate_embedding("text to embed")?;
 /// assert_eq!(embedding.len(), 384);
 /// ```
-
 use ort::{
     session::{builder::GraphOptimizationLevel, Session},
     value::Value,
 };
 use std::path::PathBuf;
 use tokenizers::Tokenizer;
+
+const MODEL_MAX_SEQUENCE_LENGTH: usize = 512;
+
+fn truncate_sequence<T: Copy>(values: &[T], max_length: usize) -> Vec<T> {
+    if values.len() <= max_length {
+        return values.to_vec();
+    }
+
+    if max_length <= 1 {
+        return values[..max_length].to_vec();
+    }
+
+    // Keep both special-token boundaries when the tokenizer has added them.
+    // This avoids sending arbitrarily long transcripts to a fixed-position
+    // BERT graph while preserving the final separator token.
+    let mut truncated = values[..max_length].to_vec();
+    truncated[max_length - 1] = values[values.len() - 1];
+    truncated
+}
 
 /// Gestor del modelo ONNX de embeddings (all-MiniLM-L6-v2, 384d).
 ///
@@ -92,18 +110,16 @@ impl ONNXModelManager {
             .encode(text, true)
             .map_err(|e| format!("Failed to tokenize: {}", e))?;
 
-        let input_ids = encoding
-            .get_ids()
+        let input_ids = truncate_sequence(encoding.get_ids(), MODEL_MAX_SEQUENCE_LENGTH)
             .iter()
             .map(|&x| x as i64)
             .collect::<Vec<_>>();
-        let attention_mask = encoding
-            .get_attention_mask()
-            .iter()
-            .map(|&x| x as i64)
-            .collect::<Vec<_>>();
-        let token_type_ids = encoding
-            .get_type_ids()
+        let attention_mask =
+            truncate_sequence(encoding.get_attention_mask(), MODEL_MAX_SEQUENCE_LENGTH)
+                .iter()
+                .map(|&x| x as i64)
+                .collect::<Vec<_>>();
+        let token_type_ids = truncate_sequence(encoding.get_type_ids(), MODEL_MAX_SEQUENCE_LENGTH)
             .iter()
             .map(|&x| x as i64)
             .collect::<Vec<_>>();
@@ -145,8 +161,9 @@ impl ONNXModelManager {
             }
         }
 
-        for j in 0..384 {
-            embedding[j] /= mask_sum.max(1e-9);
+        let divisor = mask_sum.max(1e-9);
+        for value in &mut embedding {
+            *value /= divisor;
         }
 
         // 6. L2 Normalization

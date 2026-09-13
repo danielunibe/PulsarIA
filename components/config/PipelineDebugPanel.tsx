@@ -31,8 +31,8 @@ export default function PipelineDebugPanel({ actions }: Props) {
     try {
       const res = await actions.debugSearch(activeQuery);
       setDebugResult(res);
-    } catch (err: any) {
-      setError(err?.toString() || "Error en ejecucion de pipeline");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSearching(false);
     }

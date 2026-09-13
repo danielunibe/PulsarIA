@@ -1,4 +1,4 @@
-# PULSAR EVENTIDE — AUDITORÍA 02: ARQUITECTURA DEL SISTEMA
+﻿# PULSARIA — AUDITORÍA 02: ARQUITECTURA DEL SISTEMA
 ## Análisis Estructural Profundo, Flujos IPC, Dualidad de Backends y Persistencia
 ### Referencia: docs/audit_2026/00_INDICE_MAESTRO.md | Siguiente: 03_ESTADO_ACTUAL_COMPONENTES.md
 
@@ -6,7 +6,7 @@
 
 ## 1. VISIÓN GENERAL DE LA ARQUITECTURA
 
-Pulsar Eventide está concebido como una estación de trabajo de escritorio local y privada para la digestión, vectorización y consulta semántica de videos cortos y largos (TikTok, YouTube Shorts, Instagram Reels, enlaces web genéricos).
+Pulsaria está concebido como una estación de trabajo de escritorio local y privada para la digestión, vectorización y consulta semántica de videos cortos y largos (TikTok, YouTube Shorts, Instagram Reels, enlaces web genéricos).
 
 ```
 +---------------------------------------------------------------------------------------+

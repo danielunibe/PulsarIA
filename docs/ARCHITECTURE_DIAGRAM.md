@@ -1,4 +1,4 @@
-# 🌌 Pulsar Eventide — Diagrama de Arquitectura
+# 🌌 Pulsaria — Diagrama de Arquitectura
 
 ## Vista General del Sistema
 

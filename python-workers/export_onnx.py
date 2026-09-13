@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import warnings
+from pathlib import Path
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -27,4 +28,11 @@ def export_model(model_name: str, output_dir: str):
     print("\nAssets ready. You need 'model.onnx', 'tokenizer.json' and 'vocab.txt'.")
 
 if __name__ == "__main__":
-    export_model("sentence-transformers/all-MiniLM-L6-v2", "../src-tauri/assets/models/all-MiniLM-L6-v2")
+    runtime_root = Path(os.environ.get(
+        "PULSAR_RUNTIME_ROOT",
+        Path(__file__).resolve().parents[1] / "src-tauri" / "resources",
+    )).expanduser()
+    export_model(
+        "sentence-transformers/all-MiniLM-L6-v2",
+        str(runtime_root / "assets" / "models" / "all-MiniLM-L6-v2"),
+    )

@@ -1,6 +1,6 @@
-// ============================================================
-// PulsarSemanticLayer — UNIB Adapter
-// Traduce entidades de Pulsar a entidades semánticas UNIB.
+ï»¿// ============================================================
+// PulsarSemanticLayer ï¿½ UNIB Adapter
+// Traduce entidades de Pulsar a entidades semï¿½nticas UNIB.
 // ============================================================
 
 import {
@@ -83,7 +83,7 @@ export interface PulsarSource {
 export class UnibAdapter {
   private projectId: string;
 
-  constructor(projectId: string = 'pulsar-eventide') {
+  constructor(projectId: string = 'pulsaria') {
     this.projectId = projectId;
   }
 
@@ -152,7 +152,7 @@ export class UnibAdapter {
       metadata: {
         path,
         mimeType: 'video/mp4',
-        size: '0', // Se actualiza externamente si está disponible
+        size: '0', // Se actualiza externamente si estï¿½ disponible
         checksum,
         storageProvider: 'local',
       },

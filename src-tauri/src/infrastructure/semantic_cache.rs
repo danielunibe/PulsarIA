@@ -45,9 +45,7 @@ impl SemanticCache {
 
     #[instrument(skip(self, query_embedding))]
     pub async fn lookup(&self, query_embedding: &[f32], limit: usize) -> Option<Vec<SearchResult>> {
-        if self.client.is_none() {
-            return None;
-        }
+        self.client.as_ref()?;
 
         let _start_time = std::time::Instant::now();
         let key = self.generate_cache_key(query_embedding, limit);

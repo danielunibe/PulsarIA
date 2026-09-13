@@ -1,4 +1,4 @@
-# Pulsar Eventide — Scripts de mantenimiento
+﻿# Pulsaria — Scripts de mantenimiento
 
 Scripts de utilidad para mantenimiento, benchmarks y operaciones administrativas.
 

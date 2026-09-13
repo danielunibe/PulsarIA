@@ -112,6 +112,12 @@ impl BM25Engine {
     }
 }
 
+impl Default for BM25Engine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Fusión de resultados BM25 + HNSW usando Reciprocal Rank Fusion (RRF)
 /// RRF es el estándar de facto para fusión de rankings heterogéneos.
 #[instrument(skip(bm25_hits, vector_hits))]

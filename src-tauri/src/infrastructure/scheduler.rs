@@ -1,3 +1,4 @@
+use crate::application::queue_service::QueueService;
 use crate::application::search_service::SearchService;
 use crate::domain::ports::JobRepository;
 use metrics::{counter, histogram};
@@ -8,6 +9,7 @@ use tracing::{error, info};
 pub async fn start_maintenance_scheduler(
     search_service: Arc<SearchService>,
     job_repo: Arc<dyn JobRepository>,
+    queue_service: Arc<QueueService>,
 ) -> Result<(), String> {
     let sched = JobScheduler::new()
         .await
@@ -41,26 +43,26 @@ pub async fn start_maintenance_scheduler(
 
     // 2. Limpieza de jobs huérfanos (cada 30 min)
     let stale_job_repo = job_repo.clone();
+    let stale_job_queue = queue_service.clone();
     sched
         .add(
             Job::new_async("0 15/30 * * * *", move |_uuid, _l| {
                 let repo = stale_job_repo.clone();
+                let queue = stale_job_queue.clone();
                 Box::pin(async move {
                     let start = std::time::Instant::now();
                     info!("Ejecutando tarea programada: cleanup_orphan_jobs");
                     counter!("scheduler_jobs_total").increment(1);
 
+                    // Jobs waiting in the bounded queue and jobs sleeping in
+                    // retry backoff are active claims even when their SQLite
+                    // status has not changed recently. Read the claims before
+                    // locking SQLite and exclude them from stale cleanup.
+                    let active_job_ids = queue.active_job_ids().await;
                     match repo.get_connection() {
                         Ok(connection) => match connection.lock() {
                             Ok(connection) => {
-                                match connection.execute(
-                                    "UPDATE jobs
-                                     SET status = 'error', progress = 0,
-                                         error_message = 'Job abandoned after exceeding the processing timeout'
-                                     WHERE status IN ('queued', 'processing', 'downloading', 'transcribing', 'indexing')
-                                       AND datetime(created_at) < datetime('now', '-2 hours')",
-                                    [],
-                                ) {
+                                match crate::db::mark_stale_jobs(&connection, &active_job_ids) {
                                     Ok(updated) if updated > 0 => {
                                         info!("Marked {} stale jobs as failed", updated);
                                     }
@@ -77,7 +79,10 @@ pub async fn start_maintenance_scheduler(
                             }
                         },
                         Err(error) => {
-                            error!("Could not open repository during stale job cleanup: {}", error);
+                            error!(
+                                "Could not open repository during stale job cleanup: {}",
+                                error
+                            );
                             counter!("scheduler_job_failures").increment(1);
                         }
                     }

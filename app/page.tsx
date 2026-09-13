@@ -15,14 +15,23 @@ import { useScrollParallax } from '@/hooks/useScrollParallax';
 import { FaMagnifyingGlass, FaArrowLeft, FaBrain } from 'react-icons/fa6';
 
 import { useSettings } from '@/lib/settings-context';
+import { useI18n } from '@/lib/i18n';
 import { AuroraBackground } from '@/components/AuroraBackground';
-import { generateChatResponse } from '@/lib/gemini';
-import { MOCK_ACTIVE_VIDEOS } from '@/lib/mock-data';
-import { useJobs } from '@/hooks/use-jobs';
-import { useProcessingSettings } from '@/hooks/use-processing-settings';
+import { generateChatResponse } from '@/lib/local-llm';
+import { generateGeminiChatResponse } from '@/lib/gemini';
+import { useJobs, type JobRecord, isCompletedJob } from '@/hooks/use-jobs';
+import { isTauriRuntime, useProcessingSettings } from '@/hooks/use-processing-settings';
 import { ProcessingSetupModal } from '@/components/ProcessingSetupModal';
+import { CinemaMode } from '@/components/CinemaMode';
 import type { PageConfig, SortKey } from '@/components/PagePanel';
-import type { VideoData } from '@/types';
+import type { CinemaVideo, VideoData } from '@/types';
+
+type SearchVideoDetails = VideoData & {
+    sourceState?: 'local' | 'online' | 'unavailable';
+    favorite?: boolean;
+    pinned?: boolean;
+    protected?: boolean;
+};
 
 const ColorBends = dynamic(
     () => import('@/components/ColorBends').then((mod) => mod.ColorBends),
@@ -74,25 +83,48 @@ function loadPageConfig(): PageConfig {
 export default function Page() {
 
     const { settings } = useSettings();
+    const { t } = useI18n();
     const processingSetup = useProcessingSettings();
     const activeTheme = settings.theme || 'carbon';
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const settingsPanelRef = useRef<HTMLDivElement>(null);
     const [activeVideoId, setActiveVideoId] = useState<number | null>(null);
-    const { jobs, pending, globalProgress, enqueueLinks, retryJob, retryPending } = useJobs();
+    const [cinemaOpen, setCinemaOpen] = useState(false);
+    const [cinemaVideos, setCinemaVideos] = useState<CinemaVideo[]>([]);
+    const {
+        jobs,
+        pending,
+        globalProgress,
+        enqueueLinks,
+        retryJob,
+        retryPending,
+        loading: jobsLoading,
+        ready: jobsReady,
+        error: jobsError,
+        refresh: refreshJobs,
+    } = useJobs();
     const [basePath, setBasePath] = useState('');
 
-    const completedJobs = jobs.filter((j: any) =>
-        ['complete', 'completed', 'done'].includes(String(j.status).toLowerCase())
-        && (Boolean(j.video_path) || j.keep_status === 'online')
-    );
+    const completedJobs = jobs.filter((j: JobRecord) => {
+        if (!isCompletedJob(j)) return false;
+        // A completed job remains a library item when its large media has
+        // been released, as long as the durable knowledge/ficha survives.
+        return Boolean(
+            j.video_path
+            || j.keep_status === 'online'
+            || j.source_state === 'online'
+            || j.source_state === 'unavailable'
+            || j.transcript_path
+            || j.visual_analysis
+            || j.instructional_guide
+            || j.thumbnail
+        );
+    });
     // Failed/queued records are not library videos. Counting them here made
     // the header say "1 TikTok" while the gallery had no playable content.
-    const jobCount = completedJobs.length > 0
+    const jobCount = jobsReady
         ? completedJobs.length
-        : jobs.length === 0
-            ? MOCK_ACTIVE_VIDEOS.length
-            : 0;
-    const jobsLoaded = jobs.length > 0 || MOCK_ACTIVE_VIDEOS.length > 0;
+        : 0;
 
         const [searchResults, setSearchResults] = useState<SemanticSearchResult[] | null>(null);
     const [searchMode, setSearchMode] = useState<SearchMode>('literal');
@@ -100,6 +132,10 @@ export default function Page() {
     const [searchError, setSearchError] = useState<string | null>(null);
     const [aiAnswer, setAiAnswer] = useState<string | null>(null);
     const [aiError, setAiError] = useState<string | null>(null);
+    const [lastSearchQuery, setLastSearchQuery] = useState('');
+    const [geminiAnswer, setGeminiAnswer] = useState<string | null>(null);
+    const [geminiError, setGeminiError] = useState<string | null>(null);
+    const [geminiLoading, setGeminiLoading] = useState(false);
 
     const [isSearching, setIsSearching] = useState(false);
 
@@ -117,6 +153,12 @@ export default function Page() {
         }
     }, [pageConfig]);
 
+    useEffect(() => {
+        const panel = settingsPanelRef.current;
+        if (!panel) return;
+        (panel as HTMLDivElement & { inert: boolean }).inert = !settingsOpen;
+    }, [settingsOpen]);
+
         useEffect(() => {
         (async () => {
             try {
@@ -129,18 +171,24 @@ export default function Page() {
     }, []);
 
     useEffect(() => {
+        let mounted = true;
         let unlisten: (() => void) | undefined;
         import('@tauri-apps/api/event').then(({ listen }) => {
-            try {
-                listen('job_completed_notify', (event: any) => {
+            if (!mounted) return;
+            return listen<{ title?: string; job_id?: number; jobId?: number }>('job_completed_notify', (event) => {
                     toast.success('Video procesado', {
-                        description: event.payload?.title || `Job #${event.payload?.job_id}`,
+                        description: event.payload?.title || `Job #${event.payload?.job_id ?? event.payload?.jobId ?? 'desconocido'}`,
                         duration: 5000,
                     });
-                }).then((fn) => { unlisten = fn; }).catch(() => {});
-            } catch {}
+            }).then((fn) => {
+                if (mounted) unlisten = fn;
+                else fn();
+            }).catch(() => {});
         }).catch(() => {});
-        return () => { unlisten?.(); };
+        return () => {
+            mounted = false;
+            unlisten?.();
+        };
     }, []);
 
     const handlePlayStart = useCallback((id: number) => {
@@ -164,14 +212,35 @@ export default function Page() {
     const handlePlaylistSelect = useCallback((id: number | null) => {
         setSelectedPlaylistId(id);
         setActiveVideoId(null);
+        setCinemaOpen(false);
+        setCinemaVideos([]);
         setSearchResults(null);
         setSearchError(null);
         setAiAnswer(null);
         setAiError(null);
+        setLastSearchQuery('');
+        setGeminiAnswer(null);
+        setGeminiError(null);
+        setGeminiLoading(false);
     }, []);
 
+    const isSearchView = isSearching || searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null || geminiAnswer !== null || geminiError !== null;
+    const canOpenCinema = !isSearchView && cinemaVideos.length > 0;
+    const handleOpenCinema = useCallback(() => {
+        if (!canOpenCinema) {
+            toast.info(t('noVideosCinema'), {
+                description: `${t('clearSearch')} o ${t('processContent').toLowerCase()}.`,
+                duration: 3000,
+            });
+            return;
+        }
+        setSettingsOpen(false);
+        setActiveVideoId(null);
+        setCinemaOpen(true);
+    }, [canOpenCinema, t]);
+
     const applyAiResponse = (answer: string) => {
-        if (answer.startsWith('No fue posible consultar Gemini:')) {
+        if (answer.startsWith('No fue posible consultar el modelo local:')) {
             setAiAnswer(null);
             setAiError(answer);
             return;
@@ -187,6 +256,9 @@ export default function Page() {
             setSearchResults(null);
             setAiAnswer(null);
             setAiError(null);
+            setLastSearchQuery('');
+            setGeminiAnswer(null);
+            setGeminiError(null);
             setIsSearching(false);
             return;
         }
@@ -195,6 +267,9 @@ export default function Page() {
         setSearchError(null);
         setAiAnswer(null);
         setAiError(null);
+        setLastSearchQuery(normalizedQuery);
+        setGeminiAnswer(null);
+        setGeminiError(null);
 
         try {
             let results: SemanticSearchResult[];
@@ -222,7 +297,7 @@ export default function Page() {
             setSearchResults(results);
             setSearchModeUsed(requestedMode);
 
-            // Synthesize intelligent response with Gemini RAG
+            // Synthesize intelligent response with the local model
 
             if (results && results.length > 0) {
                 const context = results.slice(0, 5).map(r => `Título: ${r.title || 'Video'}\nContenido del fragmento: ${r.matched_text}`);
@@ -258,6 +333,24 @@ export default function Page() {
 
     };
 
+    const handleGeminiSynthesis = useCallback(async () => {
+        if (!lastSearchQuery || geminiLoading) return;
+        setGeminiLoading(true);
+        setGeminiAnswer(null);
+        setGeminiError(null);
+        try {
+            const context = (searchResults ?? []).slice(0, 5).map((result) => (
+                `Título: ${result.title || `Video #${result.video_id}`}\nContenido del fragmento: ${result.matched_text}`
+            ));
+            const answer = await generateGeminiChatResponse(lastSearchQuery, context);
+            setGeminiAnswer(answer);
+        } catch (error) {
+            setGeminiError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setGeminiLoading(false);
+        }
+    }, [geminiLoading, lastSearchQuery, searchResults]);
+
     const handleClearSearch = useCallback(() => {
         searchRequestRef.current += 1;
                 setSearchResults(null);
@@ -265,6 +358,10 @@ export default function Page() {
         setSearchError(null);
         setAiAnswer(null);
         setAiError(null);
+        setLastSearchQuery('');
+        setGeminiAnswer(null);
+        setGeminiError(null);
+        setGeminiLoading(false);
         setIsSearching(false);
         setActiveVideoId(null);
     }, []);
@@ -277,10 +374,21 @@ export default function Page() {
             });
             return;
         }
+        if (isTauriRuntime()) {
+            void import('@tauri-apps/api/core')
+                .then(({ invoke }) => invoke('record_media_access', {
+                    jobId: result.video_id,
+                    accessKind: 'search',
+                }))
+                .catch(() => {
+                    // Search navigation remains usable if telemetry is
+                    // unavailable during a browser/native transition.
+                });
+        }
         setActiveVideoId(result.video_id);
     }, [jobs]);
 
-    const [resolvedSearchVideo, setResolvedSearchVideo] = useState<VideoData | null>(null);
+    const [resolvedSearchVideo, setResolvedSearchVideo] = useState<SearchVideoDetails | null>(null);
 
     async function toAssetUrl(localPath: string | undefined | null): Promise<string | undefined> {
         if (!localPath) return undefined;
@@ -302,7 +410,7 @@ export default function Page() {
                 if (!cancelled) setResolvedSearchVideo(null);
                 return;
             }
-            const thumb = await toAssetUrl(job.thumbnail) || result.thumbnail || '';
+            const thumb = await toAssetUrl(job.poster_path || job.thumbnail) || result.thumbnail || '';
             const videoSrc = await toAssetUrl(job.video_path) || '';
             if (!cancelled) {
                 setResolvedSearchVideo({
@@ -316,6 +424,16 @@ export default function Page() {
                     originalUrl: job.url,
                     visualAnalysis: job.visual_analysis,
                     instructionalGuide: job.instructional_guide,
+                    sourceState: videoSrc
+                        ? 'local'
+                        : job.source_state === 'unavailable'
+                            ? 'unavailable'
+                            : job.source_state === 'online' || job.keep_status === 'online'
+                                ? 'online'
+                                : 'unavailable',
+                    favorite: job.favorite,
+                    pinned: job.pinned,
+                    protected: job.protected,
                 });
             }
         }
@@ -328,8 +446,11 @@ export default function Page() {
             className="flex h-screen w-full flex-col font-sans overflow-hidden relative"
             style={{ 
                 color: 'var(--text-strong)',
-                minWidth: '1000px',
-                minHeight: '750px'
+                // Keep the composition usable at the native Tauri minimum;
+                // smaller viewports can scroll inside the panels instead of
+                // forcing a desktop-only 1000x750 surface.
+                minWidth: '860px',
+                minHeight: '640px'
             }}
         >
             {/* Background Theme Renderer */}
@@ -408,7 +529,7 @@ export default function Page() {
                 </div>
             )}
 
-            <WindowTitlebar />
+            {!cinemaOpen && <WindowTitlebar />}
 
             <div className="flex min-h-0 flex-1 w-full">
                 {/* Sidebar Exclusivo Dashboard */}
@@ -419,6 +540,8 @@ export default function Page() {
                     onSubmitLinks={enqueueLinks}
                     onRetryJob={retryJob}
                     onRetryPending={retryPending}
+                    onPlaylistSelect={handlePlaylistSelect}
+                    selectedPlaylistId={selectedPlaylistId}
                 />
 
                 {/* Main Content Area */}
@@ -426,7 +549,7 @@ export default function Page() {
                 <Header
                     onOpenSettings={() => setSettingsOpen(true)}
                     activeCount={jobCount}
-                    isLoading={!jobsLoaded}
+                    isLoading={jobsLoading}
                     onSearchSubmit={handleSearch}
                     onSearchClear={handleClearSearch}
                     pageConfig={pageConfig}
@@ -435,7 +558,22 @@ export default function Page() {
                     sortKey={pageConfig.sortKey}
                     searchMode={searchMode}
                     onSearchModeChange={setSearchMode}
+                    onOpenCinema={handleOpenCinema}
+                    canOpenCinema={canOpenCinema}
                 />
+
+                {!jobsLoading && !jobsReady && (
+                    <div role="alert" className="mx-8 mt-2 flex items-center justify-between gap-4 rounded-2xl border border-[#fe2c55]/25 bg-[#fe2c55]/[0.08] px-4 py-3 text-xs text-white/70">
+                        <span>{jobsError || 'La biblioteca local no está disponible en este momento.'}</span>
+                        <button
+                            type="button"
+                            onClick={() => void refreshJobs().catch(() => {})}
+                            className="shrink-0 font-bold uppercase tracking-wider text-[#25f4ee] hover:text-white"
+                        >
+                            Reintentar
+                        </button>
+                    </div>
+                )}
 
                 {isSearching ? (
                     <div className="w-full h-full flex items-center justify-center p-8">
@@ -443,7 +581,7 @@ export default function Page() {
                             <span className="w-6 h-6 rounded-full border-2 border-[#8a5cff] border-t-transparent animate-spin" />
                             <div className="flex flex-col">
                                 <span className="text-white font-black text-sm tracking-wider uppercase">Búsqueda Inteligente IA</span>
-                                <span className="text-white/40 text-xs font-mono">Inferencia semántica ONNX + Síntesis Gemini RAG...</span>
+                                <span className="text-white/40 text-xs font-mono">Inferencia semántica ONNX + síntesis LLM local...</span>
                             </div>
                         </div>
                     </div>
@@ -451,11 +589,11 @@ export default function Page() {
 
                     <div className="px-8 py-4 flex flex-col gap-5">
                         {/* Search View Header */}
-<div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <div className="h-6 w-1 rounded-full bg-gradient-to-b from-[#fe2c55] via-[#8a5cff] to-[#25f4ee]"></div>
                                 <h2 className="text-xl font-bold text-white tracking-wide flex items-center gap-2">
-                                    <span>Resultados de búsqueda</span>
+                                    <span>{t('search')}</span>
                                 </h2>
                             </div>
                                                         <button
@@ -466,11 +604,34 @@ export default function Page() {
 
                             >
                                 <FaArrowLeft size={11} />
-                                <span>Volver a la Biblioteca</span>
+                                <span>{t('library')}</span>
                             </button>
                         </div>
 
-                                                {searchError && (
+                        {searchResults !== null && (
+                            <section
+                                aria-label="Síntesis opcional con Gemini"
+                                className="flex flex-col gap-3 rounded-[20px] border border-[#4285f4]/25 bg-[#4285f4]/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                                <div className="min-w-0">
+                                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#8ab4f8]">Gemini opcional</p>
+                                    <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-white/65">
+                                        Solo se ejecuta cuando lo solicitas. Si lo activas, los fragmentos seleccionados de esta búsqueda se envían a Google para generar la síntesis y no se guardan como parte de la operación.
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => void handleGeminiSynthesis()}
+                                    disabled={!isTauriRuntime() || geminiLoading || !lastSearchQuery}
+                                    title={isTauriRuntime() ? 'Enviar los fragmentos seleccionados a Gemini' : 'Gemini requiere la aplicación de escritorio'}
+                                    className="shrink-0 rounded-xl border border-[#4285f4]/40 bg-[#4285f4]/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-[#b9d4ff] transition-colors hover:bg-[#4285f4]/25 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                    {geminiLoading ? 'Generando…' : isTauriRuntime() ? 'Sintetizar con Gemini' : 'Solo app de escritorio'}
+                                </button>
+                            </section>
+                        )}
+
+                                                 {searchError && (
                             <div role="alert" className="p-4 rounded-[20px] border border-[#fe2c55]/30 bg-[#fe2c55]/10 text-sm text-[#fe2c55]">
                                 No se pudo completar la búsqueda: {searchError}
                             </div>
@@ -480,6 +641,27 @@ export default function Page() {
                         {aiError && (
                             <div role="alert" className="p-4 rounded-[20px] border border-[#fe2c55]/30 bg-[#fe2c55]/10 text-sm text-[#fe2c55]">
                                 La síntesis IA no está disponible: {aiError}
+                            </div>
+                        )}
+                        {geminiError && (
+                            <div role="alert" className="p-4 rounded-[20px] border border-[#4285f4]/30 bg-[#4285f4]/10 text-sm text-[#b9d4ff]">
+                                No se pudo completar la síntesis opcional de Gemini: {geminiError}
+                            </div>
+                        )}
+                        {geminiAnswer && (
+                            <div
+                                className="rounded-[20px] border border-[#4285f4]/30 bg-[#101a2b]/85 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.35)]"
+                            >
+                                <div className="flex items-center gap-2.5">
+                                    <div className="flex h-7 w-7 items-center justify-center rounded-[10px] border border-[#4285f4]/40 bg-[#4285f4]/20 text-[#8ab4f8]">
+                                        <FaBrain size={14} />
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-xs font-black uppercase tracking-wider text-white">Síntesis Gemini solicitada</span>
+                                        <span className="text-[9px] font-mono font-bold text-[#8ab4f8]">Fragmentos enviados bajo acción explícita · no persistidos por Pulsaria</span>
+                                    </div>
+                                </div>
+                                <p className="mt-3 pl-1 text-xs font-medium leading-relaxed text-white/90 sm:text-[13px]">{geminiAnswer}</p>
                             </div>
                         )}
                         {aiAnswer && (
@@ -502,7 +684,7 @@ export default function Page() {
                                             Síntesis de Inteligencia Artificial
                                         </span>
                                         <span className="text-[9px] text-[#8a5cff] font-mono font-bold">
-                                            Gemini RAG • Asistente de Investigación
+                                            LLM local · los fragmentos no salen del equipo
                                         </span>
                                     </div>
                                 </div>
@@ -610,12 +792,23 @@ export default function Page() {
                             keepStatusFilter={pageConfig.keepStatusFilter}
                             platformFilter={pageConfig.platformFilter}
                             jobs={jobs}
+                            jobsLoading={jobsLoading}
+                            jobsReady={jobsReady}
+                            onVisibleVideosChange={setCinemaVideos}
                         />
                     </>
                 )}
 
                 </main>
             </div>
+
+            {cinemaOpen && (
+                <CinemaMode
+                    videos={cinemaVideos}
+                    initialIndex={0}
+                    onClose={() => setCinemaOpen(false)}
+                />
+            )}
 
             {/* Settings Modal Backdrop & Panel */}
             <div
@@ -631,7 +824,9 @@ export default function Page() {
             />
 
             <div
+                ref={settingsPanelRef}
                 className="fixed right-0 bottom-0 top-10 w-[400px] xl:w-[440px] overflow-hidden transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                aria-hidden={!settingsOpen}
                 style={{
                     zIndex: 50,
                     top: '40px',
@@ -644,13 +839,22 @@ export default function Page() {
                             <SettingsPanel onClose={() => setSettingsOpen(false)} jobs={jobs} onPlaylistSelect={handlePlaylistSelect} />
             </div>
 
-            {processingSetup.needsSetup && processingSetup.hardware && processingSetup.processing && (
+            {processingSetup.showSetup && (
                 <ProcessingSetupModal
                     hardware={processingSetup.hardware}
                     processing={processingSetup.processing}
-                    onSave={async (quality) => {
-                        await processingSetup.save(quality, settings.videoFit);
+                    modelStatus={processingSetup.modelStatus}
+                    loading={processingSetup.loading}
+                    initializationError={processingSetup.initializationError}
+                    preparationError={processingSetup.preparationError}
+                    onSave={async (quality, setup) => {
+                        return processingSetup.save(quality, settings.videoFit, setup);
                     }}
+                    onCancelPreparation={async () => {
+                        await processingSetup.cancelPreparation();
+                    }}
+                    onRetry={processingSetup.refresh}
+                    onDismiss={processingSetup.dismissSetup}
                 />
             )}
         </div>

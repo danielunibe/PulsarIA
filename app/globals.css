@@ -31,9 +31,8 @@
   }
 }
 
-
 /* ================================================================
-   DESIGN SYSTEM — Pulsar Eventide
+   DESIGN SYSTEM — Pulsaria
    Fuente única de verdad para tokens de diseño.
    ================================================================ */
 :root {
@@ -216,4 +215,432 @@ textarea {
 .app-no-drag {
   -webkit-app-region: no-drag;
   app-region: no-drag;
+}
+
+/* ================================================================
+   MODO CINEMA — Cover Flow inmersivo
+   ================================================================ */
+.cinema-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  isolation: isolate;
+  color: rgba(255, 255, 255, 0.94);
+  background: #000;
+  perspective: 1400px;
+  user-select: none;
+  outline: none;
+}
+
+.cinema-aura,
+.cinema-blackout {
+  position: absolute;
+  inset: -12%;
+  pointer-events: none;
+}
+
+.cinema-aura {
+  z-index: -2;
+  opacity: 0;
+  transform: scale(1.12);
+  background:
+    radial-gradient(ellipse at 22% 48%, rgba(254, 44, 85, 0.52), transparent 34%),
+    radial-gradient(ellipse at 78% 52%, rgba(37, 244, 238, 0.42), transparent 34%),
+    radial-gradient(ellipse at 50% 45%, rgba(138, 92, 255, 0.34), transparent 48%);
+  filter: blur(30px) saturate(2.6) contrast(1.25);
+  transition: opacity 720ms ease, transform 1000ms cubic-bezier(0.22, 1, 0.36, 1), filter 720ms ease;
+}
+
+.cinema-blackout {
+  z-index: -1;
+  background: #000;
+  opacity: 0;
+  transition: opacity 720ms ease;
+}
+
+.cinema-entering .cinema-aura {
+  opacity: 0.94;
+  animation: cinema-aura-pulse 720ms ease-in-out both;
+}
+
+.cinema-entering .cinema-blackout {
+  opacity: 0.28;
+}
+
+.cinema-active .cinema-aura {
+  opacity: 0.12;
+  transform: scale(1);
+  filter: blur(46px) saturate(1.5) contrast(1.05);
+}
+
+.cinema-active .cinema-blackout,
+.cinema-exiting .cinema-blackout {
+  opacity: 0.92;
+}
+
+.cinema-exiting .cinema-aura {
+  opacity: 0.55;
+  transform: scale(1.08);
+  filter: blur(36px) saturate(2.2) contrast(1.2);
+}
+
+.cinema-header,
+.cinema-footer {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 26px clamp(24px, 5vw, 72px);
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 420ms ease 180ms, transform 420ms ease 180ms;
+}
+
+.cinema-footer {
+  padding-top: 14px;
+  padding-bottom: 28px;
+  transform: translateY(10px);
+}
+
+.cinema-active .cinema-header,
+.cinema-active .cinema-footer {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.cinema-brand,
+.cinema-close,
+.cinema-controls,
+.cinema-progress {
+  display: flex;
+  align-items: center;
+}
+
+.cinema-brand {
+  gap: 9px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+}
+
+.cinema-brand em {
+  color: rgba(255, 255, 255, 0.36);
+  font-style: normal;
+}
+
+.cinema-brand-mark {
+  display: inline-flex;
+  width: 25px;
+  height: 25px;
+  align-items: center;
+  justify-content: center;
+  color: #25f4ee;
+  border: 1px solid rgba(37, 244, 238, 0.35);
+  border-radius: 8px;
+  box-shadow: 3px 0 0 rgba(254, 44, 85, 0.25), 0 0 16px rgba(37, 244, 238, 0.16);
+}
+
+.cinema-close,
+.cinema-controls button,
+.cinema-nav {
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  cursor: pointer;
+  transition: color 180ms ease, border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.cinema-close {
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.cinema-close:hover,
+.cinema-controls button:hover,
+.cinema-nav:hover:not(:disabled) {
+  color: #fff;
+  border-color: rgba(37, 244, 238, 0.55);
+  background: rgba(37, 244, 238, 0.1);
+  transform: translateY(-1px);
+}
+
+.cinema-stage {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+
+.cinema-coverflow {
+  position: relative;
+  display: flex;
+  width: min(100%, 1160px);
+  height: min(74vh, 720px);
+  align-items: center;
+  justify-content: center;
+  transform-style: preserve-3d;
+  touch-action: pan-y;
+}
+
+.cinema-card {
+  position: absolute;
+  width: clamp(245px, 28vw, 390px);
+  height: min(67vh, 650px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 22px;
+  background: #080a10;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.72);
+  cursor: pointer;
+  transform: translateX(calc(var(--cinema-offset) * 174px)) translateZ(calc(var(--cinema-offset) * -110px)) rotateY(calc(var(--cinema-offset) * -27deg)) scale(var(--cinema-depth));
+  opacity: var(--cinema-opacity);
+  transform-origin: center center;
+  transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1), opacity 420ms ease, border-color 260ms ease, box-shadow 260ms ease;
+}
+
+.cinema-entering .cinema-card {
+  opacity: 0;
+  transform: translateX(0) translateZ(-280px) rotateY(0) scale(0.72);
+}
+
+.cinema-active .cinema-card-current {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.86), 0 0 34px rgba(254, 44, 85, 0.12), 0 0 50px rgba(37, 244, 238, 0.08);
+}
+
+.cinema-card-side {
+  z-index: 1;
+  filter: saturate(0.82) brightness(0.7);
+}
+
+.cinema-card-side:hover {
+  border-color: rgba(37, 244, 238, 0.42);
+  filter: saturate(1.05) brightness(0.84);
+}
+
+.cinema-card-current {
+  z-index: 3;
+}
+
+.cinema-media,
+.cinema-card-shade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cinema-media {
+  display: block;
+  background: linear-gradient(145deg, #111827, #020306);
+}
+
+.cinema-card-shade {
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(2, 3, 7, 0.05) 34%, rgba(2, 3, 7, 0.88) 100%);
+}
+
+.cinema-no-media {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(37, 244, 238, 0.7);
+  background: radial-gradient(circle at 50% 42%, rgba(37, 244, 238, 0.16), transparent 30%), linear-gradient(145deg, #111827, #020306);
+}
+
+.cinema-card-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 26px 24px 24px;
+  pointer-events: none;
+}
+
+.cinema-play-indicator {
+  display: inline-flex;
+  width: 48px;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 28%;
+  padding-left: 3px;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  transform: scale(0.82);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.cinema-card-current:hover .cinema-play-indicator,
+.cinema-play-indicator.is-playing {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.cinema-card-copy {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 7px;
+  text-align: left;
+}
+
+.cinema-card-author,
+.cinema-card-copy small,
+.cinema-error {
+  color: rgba(255, 255, 255, 0.57);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.cinema-card-copy strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: clamp(15px, 1.45vw, 19px);
+  line-height: 1.18;
+  text-align: left;
+  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.cinema-card-copy small {
+  color: rgba(37, 244, 238, 0.8);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: none;
+}
+
+.cinema-error {
+  position: absolute;
+  bottom: 122px;
+  left: 24px;
+  right: 24px;
+  color: #fe2c55;
+  text-align: center;
+}
+
+.cinema-nav {
+  position: absolute;
+  z-index: 5;
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.cinema-nav:disabled,
+.cinema-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+.cinema-nav-left {
+  left: clamp(20px, 5vw, 74px);
+}
+
+.cinema-nav-right {
+  right: clamp(20px, 5vw, 74px);
+}
+
+.cinema-progress {
+  width: min(32vw, 360px);
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.cinema-progress-line {
+  position: relative;
+  display: block;
+  height: 1px;
+  flex: 1;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.cinema-progress-line i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #fe2c55, #8a5cff, #25f4ee);
+  transition: width 420ms ease;
+}
+
+.cinema-controls {
+  gap: 8px;
+}
+
+.cinema-controls button {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.cinema-hint {
+  margin-left: 9px;
+  color: rgba(255, 255, 255, 0.28);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
+@keyframes cinema-aura-pulse {
+  0% { transform: scale(1.24); filter: blur(22px) saturate(1.5) contrast(1.05); }
+  54% { transform: scale(1.02); filter: blur(16px) saturate(3.4) contrast(1.45); }
+  100% { transform: scale(1.12); filter: blur(30px) saturate(2.6) contrast(1.25); }
+}
+
+@media (max-width: 800px) {
+  .cinema-header { padding: 18px 18px; }
+  .cinema-footer { align-items: flex-end; flex-direction: column; gap: 12px; padding: 12px 18px 18px; }
+  .cinema-progress { width: 100%; }
+  .cinema-hint { display: none; }
+  .cinema-card { width: min(72vw, 340px); height: min(66vh, 590px); }
+  .cinema-card-side { opacity: 0.22; }
+  .cinema-nav-left { left: 12px; }
+  .cinema-nav-right { right: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cinema-root *,
+  .cinema-root *::before,
+  .cinema-root *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }

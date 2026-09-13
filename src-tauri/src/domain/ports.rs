@@ -9,6 +9,7 @@ pub trait JobRepository: Send + Sync {
     fn insert_job(&self, url: &str) -> Result<i64, String>;
     fn get_all_jobs(&self) -> Result<Vec<JobRecord>, String>;
     fn update_status(&self, id: i64, status: &str, progress: i32) -> Result<(), String>;
+    fn update_retrying(&self, id: i64, attempt: u32) -> Result<(), String>;
 
     // Simplificado para la demostracion
     fn update_media(
