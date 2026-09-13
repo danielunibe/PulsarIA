@@ -106,9 +106,15 @@ y, cuando exista una URL autorizada, el smoke live documentado en
 | Instalador NSIS/MSI | PASS local | Build `0.1.0`, SHA NSIS `77095348AA234D1152000A34DD02258DF68D9C8E5FF5267701063483FB12DB13` |
 | TikTok live | PASS parcial | Descarga/audio/análisis/indexado/reinicio/dedupe/URL inválida/search shape; la muestra no produjo texto reconocible |
 | Updater, firmas y Authenticode | BLOCKED_EXTERNAL | No se fabrican `latest.json`, `.sig`, claves ni firmas |
-| Publicación GitHub | PENDIENTE | Requiere validación final, fast-forward y clonación limpia |
+| Publicación GitHub | PASS | `origin/main` publicado en `27d2ff73925e9e217b5051eb05dd0811bc3c3c64` por fast-forward; clonación limpia verificada |
 
 La tabla es un estado de trabajo, no reemplaza la salida de los verificadores.
+
+### Evidencia de publicación canónica
+
+La publicación de código y documentación se realizó el 13 de septiembre de 2026 sobre `origin/main`, sin force push ni reescritura de historia. La clonación limpia de esa rama resolvió el commit canónico `27d2ff73925e9e217b5051eb05dd0811bc3c3c64`, quedó limpia y pasó `npm run verify:canonical`.
+
+Las líneas anteriores permanecen como referencias históricas mediante tags `archive/*`; no se borraron ramas ni se presentan como líneas activas de desarrollo.
 
 ## Política de ramas y archivo
 
