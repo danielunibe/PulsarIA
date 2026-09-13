@@ -98,21 +98,21 @@ y, cuando exista una URL autorizada, el smoke live documentado en
 
 | Gate | Estado | Evidencia o límite |
 | --- | --- | --- |
-| Lint, TypeScript, build Next | PASS previo a esta consolidación | Reejecutar antes de publicar |
-| Locale es/en | PASS previo a esta consolidación | `scripts/verify-locale.ps1` |
+| Lint, TypeScript, build Next | PASS | Incluidos en `npm run verify:mvp` (12/12) |
+| Locale es/en | PASS | `scripts/verify-locale.ps1`, incluido en `npm run verify:mvp` |
 | Rust fmt/check/tests | PASS | 40 tests Rust sin fallos después del cambio de rutas |
-| Python | PASS previo a esta consolidación | 18 tests y un skip live intencional |
+| Python | PASS | 18 tests y un skip live intencional |
 | Runtime preparado | PASS en staging local | 50/50 recursos canónicos verificados; se eliminó la copia de compatibilidad |
-| Instalador NSIS/MSI | PASS local | Build `0.1.0`, SHA NSIS `77095348AA234D1152000A34DD02258DF68D9C8E5FF5267701063483FB12DB13` |
+| Instalador NSIS/MSI | PARTIAL | Existe una build `0.1.0` previa a la consolidación; requiere reconstrucción y smoke limpio con el contrato canónico |
 | TikTok live | PASS parcial | Descarga/audio/análisis/indexado/reinicio/dedupe/URL inválida/search shape; la muestra no produjo texto reconocible |
 | Updater, firmas y Authenticode | BLOCKED_EXTERNAL | No se fabrican `latest.json`, `.sig`, claves ni firmas |
-| Publicación GitHub | PASS | `origin/main` publicado en `27d2ff73925e9e217b5051eb05dd0811bc3c3c64` por fast-forward; clonación limpia verificada |
+| Publicación GitHub | PASS | `origin/main` publicado en `ef5a6e3fc051df4861a2eafbac4a9911d7551240` por fast-forward; clonación limpia verificada |
 
 La tabla es un estado de trabajo, no reemplaza la salida de los verificadores.
 
 ### Evidencia de publicación canónica
 
-La publicación de código y documentación se realizó el 13 de septiembre de 2026 sobre `origin/main`, sin force push ni reescritura de historia. La clonación limpia de esa rama resolvió el commit canónico `27d2ff73925e9e217b5051eb05dd0811bc3c3c64`, quedó limpia y pasó `npm run verify:canonical`.
+La publicación de código y documentación se realizó el 13 de septiembre de 2026 sobre `origin/main`, sin force push ni reescritura de historia. La clonación limpia de esa rama resolvió el commit canónico `ef5a6e3fc051df4861a2eafbac4a9911d7551240`, quedó limpia y pasó `npm run verify:canonical`.
 
 Las líneas anteriores permanecen como referencias históricas mediante tags `archive/*`; no se borraron ramas ni se presentan como líneas activas de desarrollo.
 
