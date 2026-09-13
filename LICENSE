@@ -1,21 +1,87 @@
-MIT License
+Pulsaria Source-Visible Beta License
+Version 1.0 - 2026-09-12
 
-Copyright (c) 2026 Pulsar Eventide Contributors
+Copyright (c) 2026 [NOMBRE LEGAL COMPLETO DEL TITULAR]
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+IMPORTANT
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This is a proprietary, source-visible license. It is not an open-source
+license. The repository is public so that the software can be inspected and
+the official beta can be downloaded from GitHub. Public visibility does not
+grant the broad reuse rights associated with MIT, Apache-2.0, GPL, or other
+open-source licenses.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. Definitions
+
+"Software" means the Pulsaria source code, documentation, configuration,
+official builds, and associated materials distributed by the copyright holder,
+excluding components identified as third-party materials.
+
+"Official beta" means an unmodified binary published by the copyright holder
+through the official Pulsaria GitHub repository or GitHub Releases.
+
+"Copyright holder" means the person or entity identified in the release legal
+manifest, or a successor who has received a written assignment of the
+applicable rights.
+
+2. Limited permissions
+
+Subject to this license, the copyright holder grants you a limited,
+non-exclusive, non-transferable, revocable permission to:
+
+* view and clone the repository for personal evaluation, security review,
+  education, or research;
+* download and run an Official beta for personal or internal evaluation;
+* keep the notices that accompany the Software.
+
+No fee is charged for the Official beta during the beta period. This free
+availability does not transfer ownership of the Software.
+
+3. Restrictions
+
+Except where applicable law gives you a right that cannot be waived, you may
+not:
+
+* modify, adapt, translate, or create derivative works of the Software;
+* publish, distribute, mirror, sublicense, rent, lease, sell, or offer the
+  Software or a derivative as a product or service;
+* use the source code to build or operate a competing product;
+* remove or change copyright, license, attribution, security, update, or
+  branding notices;
+* bypass license, integrity, update, or access controls;
+* represent Pulsaria or any part of the Software as your own;
+* use the name, logo, or other marks of Pulsaria without written permission.
+
+This license does not prohibit lawful interoperability, accessibility,
+security research, or other rights that the law makes unavoidable. It also
+does not change the licenses of third-party materials.
+
+4. Third-party materials
+
+Third-party libraries, runtimes, binaries, fonts, models, and other materials
+are not relicensed by this document. Their notices and license conditions are
+listed in THIRD_PARTY_NOTICES.md and MODEL_NOTICE.md. If a third-party license
+grants a right that conflicts with a restriction above, that third-party
+license controls only for that material.
+
+5. Beta status and warranty
+
+The Software is an experimental beta. It is provided as-is and may change,
+stop working, lose compatibility, or contain defects. To the maximum extent
+permitted by law, the copyright holder disclaims warranties and liability.
+Mandatory consumer, privacy, copyright, and other rights are not waived.
+
+6. No trademark or platform affiliation
+
+Pulsaria is not affiliated with, sponsored by, or endorsed by TikTok,
+ByteDance, YouTube, Google, or any other platform named by the Software.
+
+7. Reservation of rights
+
+All rights not expressly granted remain with the copyright holder. This
+license is effective only for the version to which it is attached and does not
+retroactively revoke rights granted under a different license to an earlier
+version.
+
+For questions or permission requests, use the legal contact published in
+COPYRIGHT_AND_TAKEDOWN.es.md.

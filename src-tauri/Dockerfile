@@ -1,5 +1,5 @@
-# ─────────────────────────────────────────────────────────────
-# Dockerfile — Pulsar Eventide Engine (Multi-Stage Build)
+﻿# ─────────────────────────────────────────────────────────────
+# Dockerfile — Pulsaria Engine (Multi-Stage Build)
 # Sprint 4, Fase 22
 # ─────────────────────────────────────────────────────────────
 

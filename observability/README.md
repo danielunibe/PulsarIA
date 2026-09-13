@@ -1,12 +1,12 @@
-# Pulsar Eventide — Observabilidad
+﻿# Pulsaria — Observabilidad
 
-Configuración de métricas y monitoreo para Pulsar Eventide.
+Configuración de métricas y monitoreo para Pulsaria.
 
 ## Componentes
 
 ### Prometheus (`prometheus.yml`)
 
-Configuración de Prometheus para scrape de métricas del servidor de métricas de Pulsar.
+Configuración de Prometheus para scrape de métricas del servidor de métricas de Pulsaria.
 
 - **Endpoint de métricas**: `http://127.0.0.1:9001/metrics`
 - **Intervalo de scrape**: 15 segundos
@@ -14,7 +14,7 @@ Configuración de Prometheus para scrape de métricas del servidor de métricas 
 
 ### Grafana (`grafana_dashboard.json`)
 
-Dashboard preconfigurado para visualizar métricas de Pulsar Eventide:
+Dashboard preconfigurado para visualizar métricas de Pulsaria:
 
 - Latencia de queries semánticas
 - Tiempo de inferencia ONNX
@@ -45,7 +45,7 @@ docker-compose up -d  # Si se crea docker-compose.yml
 
 ### Sin Docker
 
-1. Iniciar Pulsar Eventide (`npm run tauri dev`)
+1. Iniciar Pulsaria (`npm run tauri dev`)
 2. Iniciar Prometheus con la config:
    ```bash
    prometheus --config.file=observability/prometheus.yml

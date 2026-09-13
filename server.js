@@ -25,21 +25,45 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
-    let reqPath = decodeURI(req.url.split('?')[0]);
-    if (reqPath === '/' || reqPath === '') reqPath = '/index.html';
-    
-    let filePath = path.join(OUT_DIR, reqPath);
-    
-    // Si no tiene extensión y no existe como archivo, probar .html
-    if (!fs.existsSync(filePath) && !path.extname(filePath)) {
-        if (fs.existsSync(filePath + '.html')) {
-            filePath = filePath + '.html';
-        }
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD' });
+        res.end('Method not allowed');
+        return;
     }
 
-    // Fallback a index.html si no existe (SPA routing)
+    let reqPath;
+    try {
+        reqPath = decodeURIComponent((req.url || '/').split('?')[0] || '/');
+    } catch {
+        res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Invalid URL');
+        return;
+    }
+
+    const resolvedOutDir = path.resolve(OUT_DIR);
+    const candidatePath = path.resolve(resolvedOutDir, `.${reqPath}`);
+    const outDirPrefix = `${resolvedOutDir}${path.sep}`;
+    if (candidatePath !== resolvedOutDir && !candidatePath.startsWith(outDirPrefix)) {
+        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Forbidden');
+        return;
+    }
+
+    let filePath = candidatePath;
+    if (reqPath === '/' || reqPath === '') filePath = path.join(resolvedOutDir, 'index.html');
+
+    // Route fallback applies only to extensionless paths. Missing assets must
+    // remain 404s so a broken bundle cannot be disguised as index.html.
+    if (!fs.existsSync(filePath) && !path.extname(filePath)) {
+        const htmlPath = `${filePath}.html`;
+        if (fs.existsSync(htmlPath)) filePath = htmlPath;
+        else filePath = path.join(resolvedOutDir, 'index.html');
+    }
+
     if (!fs.existsSync(filePath)) {
-        filePath = path.join(OUT_DIR, 'index.html');
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Not found');
+        return;
     }
 
     const ext = path.extname(filePath).toLowerCase();
@@ -47,19 +71,20 @@ const server = http.createServer((req, res) => {
 
     fs.readFile(filePath, (err, content) => {
         if (err) {
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end('Error reading file: ' + err.message);
+            res.writeHead(err.code === 'ENOENT' ? 404 : 500, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end(err.code === 'ENOENT' ? 'Not found' : 'Error reading file');
         } else {
-            res.writeHead(200, { 
+            res.writeHead(200, {
                 'Content-Type': contentType,
                 'Access-Control-Allow-Origin': '*',
                 'Cache-Control': 'no-cache'
             });
-            res.end(content);
+            if (req.method === 'HEAD') res.end();
+            else res.end(content);
         }
     });
 });
 
 server.listen(PORT, () => {
-    console.log(`Pulsar Eventide UI server running on http://localhost:${PORT} and http://127.0.0.1:${PORT}`);
+    console.log(`Pulsaria UI server running on http://localhost:${PORT} and http://127.0.0.1:${PORT}`);
 });

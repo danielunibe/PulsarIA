@@ -1,4 +1,4 @@
-{
+﻿{
   "annotations": { "list": [] },
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -47,7 +47,7 @@
       "targets": [{ "expr": "worker_utilization", "legendFormat": "Threads Active %" }]
     }
   ],
-  "title": "Pulsar Eventide Production Semantic Engine",
+  "title": "Pulsaria Production Semantic Engine",
   "uid": "pulsar_aaa_dashboard_v1",
   "version": 1
 }

@@ -42,6 +42,7 @@ if ($workerCopies.Count -gt 0) {
 $trackedResources = @(git ls-files -- 'src-tauri/resources/**')
 foreach ($path in $trackedResources) {
     $allowed = $path -in @(
+        'src-tauri/resources/bin/FFMPEG-LICENSE.txt',
         'src-tauri/resources/local-llm-manifest.json',
         'src-tauri/resources/runtime-manifest.json'
     )
