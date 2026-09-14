@@ -15,8 +15,8 @@ de evolución. Este README no duplica esas decisiones.
 referencia histórica y no se utilizan para publicar. La operación de
 consolidación está documentada en [docs/CANONICAL_BASE.md](docs/CANONICAL_BASE.md).
 
-La página pública de descargas se publica desde `website/` mediante GitHub
-Pages. Los instaladores y sus firmas se distribuyen mediante GitHub Releases;
+La página pública de descargas está preparada en `website/` para publicarse
+cuando GitHub Pages esté habilitado en el repositorio. Los instaladores y sus firmas se distribuyen mediante GitHub Releases;
 el updater de escritorio usa únicamente releases firmadas, nunca una rama o
 un archivo del árbol fuente.
 

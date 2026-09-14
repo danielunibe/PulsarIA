@@ -17,7 +17,7 @@ privacidad y política de contenido antes de mostrar el dashboard.
 | Contrato Gemini opcional | PASS local condicionado | IPC nativo y tests de seguridad pasan; requiere clave autorizada para probar una llamada real y no forma parte del modo offline |
 | Updater JavaScript | Implementado, inactivo | Clave pública Tauri, clave privada en GitHub Environment y `latest.json` publicado |
 | Consentimiento legal nativo | Implementado localmente | Repetir en un instalador Release y verificar una nueva aceptación cuando cambie una versión legal |
-| GitHub Pages | Preparado en `website/` | Habilitar Pages con el workflow `pages.yml` y comprobar la URL publicada |
+| GitHub Pages | Preparado en `website/` | Habilitar Pages en la configuración del repositorio y publicar `website/` con un workflow aprobado; el checkout no activa despliegues hasta que el repositorio tenga Pages habilitado |
 | Aceptación visual Tauri | BLOCKED_EXTERNAL | Capturas asistidas en el equipo objetivo a 1280×800 y 860×640 |
 | Next/PostCSS | PASS parcial aislado | Next 16.3.5 y audit 0 demostrados en el experimento; repetir sobre un checkpoint limpio con la estabilización vigente antes de promover |
 | Firma Authenticode | Pendiente externo | Certificado PFX temporal, timestamp server y verificación válida |
