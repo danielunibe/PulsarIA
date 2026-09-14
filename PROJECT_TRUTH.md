@@ -19,7 +19,7 @@ distribución estable a terceros.
 ## Fuente canónica
 
 La rama activa es `main` en `origin`. Este checkout de producto parte de la
-punta publicada `618bcb24`; las ramas antiguas se conservan como referencias
+punta publicada `f6f046fa`; las ramas antiguas se conservan como referencias
 archivadas y no son líneas de desarrollo nuevas.
 
 Las fuentes funcionales únicas son:
@@ -124,13 +124,13 @@ y, cuando exista una URL autorizada, el smoke live documentado en
 | Contrato Gemini | PASS local condicionado | IPC nativo, clave solo en proceso Rust, validaciones de clave/prompt/respuesta/HTTP/timeout; requiere clave real para una llamada autorizada |
 | Updater, firmas y Authenticode | BLOCKED_EXTERNAL | No se fabrican `latest.json`, `.sig`, claves ni firmas |
 | Aceptación visual nativa | BLOCKED_EXTERNAL | Este host no expone una ventana Tauri para captura asistida; el preview de navegador no sustituye esa evidencia |
-| Publicación GitHub | PARTIAL | `origin/main` apunta a `618bcb24`; el README, workflow, sitio y documentación están publicados. El instalador de evaluación se publica por separado sin Authenticode; la release estable firmada requiere configuración de secretos externos |
+| Publicación GitHub | PARTIAL | `origin/main` apunta a `f6f046fa`; el README, workflow, sitio y documentación están publicados. El instalador de evaluación `v0.1.0-eval.2` se publica por separado sin Authenticode; la release estable firmada requiere configuración de secretos externos |
 
 La tabla es un estado de trabajo, no reemplaza la salida de los verificadores.
 
 ### Evidencia de publicación canónica
 
-La publicación de código y documentación de la base se realizó el 13 de septiembre de 2026 sobre `origin/main`, sin force push ni reescritura de historia. La punta publicada actual es `618bcb24`; la clonación limpia de esa base pasó `npm run verify:canonical` y el workflow canónico remoto terminó correctamente. Los instaladores generados se distribuyen mediante GitHub Releases y no se guardan como blobs normales del árbol fuente.
+La publicación de código y documentación de la base se realizó el 14 de septiembre de 2026 sobre `origin/main`, sin force push ni reescritura de historia. La punta publicada actual es `f6f046fa`; la clonación limpia de esa base pasó `npm run verify:canonical` y el workflow canónico remoto terminó correctamente. Los instaladores generados se distribuyen mediante GitHub Releases y no se guardan como blobs normales del árbol fuente.
 
 Las líneas anteriores permanecen como referencias históricas mediante tags `archive/*`; no se borraron ramas ni se presentan como líneas activas de desarrollo.
 

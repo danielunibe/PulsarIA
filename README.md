@@ -120,7 +120,7 @@ workflow de release.
 
 ## Validación actual
 
-La punta publicada de `main` es `618bcb24`. La validación reproducible actual
+La punta publicada de `main` es `f6f046fa`. La validación reproducible actual
 incluye:
 
 - `npm run verify:mvp`: 13/13 gates PASS.
