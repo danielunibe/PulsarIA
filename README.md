@@ -11,10 +11,11 @@ palabras o por significado desde una biblioteca local.
 
 ## Descargar e instalar
 
-Ve a [Releases](https://github.com/danielunibe/PulsarIA/releases) y descarga
-`Pulsaria_0.1.0_x64-setup.exe` desde la release de evaluación. El instalador
-es para Windows x64 y no requiere instalar Node.js, Rust, Python, FFmpeg ni
-FFprobe por separado.
+Puedes descargar directamente
+[`Pulsaria_0.1.0_x64-setup.exe`](https://github.com/danielunibe/PulsarIA/releases/download/v0.1.0-eval.1/Pulsaria_0.1.0_x64-setup.exe)
+o consultar la [release de evaluación completa](https://github.com/danielunibe/PulsarIA/releases/tag/v0.1.0-eval.1).
+El instalador es para Windows x64 y no requiere instalar Node.js, Rust,
+Python, FFmpeg ni FFprobe por separado.
 
 Antes de ejecutar el archivo, comprueba su integridad en PowerShell:
 
