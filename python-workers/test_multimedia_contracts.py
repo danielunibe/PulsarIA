@@ -260,7 +260,12 @@ class DurableTranscriptTests(unittest.TestCase):
             durable = data_dir / "transcripts" / "73.txt"
             legacy = audio.parent / "transcript.txt"
             self.assertEqual(Path(result["transcript_path"]), durable)
-            self.assertEqual(Path(result["legacy_transcript_path"]), legacy)
+            # Windows may expose the same temporary directory through its
+            # long path or its 8.3 short-path alias. Compare canonical paths
+            # so the contract validates the adjacent artifact, not spelling.
+            self.assertEqual(
+                Path(result["legacy_transcript_path"]).resolve(), legacy.resolve()
+            )
             self.assertEqual(durable.read_text(encoding="utf-8"), "Hola Pulsaria")
             self.assertEqual(legacy.read_text(encoding="utf-8"), "Hola Pulsaria")
 

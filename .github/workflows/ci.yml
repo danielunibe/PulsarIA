@@ -56,5 +56,24 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml -- --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
 
+      - name: Prepare source-only Python contract fixture
+        run: |
+          # The portable Python runtime is supplied by the release bundle.
+          # Keep only its small import-path contract in this source-check job;
+          # do not commit Python, models, or site-packages to the repository.
+          $pythonPth = 'src-tauri/resources/python/python311._pth'
+          if (-not (Test-Path -LiteralPath $pythonPth)) {
+            @(
+              'python311.zip'
+              '.'
+              '..\python-workers'
+              '..\..\..\python-workers'
+              'Lib\site-packages'
+              ''
+              '# Cargar site-packages del runtime portable bundleado.'
+              'import site'
+            ) | Set-Content -LiteralPath $pythonPth -Encoding ascii
+          }
+
       - name: Verify Python contracts
         run: npm run test:python
