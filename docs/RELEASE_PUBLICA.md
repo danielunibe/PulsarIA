@@ -9,6 +9,12 @@ privacidad y política de contenido antes de mostrar el dashboard.
 
 ## Estado de esta fase
 
+La release de evaluación `v0.1.0-eval.1` contiene el instalador NSIS probado
+localmente para que los usuarios puedan descargarlo e instalarlo. Está
+marcada como pre-release y no activa el updater: el instalador aún no tiene
+firma Authenticode. La release estable no debe publicarse hasta completar los
+gates externos descritos abajo.
+
 | Gate | Estado actual | Qué falta para marcarlo PASS |
 |---|---|---|
 | Frontend, Rust, Python y recursos fuente | PASS local | Manifest de 51 registros canónicos, FFmpeg/FFprobe y `FFMPEG-LICENSE.txt` verificados; el bundle debug final ya fue reconstruido |
@@ -21,6 +27,12 @@ privacidad y política de contenido antes de mostrar el dashboard.
 | Aceptación visual Tauri | BLOCKED_EXTERNAL | Capturas asistidas en el equipo objetivo a 1280×800 y 860×640 |
 | Next/PostCSS | PASS parcial aislado | Next 16.3.5 y audit 0 demostrados en el experimento; repetir sobre un checkpoint limpio con la estabilización vigente antes de promover |
 | Firma Authenticode | Pendiente externo | Certificado PFX temporal, timestamp server y verificación válida |
+
+El workflow de release usa la variable protegida `RELEASE_READY`. Si no vale
+`true`, una etiqueta no arranca un job incompleto y no genera notificaciones de
+fallo por secretos ausentes. Sólo debe cambiarse a `true` después de cargar la
+clave pública, la clave privada, el certificado, el runtime externo, el SBOM y
+la aprobación legal en el Environment `release`.
 
 La aceptación visual nativa no se considera demostrada por `next build`, una captura del navegador o un smoke HTTP. Debe completarse con el ejecutable instalado y conservar las capturas sanitizadas junto con la hoja de evidencia.
 

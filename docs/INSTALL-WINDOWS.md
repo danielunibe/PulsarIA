@@ -2,7 +2,7 @@
 
 ## Estado del artefacto y contrato runtime
 
-El instalador aprobado debe ser un artefacto release generado desde el checkout verificado. Este documento no congela un hash de un instalador antiguo: el nombre, tamaño y SHA-256 se deben tomar del archivo que se vaya a distribuir y conservar en la hoja de evidencia de release.
+El instalador de evaluación disponible en GitHub Releases es un artefacto generado desde el checkout verificado. No es una release estable: todavía no tiene certificado Authenticode ni updater público. El nombre, tamaño y SHA-256 de cada artefacto deben conservarse en la evidencia de release.
 
 El contrato reproducible de recursos está en [`src-tauri/resources/runtime-manifest.json`](../src-tauri/resources/runtime-manifest.json). Incluye los hashes de Python embebido, módulos críticos, workers Python, ONNX/MiniLM, Whisper tiny, FFmpeg y FFprobe. El manifest excluye timestamps para que pueda regenerarse y compararse de forma determinista.
 
@@ -17,10 +17,19 @@ Ejecuta el archivo `.exe` y conserva la carpeta propuesta por el instalador. Des
 Para verificar el archivo antes de ejecutarlo, abre PowerShell en la carpeta donde se descargó y ejecuta:
 
 ```powershell
-Get-FileHash .\pulsaria_0.1.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\Pulsaria_0.1.0_x64-setup.exe -Algorithm SHA256
 ```
 
-El valor debe coincidir con la suma registrada para ese artefacto en la evidencia de release.
+Para el instalador de evaluación `Pulsaria_0.1.0_x64-setup.exe`, el valor esperado es:
+
+```text
+2E27F6520A41EBFA93B2F7CD54EEE7666929682F88689B365522B2F4F1459427
+```
+
+El instalador puede mostrar una advertencia de SmartScreen porque el candidato
+actual todavía no tiene firma Authenticode. Descárgalo únicamente desde la
+release oficial de [Pulsaria en GitHub](https://github.com/danielunibe/PulsarIA/releases)
+y verifica siempre el SHA-256.
 
 ## Verificación reproducible de recursos
 

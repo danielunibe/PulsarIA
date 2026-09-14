@@ -1,54 +1,172 @@
 # Pulsaria
 
-Pulsaria es un MVP local-first para Windows que procesa contenido audiovisual
-autorizado, genera transcripciones y análisis local, e indexa la biblioteca
-para búsqueda literal y semántica.
+Pulsaria es una biblioteca audiovisual local-first para Windows. Permite
+importar contenido de TikTok que el usuario está autorizado a procesar,
+convertirlo en video, audio, transcripción y análisis visual, y buscarlo por
+palabras o por significado desde una biblioteca local.
 
-La definición técnica y operativa vigente está en
-[PROJECT_TRUTH.md](PROJECT_TRUTH.md). Ese documento define la arquitectura
-canónica, el runtime externo, los gates, las ramas, los artefactos y el orden
-de evolución. Este README no duplica esas decisiones.
+> Pulsaria está en beta. El instalador de evaluación disponible en Releases
+> es funcional, pero todavía no es una release estable firmada con
+> Authenticode ni tiene updater público habilitado.
 
-## Fuente canónica y distribución
+## Descargar e instalar
 
-`main` es la única línea activa. Las ramas antiguas se conservan como
-referencia histórica y no se utilizan para publicar. La operación de
-consolidación está documentada en [docs/CANONICAL_BASE.md](docs/CANONICAL_BASE.md).
+Ve a [Releases](https://github.com/danielunibe/PulsarIA/releases) y descarga
+`Pulsaria_0.1.0_x64-setup.exe` desde la release de evaluación. El instalador
+es para Windows x64 y no requiere instalar Node.js, Rust, Python, FFmpeg ni
+FFprobe por separado.
 
-La página pública de descargas está preparada en `website/` para publicarse
-cuando GitHub Pages esté habilitado en el repositorio. Los instaladores y sus firmas se distribuyen mediante GitHub Releases;
-el updater de escritorio usa únicamente releases firmadas, nunca una rama o
-un archivo del árbol fuente.
-
-## Inicio rápido
-
-Requisitos: Node.js 20+, Rust/Cargo y Python 3.10+.
+Antes de ejecutar el archivo, comprueba su integridad en PowerShell:
 
 ```powershell
-npm install
+Get-FileHash .\Pulsaria_0.1.0_x64-setup.exe -Algorithm SHA256
+```
+
+El hash de la compilación de evaluación es:
+
+```text
+2E27F6520A41EBFA93B2F7CD54EEE7666929682F88689B365522B2F4F1459427
+```
+
+Durante la instalación puedes conservar la carpeta propuesta. Al finalizar,
+abre Pulsaria desde el acceso creado. La aplicación guarda el estado nuevo en
+`%APPDATA%\Pulsar Eventide` y mantiene compatibilidad con bibliotecas antiguas
+en `%APPDATA%\Pulsaria`. Los medios se guardan en la carpeta de descargas que
+elijas desde Settings.
+
+Windows puede mostrar una advertencia de SmartScreen porque este candidato aún
+no tiene certificado Authenticode. El archivo fue probado instalándolo,
+iniciando la aplicación, comprobando su health check, reiniciándola y
+desinstalándola en un directorio temporal. No ejecutes instaladores alterados
+ni compartas tus datos de aplicación o cookies del navegador.
+
+La guía completa está en
+[docs/INSTALL-WINDOWS.md](docs/INSTALL-WINDOWS.md).
+
+## Qué hace Pulsaria
+
+- Importa videos, perfiles, favoritos y colecciones de TikTok mediante URLs
+  que el usuario puede consultar y procesar legalmente.
+- Descarga el contenido solicitado, extrae audio y genera transcripciones.
+- Conserva análisis visual, keyframes, metadata y exportaciones MP4, MP3 y
+  TXT.
+- Permite búsqueda literal y búsqueda semántica local con embeddings, HNSW y
+  BM25.
+- Incluye una cola local con reintentos, deduplicación y recuperación después
+  de reiniciar la aplicación.
+- Incluye IA local opcional bajo demanda. La síntesis Gemini es opcional y
+  sólo se ejecuta tras una acción explícita desde el shell nativo.
+- Ofrece interfaz en español de México e inglés.
+
+El alcance actual es deliberadamente TikTok local-first. No se presenta como
+una herramienta oficial de TikTok ni incluye todavía expansión formal a
+YouTube/Instagram, OCR avanzado, chat RAG conversacional, playlists
+inteligentes o traducción automática.
+
+## Privacidad y uso responsable
+
+Los videos, audios, transcripciones, embeddings, búsquedas y resultados locales
+permanecen en el equipo por defecto. Pulsaria no incluye analytics, telemetría
+de uso ni crash reporting remoto en el beta.
+
+Puede existir tráfico de red cuando tú lo solicitas para importar una URL,
+descargar un modelo local, comprobar una release o ejecutar manualmente una
+síntesis Gemini. La interfaz debe mostrar esta transferencia antes de enviar
+fragmentos a Google.
+
+Sólo procesa contenido propio, autorizado o con una base legal suficiente.
+No uses Pulsaria para acceder a contenido privado, evadir controles, extraer
+credenciales o redistribuir material de terceros. Consulta
+[CONTENT_POLICY.es.md](CONTENT_POLICY.es.md), [PRIVACY.es.md](PRIVACY.es.md),
+[TERMS_OF_USE.es.md](TERMS_OF_USE.es.md) y [EULA.es.md](EULA.es.md) antes de
+usar una release.
+
+## Requisitos del instalador
+
+- Windows x64 compatible con WebView2.
+- Espacio libre suficiente para la aplicación, el runtime local y los medios
+  que decidas conservar.
+- Conexión a Internet sólo para las operaciones que tú inicies.
+- No es necesario instalar herramientas de desarrollo para usar el instalador.
+
+El runtime portable de Python, FFmpeg/FFprobe, ONNX, Whisper y otros recursos
+pesados se entregan como parte del bundle de instalación aprobado; no se
+guardan como blobs en el repositorio fuente.
+
+## Desde el código fuente
+
+Para desarrollo se necesita Node.js 20+, Rust/Cargo, Python 3.10+ y las
+dependencias de Python:
+
+```powershell
+npm ci
 pip install -r python-workers/requirements.txt
 npm run tauri dev
 ```
 
-Para build instalada se requiere preparar primero el runtime externo con
-`scripts/prepare-runtime.ps1`. No se aceptan ejecutables descubiertos por
-`PATH` como sustituto del runtime aprobado.
-
-## Validación
+Para preparar un build instalado se requiere el runtime externo aprobado:
 
 ```powershell
-npm run verify:mvp
-npm run verify:canonical
-cargo test --manifest-path src-tauri/Cargo.toml
-npm run test:python
+$env:PULSAR_RUNTIME_ROOT = (Resolve-Path .\src-tauri\resources).Path
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-runtime.ps1 `
+  -RuntimeBundle <directorio-del-runtime-aprobado>
+npm run tauri build -- --bundles nsis
 ```
 
-El alcance legal y las condiciones de uso se encuentran en `LICENSE`, los
-documentos EULA/privacidad, `CONTENT_POLICY.es.md` y
-`THIRD_PARTY_NOTICES.md`.
+No se deben copiar Python, modelos, FFmpeg, instaladores ni bases de datos al
+repositorio. La preparación externa y su SHA-256 se verifican mediante el
+workflow de release.
 
-## Releases Windows
+## Validación actual
 
-La release estable recomendada se publica en
-<https://github.com/danielunibe/PulsarIA/releases/latest>. El canal RC es para
-pruebas previas y no debe usarse como biblioteca principal sin un respaldo.
+La punta publicada de `main` es `618bcb24`. La validación reproducible actual
+incluye:
+
+- `npm run verify:mvp`: 13/13 gates PASS.
+- Rust: formato, check y 60 tests PASS.
+- Python: 26 tests PASS; el único skip corresponde a una URL TikTok live no
+  suministrada en CI.
+- Runtime preparado: 51/51 recursos canónicos PASS en staging local.
+- Smoke NSIS instalado: instalación, arranque, health, reinicio y
+  desinstalación PASS.
+
+Estos resultados no sustituyen una prueba visual nativa, una certificación
+live con voz reconocible, una firma Authenticode o una publicación estable.
+Consulta [docs/MVP_STATUS.md](docs/MVP_STATUS.md) y
+[PROJECT_TRUTH.md](PROJECT_TRUTH.md) para los límites de evidencia.
+
+## Release y updater
+
+El workflow [Pulsaria public release](.github/workflows/release.yml) genera
+NSIS/MSI, firmas Tauri, `latest.json`, `.sig` y `SHA256SUMS.txt` cuando el
+Environment `release` tiene todas las credenciales y el runtime externo.
+Mientras `RELEASE_READY` no sea `true`, las etiquetas no ejecutan un job de
+release incompleto y quedan sin notificaciones de fallo.
+
+La release de evaluación no activa el updater público. Una release estable
+requiere clave pública Tauri, clave privada, certificado Authenticode,
+timestamp HTTPS, runtime con SHA-256, SBOM y revisión legal humana.
+
+## Documentación
+
+- [Instalación Windows](docs/INSTALL-WINDOWS.md)
+- [Estado del MVP](docs/MVP_STATUS.md)
+- [Runbook de release pública](docs/RELEASE_PUBLICA.md)
+- [Arquitectura](ARCHITECTURE.md)
+- [Política de seguridad](SECURITY.md)
+- [Avisos de terceros](THIRD_PARTY_NOTICES.md)
+- [Auditoría reconciliada](docs/PULSARIA_RECONCILIATED_AUDIT_MATRIX.md)
+
+## Soporte
+
+Usa [GitHub Issues](https://github.com/danielunibe/PulsarIA/issues) para
+reportar errores. Incluye versión, sistema operativo y pasos reproducibles;
+nunca adjuntes videos, audios, cookies, transcripciones o bases de datos de
+terceros.
+
+## Licencia
+
+Consulta [LICENSE](LICENSE), [EULA.es.md](EULA.es.md) y
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). TikTok, ByteDance, Google y
+las demás plataformas mencionadas son marcas y servicios independientes de
+Pulsaria.

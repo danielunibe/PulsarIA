@@ -20,6 +20,11 @@ concurrency:
 
 jobs:
   release:
+    # Do not create failed runs while the external signing/runtime contract is
+    # still being configured. Set the protected Environment variable
+    # RELEASE_READY=true only after every required secret, runtime URL/hash,
+    # legal approval and SBOM process is ready for publication.
+    if: ${{ vars.RELEASE_READY == 'true' }}
     runs-on: windows-latest
     environment:
       name: release
