@@ -70,6 +70,26 @@ interface SettingsContextValue {
     localeSelected: boolean;
 }
 
+interface NativeSettingsResponse {
+    settings: {
+        schemaVersion: number;
+        locale: Locale;
+        theme: AppTheme;
+        downloadDir: string;
+        formats: string[];
+        retention: RetentionPolicy;
+        cookiesBrowser: SystemSettings['cookiesBrowser'];
+        processingQuality: number;
+        processingProfile: ProcessingQuality;
+        videoFit: VideoFit;
+        storageIntent: StorageIntent;
+        quotaBytes: number;
+        reserveBytes: number;
+        minScore: number;
+    };
+    source: 'native' | 'migrated' | 'default' | string;
+}
+
 const defaultSettings: SystemSettings = {
     locale: 'es-MX',
     formats: ['mp4', 'mp3', 'txt'],
@@ -162,23 +182,89 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const [isInitialized, setIsInitialized] = useState(false);
     const [localeSelected, setLocaleSelected] = useState(false);
 
-    // Cargar desde localStorage al montar (solo en cliente)
+    // The native snapshot is authoritative in Tauri. localStorage is only a
+    // browser cache and a one-time migration source for profiles created by
+    // older frontend-only builds.
     useEffect(() => {
         let active = true;
         queueMicrotask(() => {
             if (!active) return;
-            try {
-                const saved = localStorage.getItem('pulsar-settings');
-                if (saved) {
-                    const parsed = JSON.parse(saved) as Record<string, unknown>;
-                    setSettings(normalizeSettings(parsed));
-                    setLocaleSelected(parsed.locale === 'es-MX' || parsed.locale === 'en-US');
+            const load = async () => {
+                let localCandidate: Record<string, unknown> | null = null;
+                try {
+                    const saved = localStorage.getItem('pulsar-settings');
+                    if (saved) localCandidate = JSON.parse(saved) as Record<string, unknown>;
+                } catch (error) {
+                    console.error('Error loading cached settings:', error);
                 }
-            } catch (e) {
-                console.error('Error loading settings:', e);
-            } finally {
-                setIsInitialized(true);
-            }
+
+                const runtimeWindow = window as Window & { __TAURI_INTERNALS__?: unknown };
+                const native = Boolean(runtimeWindow.__TAURI_INTERNALS__)
+                    || window.location.protocol === 'tauri:'
+                    || window.location.hostname === 'tauri.localhost';
+                if (native) {
+                    try {
+                        const { invoke } = await import('@tauri-apps/api/core');
+                        const response = await invoke<NativeSettingsResponse>('get_app_settings');
+                        let next = normalizeSettings({
+                            locale: response.settings.locale,
+                            theme: response.settings.theme,
+                            folder: response.settings.downloadDir,
+                            formats: response.settings.formats,
+                            retention: response.settings.retention,
+                            cookiesBrowser: response.settings.cookiesBrowser,
+                            processingQuality: response.settings.processingQuality,
+                            processingProfile: response.settings.processingProfile,
+                            videoFit: response.settings.videoFit,
+                            storageIntent: response.settings.storageIntent,
+                            quotaBytes: response.settings.quotaBytes,
+                            reserveBytes: response.settings.reserveBytes,
+                        });
+                        if (response.source === 'default' && localCandidate) {
+                            next = normalizeSettings({ ...next, ...localCandidate });
+                            try {
+                                await invoke('save_app_settings', {
+                                    settings: {
+                                        ...response.settings,
+                                        ...next,
+                                        schemaVersion: response.settings.schemaVersion,
+                                        downloadDir: next.folder,
+                                        cookiesBrowser: next.cookiesBrowser,
+                                        processingQuality: next.processingQuality,
+                                        processingProfile: next.processingProfile,
+                                        storageIntent: next.storageIntent,
+                                        quotaBytes: next.quotaBytes,
+                                        reserveBytes: next.reserveBytes,
+                                        minScore: response.settings.minScore,
+                                        source: 'native',
+                                    },
+                                });
+                            } catch (error) {
+                                console.error('Could not migrate cached settings to native storage:', error);
+                            }
+                        }
+                        if (active) {
+                            setSettings(next);
+                            setLocaleSelected(Boolean(localCandidate?.locale) || response.source !== 'default');
+                            localStorage.setItem('pulsar-settings', JSON.stringify(next));
+                        }
+                        return;
+                    } catch (error) {
+                        console.error('Error loading native settings:', error);
+                    }
+                }
+                try {
+                    if (localCandidate) {
+                        setSettings(normalizeSettings(localCandidate));
+                        setLocaleSelected(localCandidate.locale === 'es-MX' || localCandidate.locale === 'en-US');
+                    }
+                } finally {
+                    if (active) setIsInitialized(true);
+                }
+            };
+            void load().finally(() => {
+                if (active) setIsInitialized(true);
+            });
         });
         return () => {
             active = false;

@@ -149,7 +149,16 @@ def _writable_model_cache(project_root: Path) -> Path:
 
     local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
     base = Path(local_app_data).expanduser() if local_app_data else Path.home()
-    return base / "Pulsaria" / "whisper-models"
+    return _app_data_root(base) / "whisper-models"
+
+
+def _app_data_root(base: Path) -> Path:
+    """Return the canonical app-data root while preserving legacy installs."""
+    canonical = base / "Pulsar Eventide"
+    legacy = base / "Pulsaria"
+    if not canonical.exists() and legacy.exists():
+        return legacy
+    return canonical
 
 
 def _default_transcripts_root(project_root: Path) -> Path:
@@ -168,7 +177,7 @@ def _default_transcripts_root(project_root: Path) -> Path:
 
     local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
     base = Path(local_app_data).expanduser() if local_app_data else Path.home()
-    return base / "Pulsaria" / "transcripts"
+    return _app_data_root(base) / "transcripts"
 
 
 def _runtime_root(project_root: Path) -> Path:

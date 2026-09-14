@@ -40,12 +40,23 @@ pub struct WorkerMetadata {
 }
 
 #[derive(Debug, Clone)]
+pub struct GeneratedArtifact {
+    pub category: String,
+    pub format: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub validated: bool,
+    pub label: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct WorkerResult {
     pub transcript: String,
     pub metadata: Option<WorkerMetadata>,
     pub segments: Vec<serde_json::Value>,
     pub visual_analysis: Option<serde_json::Value>,
     pub instructional_guide: Option<String>,
+    pub generated_artifacts: Vec<GeneratedArtifact>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +78,21 @@ struct WorkerEvent {
     visual_analysis: Option<serde_json::Value>,
     #[serde(default)]
     instructional_guide: Option<String>,
+    #[serde(default)]
+    artifacts: Vec<GeneratedArtifactPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeneratedArtifactPayload {
+    category: String,
+    format: String,
+    path: String,
+    #[serde(default)]
+    size_bytes: u64,
+    #[serde(default)]
+    validated: bool,
+    #[serde(default)]
+    label: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -158,19 +184,14 @@ impl PythonWorker {
         let payload = WorkerPayload {
             job_id: job.job_id,
             url: &job.url,
-            formats: std::env::var("PULSAR_FORMATS")
-                .unwrap_or_else(|_| "[\"mp4\",\"mp3\",\"txt\"]".into()),
-            download_dir: std::env::var("PULSAR_DOWNLOAD_DIR").unwrap_or_default(),
-            cookies_browser: job.cookies_browser.clone().unwrap_or_else(|| {
-                std::env::var("PULSAR_COOKIES_FROM_BROWSER").unwrap_or_default()
-            }),
-            retention: std::env::var("PULSAR_DEFAULT_RETENTION").unwrap_or_else(|_| "keep".into()),
-            processing_quality: std::env::var("PULSAR_PROCESSING_QUALITY")
-                .unwrap_or_else(|_| "78".into()),
-            whisper_model: std::env::var("WHISPER_MODEL").unwrap_or_else(|_| "tiny".into()),
-            whisper_device: std::env::var("WHISPER_DEVICE").unwrap_or_else(|_| "cpu".into()),
-            whisper_compute_type: std::env::var("WHISPER_COMPUTE_TYPE")
-                .unwrap_or_else(|_| "int8".into()),
+            formats: job.formats.clone(),
+            download_dir: job.download_dir.clone(),
+            cookies_browser: job.cookies_browser.clone().unwrap_or_default(),
+            retention: job.retention.clone(),
+            processing_quality: job.processing_quality.clone(),
+            whisper_model: job.whisper_model.clone(),
+            whisper_device: job.whisper_device.clone(),
+            whisper_compute_type: job.whisper_compute_type.clone(),
         };
         let mut payload_json = serde_json::to_string(&payload)
             .map_err(|error| PythonRunnerError::JsonParseError(error.to_string()))?;
@@ -191,6 +212,7 @@ impl PythonWorker {
         let mut segments: Vec<serde_json::Value> = Vec::new();
         let mut visual_analysis: Option<serde_json::Value> = None;
         let mut instructional_guide: Option<String> = None;
+        let mut generated_artifacts = Vec::new();
         let mut transcription_start: Option<std::time::Instant> = None;
 
         loop {
@@ -254,6 +276,20 @@ impl PythonWorker {
             if let Some(event_instructional_guide) = event.instructional_guide {
                 instructional_guide = Some(event_instructional_guide);
             }
+            if !event.artifacts.is_empty() {
+                generated_artifacts = event
+                    .artifacts
+                    .into_iter()
+                    .map(|artifact| GeneratedArtifact {
+                        category: artifact.category,
+                        format: artifact.format,
+                        path: artifact.path,
+                        size_bytes: artifact.size_bytes,
+                        validated: artifact.validated,
+                        label: artifact.label,
+                    })
+                    .collect();
+            }
 
             match event.event.as_str() {
                 "completed" => {
@@ -264,6 +300,7 @@ impl PythonWorker {
                         segments,
                         visual_analysis,
                         instructional_guide,
+                        generated_artifacts,
                     }));
                 }
                 "error" => {

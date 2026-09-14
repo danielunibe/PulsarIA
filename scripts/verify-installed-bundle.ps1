@@ -27,10 +27,6 @@ if ([string]::IsNullOrWhiteSpace($bundlePath) -or -not (Test-Path -LiteralPath $
     throw "Bundle not found under $bundleRoot for $Bundle"
 }
 
-if ($Bundle -eq 'msi') {
-    throw 'MSI installation automation is intentionally not enabled by this script; use the NSIS path or a controlled MSI test host.'
-}
-
 function Get-JobList {
     param([object]$Body)
 
@@ -103,10 +99,18 @@ function Assert-OwnedTempPath {
 
 $tag = [guid]::NewGuid().ToString('N')
 $installDir = Join-Path $env:TEMP "pulsaria-current-bundle-install-$tag"
-$dataDir = Join-Path $env:TEMP "pulsaria-current-bundle-data-$tag"
+$appDataRoot = Join-Path $env:TEMP "pulsaria-current-bundle-appdata-$tag"
+$dataDir = Join-Path $appDataRoot 'Pulsar Eventide'
+$preservationMarker = Join-Path $dataDir 'settings\mvp-uninstall-preservation.txt'
 $downloadsDir = Join-Path $env:TEMP "pulsaria-current-bundle-downloads-$tag"
+$msiLog = Join-Path $installDir 'msiexec.log'
 $baseUrl = "http://127.0.0.1:$ApiPort"
-$envNames = @('PULSAR_DATA_DIR', 'PULSAR_DOWNLOAD_DIR', 'PULSAR_API_PORT', 'PULSAR_API_HOST')
+$envNames = @(
+    'PULSAR_DATA_DIR', 'PULSAR_DOWNLOAD_DIR', 'PULSAR_API_PORT', 'PULSAR_API_HOST', 'APPDATA',
+    'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
+    'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
+    'ONNX_MODEL_DIR', 'TESSERACT_PATH', 'PATH'
+)
 $oldEnvironment = @{}
 foreach ($name in $envNames) {
     $oldEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -130,18 +134,46 @@ $result = [ordered]@{
     semanticSearch = $null
     finalJob = $null
     outputFiles = @()
+    stagingContract = [ordered]@{
+        root = Join-Path $downloadsDir '.pulsaria\staging'
+        leftoverFiles = @()
+        clean = $false
+    }
     restartJob = $null
+    dataPathContract = [ordered]@{
+        expected = $dataDir
+        usesAppDataFallback = $false
+    }
+    userDataPreservedAfterUninstall = $false
+    runtimeIsolation = [ordered]@{
+        pathCleared = $false
+        externalRuntimeOverridesCleared = $false
+    }
     uninstallExit = $null
     cleanup = $false
     error = $null
 }
 
 try {
-    New-Item -ItemType Directory -Path $installDir, $dataDir, $downloadsDir -Force | Out-Null
-    $installResult = Start-Process -FilePath $bundlePath -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+    New-Item -ItemType Directory -Path $installDir, $appDataRoot, $downloadsDir -Force | Out-Null
+    if ($Bundle -eq 'msi') {
+        $msiInstallArguments = @(
+            '/i', ('"{0}"' -f $bundlePath),
+            '/qn',
+            '/norestart',
+            ('INSTALLDIR="{0}"' -f $installDir),
+            '/L*v', ('"{0}"' -f $msiLog)
+        )
+        $installResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiInstallArguments -Wait -PassThru
+    } else {
+        $installResult = Start-Process -FilePath $bundlePath -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+    }
     $result.installExit = $installResult.ExitCode
-    if ($installResult.ExitCode -ne 0) {
-        throw "NSIS install exited with code $($installResult.ExitCode)"
+    if ($Bundle -eq 'msi' -and $installResult.ExitCode -eq 1603) {
+        throw 'MSI installation requires administrator privileges on this host (msiexec 1603). Repeat this smoke on an elevated Windows test host.'
+    }
+    if ($installResult.ExitCode -notin @(0, 3010)) {
+        throw "$Bundle install exited with code $($installResult.ExitCode)"
     }
 
     $productSlug = ([string]$tauriConfig.productName -replace '[^A-Za-z0-9._-]', '')
@@ -189,10 +221,27 @@ try {
         throw 'One or more packaged runtime resources are missing; ffmpeg.exe, ffprobe.exe and local license evidence are required'
     }
 
-    [Environment]::SetEnvironmentVariable('PULSAR_DATA_DIR', $dataDir, 'Process')
+    # Do not provide PULSAR_DATA_DIR here. This deliberately exercises the
+    # installed fallback under APPDATA and proves that writable state is not
+    # created beside the executable or inside the bundled resources.
+    [Environment]::SetEnvironmentVariable('APPDATA', $appDataRoot, 'Process')
+    Remove-Item -LiteralPath 'Env:PULSAR_DATA_DIR' -ErrorAction SilentlyContinue
     [Environment]::SetEnvironmentVariable('PULSAR_DOWNLOAD_DIR', $downloadsDir, 'Process')
     [Environment]::SetEnvironmentVariable('PULSAR_API_PORT', "$ApiPort", 'Process')
     [Environment]::SetEnvironmentVariable('PULSAR_API_HOST', '127.0.0.1', 'Process')
+    foreach ($name in @(
+        'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
+        'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
+        'ONNX_MODEL_DIR', 'TESSERACT_PATH'
+    )) {
+        Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+    }
+    # The app must resolve every runtime dependency from its installed
+    # resources directory. An empty PATH prevents a globally installed Python,
+    # FFmpeg or FFprobe from making a broken bundle appear healthy.
+    $env:PATH = ''
+    $result.runtimeIsolation.pathCleared = $true
+    $result.runtimeIsolation.externalRuntimeOverridesCleared = $true
     $appProcess = Start-Process -FilePath $appPath -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
 
     $health = $null
@@ -207,6 +256,10 @@ try {
         throw "Installed app did not expose /health within $StartupTimeoutSeconds seconds"
     }
     $result.health = $health
+    $result.dataPathContract.usesAppDataFallback = Test-Path -LiteralPath (Join-Path $dataDir 'library.db') -PathType Leaf
+    if (-not $result.dataPathContract.usesAppDataFallback) {
+        throw "Installed app did not create library.db under the APPDATA contract: $dataDir"
+    }
     if ([string]$health.version -ne $expectedVersion) {
         throw "Installed health version $($health.version) does not match expected $expectedVersion"
     }
@@ -225,7 +278,7 @@ try {
                 $candidate = Find-Job $jobs $jobId
                 if ($candidate -is [array] -and $candidate.Count -gt 0) { $candidate = $candidate[0] }
                 if ($null -ne $candidate) { $finalJob = $candidate }
-                if ($null -ne $finalJob -and "$($finalJob.status)" -in @('complete', 'completed', 'error', 'failed')) { break }
+                if ($null -ne $finalJob -and "$($finalJob.status)" -in @('complete', 'completed', 'error', 'failed', 'error_dlq')) { break }
             } catch { }
             Start-Sleep -Seconds 5
         }
@@ -286,6 +339,16 @@ try {
             }
         }
         $result.outputFiles = @(Get-ChildItem -LiteralPath $downloadsDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object Name, Length, FullName)
+        $stagingRoot = [string]$result.stagingContract.root
+        $stagedFiles = @()
+        if (Test-Path -LiteralPath $stagingRoot -PathType Container) {
+            $stagedFiles = @(Get-ChildItem -LiteralPath $stagingRoot -Recurse -File -ErrorAction SilentlyContinue | Select-Object FullName, Length)
+        }
+        $result.stagingContract.leftoverFiles = $stagedFiles
+        $result.stagingContract.clean = $stagedFiles.Count -eq 0
+        if (-not $result.stagingContract.clean) {
+            throw 'Successful installed job left files in the staging directory'
+        }
     }
 
     Stop-Process -Id $appProcess.Id -Force -ErrorAction SilentlyContinue
@@ -325,6 +388,12 @@ try {
             throw 'Persisted completed job was not visible after installed-app restart'
         }
     }
+
+    # The uninstaller must remove the application without deleting user data.
+    # This marker lives only in the test-owned APPDATA root and is removed by
+    # the cleanup block after the preservation assertion.
+    New-Item -ItemType Directory -Path (Split-Path -Parent $preservationMarker) -Force | Out-Null
+    Set-Content -LiteralPath $preservationMarker -Value 'preserve-user-data' -Encoding UTF8
 } catch {
     $result.error = $_.Exception.Message
 } finally {
@@ -340,18 +409,45 @@ try {
         }
     }
 
-    $uninstallerPath = (Get-ChildItem -LiteralPath $installDir -Filter '*uninstall*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-    if ($uninstallerPath -and (Test-Path -LiteralPath $uninstallerPath -PathType Leaf)) {
+    if ($Bundle -eq 'msi' -and $result.installExit -in @(0, 3010)) {
+        try {
+            $msiUninstallArguments = @(
+                '/x', ('"{0}"' -f $bundlePath),
+                '/qn',
+                '/norestart',
+                '/L*v', ('"{0}"' -f (Join-Path $installDir 'msiexec-uninstall.log'))
+            )
+            $uninstallResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiUninstallArguments -Wait -PassThru
+            $result.uninstallExit = $uninstallResult.ExitCode
+            $result.userDataPreservedAfterUninstall =
+                $uninstallResult.ExitCode -in @(0, 3010) -and
+                (Test-Path -LiteralPath $preservationMarker -PathType Leaf)
+            if (-not $result.userDataPreservedAfterUninstall -and [string]::IsNullOrWhiteSpace([string]$result.error)) {
+                $result.error = 'The MSI uninstaller removed the test user-data marker from the APPDATA contract'
+            }
+        } catch {
+            $result.uninstallExit = "error: $($_.Exception.Message)"
+        }
+    } else {
+        $uninstallerPath = (Get-ChildItem -LiteralPath $installDir -Filter '*uninstall*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+        if ($uninstallerPath -and (Test-Path -LiteralPath $uninstallerPath -PathType Leaf)) {
         try {
             $uninstallResult = Start-Process -FilePath $uninstallerPath -ArgumentList '/S' -Wait -PassThru
             $result.uninstallExit = $uninstallResult.ExitCode
+            $result.userDataPreservedAfterUninstall =
+                $uninstallResult.ExitCode -eq 0 -and
+                (Test-Path -LiteralPath $preservationMarker -PathType Leaf)
+            if (-not $result.userDataPreservedAfterUninstall -and [string]::IsNullOrWhiteSpace([string]$result.error)) {
+                $result.error = 'The uninstaller removed the test user-data marker from the APPDATA contract'
+            }
         } catch {
             $result.uninstallExit = "error: $($_.Exception.Message)"
+        }
         }
     }
 
     $clean = $true
-    foreach ($path in @($installDir, $dataDir, $downloadsDir)) {
+    foreach ($path in @($installDir, $appDataRoot, $downloadsDir)) {
         Assert-OwnedTempPath $path $tag
         if (Test-Path -LiteralPath $path) {
             try {
@@ -370,10 +466,12 @@ $result | ConvertTo-Json -Depth 8
 # JSON contains an error or when install/uninstall/cleanup did not complete.
 # Previously the catch block only populated $result.error, so a broken
 # installation could still return exit code 0.
-$uninstallFailed = $null -eq $result.uninstallExit -or "$($result.uninstallExit)" -ne '0'
+$installFailed = $null -eq $result.installExit -or $result.installExit -notin @(0, 3010)
+$uninstallFailed = $null -eq $result.uninstallExit -or "$($result.uninstallExit)" -notin @('0', '3010')
 $verificationFailed = (-not [string]::IsNullOrWhiteSpace([string]$result.error)) -or
-    $null -eq $result.installExit -or $result.installExit -ne 0 -or
-    $uninstallFailed -or -not [bool]$result.cleanup
+    $installFailed -or
+    $uninstallFailed -or -not [bool]$result.userDataPreservedAfterUninstall -or
+    -not [bool]$result.cleanup
 if ($verificationFailed) {
     exit 1
 }

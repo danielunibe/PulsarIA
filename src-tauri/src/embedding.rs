@@ -1,3 +1,4 @@
+use crate::domain::models::EMBEDDING_DIMS;
 /// Motor de inferencia de embeddings ONNX para búsqueda semántica.
 ///
 /// Gestiona el modelo `all-MiniLM-L6-v2` exportado a ONNX y su tokenizer asociado.
@@ -150,14 +151,14 @@ impl ONNXModelManager {
             .map_err(|e| format!("Failed to extract hidden state: {}", e))?;
 
         // 4. Mean Pooling (simplification assuming sentence-transformers style)
-        let mut embedding = vec![0.0f32; 384];
+        let mut embedding = vec![0.0f32; EMBEDDING_DIMS];
         let mut mask_sum = 0.0;
 
         for i in 0..seq_len {
             let mask = attention_mask[i] as f32;
             mask_sum += mask;
-            for j in 0..384 {
-                embedding[j] += last_hidden_state_flat[i * 384 + j] * mask;
+            for j in 0..EMBEDDING_DIMS {
+                embedding[j] += last_hidden_state_flat[i * EMBEDDING_DIMS + j] * mask;
             }
         }
 

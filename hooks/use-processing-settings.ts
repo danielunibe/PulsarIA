@@ -60,6 +60,7 @@ export function useProcessingSettings() {
   const [preparing, setPreparing] = useState(false);
   const [preparationError, setPreparationError] = useState<string | null>(null);
   const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [runtimeReady, setRuntimeReady] = useState(false);
   const [setupCompleted, setSetupCompleted] = useState(false);
   const [setupPreferencesReady, setSetupPreferencesReady] = useState(false);
   const preparationRequestRef = useRef(0);
@@ -77,18 +78,24 @@ export function useProcessingSettings() {
         invoke<HardwareProfile>('get_hardware_profile'),
         invoke<ProcessingSettings>('get_processing_settings'),
       ]);
+      const runtime = await invoke<{ ready?: boolean; message?: string }>('get_runtime_preflight');
+      if (runtime.ready === false) {
+        throw new Error(runtime.message || 'El runtime local no está listo.');
+      }
       const detectedModel = await invoke<WhisperModelStatus>('get_whisper_model_status', {
         model: persistedSettings.whisper_model,
       });
       setHardware(detectedHardware);
       setProcessing(persistedSettings);
       setModelStatus(detectedModel);
+      setRuntimeReady(true);
       updateSettings({
         processingQuality: persistedSettings.quality,
         processingProfile: persistedSettings.profile,
         videoFit: persistedSettings.video_fit,
       });
     } catch (error) {
+      setRuntimeReady(false);
       const message = error instanceof Error ? error.message : String(error);
       setInitializationError(message || 'No se pudo inicializar el motor local.');
     } finally {
@@ -172,16 +179,18 @@ export function useProcessingSettings() {
     const normalizedQuality = Math.max(0, Math.min(100, Math.round(quality)));
     const next = setup
       ? await invoke<ProcessingSettings>('save_mvp_settings', {
-        downloadDir: setup.downloadDir || '',
-        retention: setup.retention || 'keep',
-        browser: setup.browser || '',
-        formats: setup.formats?.length ? setup.formats : ['mp4', 'mp3', 'txt'],
-        minScore: setup.minScore ?? 0.45,
-        quality: normalizedQuality,
-        videoFit,
-        intent: setup.intent,
-        quotaBytes: setup.quotaBytes,
-        reserveBytes: setup.reserveBytes,
+        input: {
+          downloadDir: setup.downloadDir || '',
+          retention: setup.retention || 'keep',
+          browser: setup.browser || '',
+          formats: setup.formats?.length ? setup.formats : ['mp4', 'mp3', 'txt'],
+          minScore: setup.minScore ?? 0.45,
+          quality: normalizedQuality,
+          videoFit,
+          intent: setup.intent,
+          quotaBytes: setup.quotaBytes,
+          reserveBytes: setup.reserveBytes,
+        },
       })
       : await invoke<ProcessingSettings>('set_processing_settings', { quality: normalizedQuality, videoFit });
     setProcessing(next);
@@ -253,6 +262,7 @@ export function useProcessingSettings() {
     initializationError,
     loading,
     isNative: isTauriRuntime(),
+    runtimeReady,
     needsSetup: isTauriRuntime() && !setupCompleted && Boolean(
       !setupPreferencesReady || (processing && (!processing.configured || !modelStatus?.ready)),
     ),

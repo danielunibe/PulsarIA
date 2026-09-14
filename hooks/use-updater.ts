@@ -16,7 +16,16 @@ export type UpdaterStatus =
   | 'available'
   | 'downloading'
   | 'installing'
+  | 'blocked-by-active-job'
   | 'error';
+
+export type UpdateChannel = 'stable' | 'rc';
+
+export interface UpdatePreferences {
+  channel: UpdateChannel;
+  automaticChecks: boolean;
+  lastCheckedAt: string | null;
+}
 
 export interface UpdaterState {
   status: UpdaterStatus;
@@ -26,7 +35,15 @@ export interface UpdaterState {
   notes: string | null;
   progress: number;
   error: string | null;
+  channel: UpdateChannel;
+  automaticChecks: boolean;
+  lastCheckedAt: string | null;
 }
+
+const UPDATER_ENABLED = process.env.NEXT_PUBLIC_PULSARIA_UPDATER_ENABLED === 'true';
+const UPDATE_CHANNEL: UpdateChannel = process.env.NEXT_PUBLIC_PULSARIA_UPDATE_CHANNEL === 'rc' ? 'rc' : 'stable';
+const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const LAST_CHECK_STORAGE_KEY = 'pulsaria.updater.last-checked.v1';
 
 function errorMessage(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : String(error);
@@ -55,16 +72,18 @@ function progressFromEvent(
 }
 
 /**
- * Manual, signed desktop updater state.
+ * Signed desktop updater state.
  *
- * There is intentionally no effect that checks in the background. The caller
- * must invoke checkForUpdate from an explicit user action, and the UI decides
- * when to confirm installation/restart.
+ * Detection may happen once per 24 hours when the signed release channel is
+ * enabled. Installation is never automatic: the caller must still confirm
+ * and the app decides when it is safe to restart.
  */
-export function useUpdater(): UpdaterState & {
+export function useUpdater(options: { hasActiveJob?: boolean } = {}): UpdaterState & {
+  enabled: boolean;
   checkForUpdate: () => Promise<boolean>;
   installUpdate: () => Promise<boolean>;
 } {
+  const { hasActiveJob = false } = options;
   const [state, setState] = useState<UpdaterState>({
     status: 'idle',
     isNative: isTauriRuntime(),
@@ -73,9 +92,27 @@ export function useUpdater(): UpdaterState & {
     notes: null,
     progress: 0,
     error: null,
+    channel: UPDATE_CHANNEL,
+    automaticChecks: true,
+    lastCheckedAt: null,
   });
   const updateRef = useRef<Update | null>(null);
   const operationRef = useRef(false);
+
+  const markChecked = useCallback(() => {
+    const timestamp = new Date().toISOString();
+    setState((previous) => ({ ...previous, lastCheckedAt: timestamp }));
+    try {
+      const current = JSON.parse(window.localStorage.getItem(LAST_CHECK_STORAGE_KEY) || '{}') as Record<string, unknown>;
+      window.localStorage.setItem(LAST_CHECK_STORAGE_KEY, JSON.stringify({
+        ...current,
+        [UPDATE_CHANNEL]: timestamp,
+      }));
+    } catch {
+      // The timestamp is an optimization only. A failed preference write
+      // must not affect signed update checks.
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -107,6 +144,7 @@ export function useUpdater(): UpdaterState & {
     }));
     try {
       const update = await check({ timeout: 15_000, allowDowngrades: false });
+      markChecked();
       const previousUpdate = updateRef.current;
       updateRef.current = update;
       if (previousUpdate && previousUpdate !== update) {
@@ -144,7 +182,7 @@ export function useUpdater(): UpdaterState & {
     } finally {
       operationRef.current = false;
     }
-  }, []);
+  }, [markChecked]);
 
   const installUpdate = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -153,6 +191,14 @@ export function useUpdater(): UpdaterState & {
         isNative: false,
         status: 'error',
         error: 'La instalación requiere el shell nativo de Pulsaria.',
+      }));
+      return false;
+    }
+    if (hasActiveJob) {
+      setState((previous) => ({
+        ...previous,
+        status: 'blocked-by-active-job',
+        error: 'Guarda o espera a que terminen los trabajos activos antes de instalar una actualización.',
       }));
       return false;
     }
@@ -202,7 +248,31 @@ export function useUpdater(): UpdaterState & {
     } finally {
       operationRef.current = false;
     }
+  }, [checkForUpdate, hasActiveJob]);
+
+  useEffect(() => {
+    if (!UPDATER_ENABLED || !isTauriRuntime()) return;
+    let lastCheckedAt: string | null = null;
+    try {
+      const current = JSON.parse(window.localStorage.getItem(LAST_CHECK_STORAGE_KEY) || '{}') as Record<string, unknown>;
+      lastCheckedAt = typeof current[UPDATE_CHANNEL] === 'string' ? current[UPDATE_CHANNEL] : null;
+    } catch {
+      // An unreadable optimization timestamp means a check is due.
+    }
+    if (lastCheckedAt) {
+      setState((previous) => ({ ...previous, lastCheckedAt }));
+    }
+    const elapsed = lastCheckedAt ? Date.now() - Date.parse(lastCheckedAt) : Number.POSITIVE_INFINITY;
+    if (!Number.isFinite(elapsed) || elapsed >= CHECK_INTERVAL_MS) {
+      void checkForUpdate();
+    }
   }, [checkForUpdate]);
 
-  return { ...state, isNative: isTauriRuntime(), checkForUpdate, installUpdate };
+  return {
+    ...state,
+    isNative: isTauriRuntime(),
+    enabled: UPDATER_ENABLED,
+    checkForUpdate,
+    installUpdate,
+  };
 }

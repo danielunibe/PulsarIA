@@ -4,6 +4,7 @@ import './globals.css';
 import { SettingsProvider } from '@/lib/settings-context';
 import { I18nProvider } from '@/lib/i18n';
 import { Toaster } from 'sonner';
+import { LocalizedErrorBoundary } from '@/components/ErrorBoundary';
 
 const inter = Inter({
     subsets: ['latin'],
@@ -35,7 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <body className="font-sans antialiased" suppressHydrationWarning>
                 <SettingsProvider>
                     <I18nProvider>
-                        {children}
+                        <LocalizedErrorBoundary>{children}</LocalizedErrorBoundary>
                     </I18nProvider>
                     <Toaster
                         position="bottom-right"

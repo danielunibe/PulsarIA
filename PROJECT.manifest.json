@@ -1,7 +1,7 @@
 ﻿{
   "project": "Pulsaria",
   "name": "Pulsaria",
-  "description": "Motor multimodal de escritorio para descarga, transcripci�n, indexaci�n sem�ntica y consulta de videos cortos (TikTok, YouTube, Instagram).",
+  "description": "Motor local-first de escritorio para procesar contenido audiovisual autorizado de TikTok, generar transcripciones y análisis, e indexar una biblioteca para búsqueda literal y semántica.",
   "version": "0.1.0",
   "language": "Rust + TypeScript",
   "framework": {
@@ -13,7 +13,7 @@
     {
       "name": "ingestion",
       "path": "src-tauri/src/commands.rs",
-      "description": "Tauri IPC commands for URL ingestion, job creation, collection expansion",
+      "description": "Tauri IPC commands for authorized TikTok URL ingestion, job creation and collection expansion",
       "entrypoints": ["add_job", "get_jobs", "search_literal_transcripts", "search_transcripts"]
     },
     {
@@ -59,16 +59,12 @@
     "frontend": 3000
   },
   "tests": {
-    "rust": ["src-tauri/src/main.rs::unib_tests", "src-tauri/test_hnsw.rs"],
+    "rust": ["src-tauri/src/main.rs::unib_tests", "src-tauri/tests/test_hnsw.rs"],
     "typescript": ["semantic/__tests__/*.test.ts"],
-    "python": ["python-workers/test_demo_links.py"]
-  },
-  "docker": {
-    "compose": "docker-compose.yml",
-    "services": ["pulsar-worker", "pulsar-redis", "pulsar-frontend"]
+    "python": ["python-workers/test_*.py"]
   },
   "dependencies": {
-    "critical": ["rusqlite", "tauri", "tokio", "onnx-runtime", "hnswlib", "axum"],
+    "critical": ["rusqlite", "tauri", "tokio", "ort", "hnsw", "axum"],
     "frontend": ["next", "react", "motion", "tauri-apps/api"]
   }
 }

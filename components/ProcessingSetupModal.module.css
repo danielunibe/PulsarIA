@@ -15,12 +15,13 @@
   width: 100%;
   align-items: center;
   justify-content: center;
-  padding: clamp(1.5rem, 4vh, 3.5rem) clamp(1.25rem, 5vw, 5.5rem);
+  padding: clamp(1rem, 3vh, 2.5rem) clamp(1rem, 4vw, 4.5rem);
 }
 
 .dialog {
-  width: min(100%, 760px);
+  width: min(100%, 860px);
   color: white;
+  outline: none;
 }
 
 .statusState {
@@ -105,7 +106,7 @@
 .title {
   max-width: 22ch;
   margin: 0;
-  font-size: clamp(2.25rem, 4vw, 3rem);
+  font-size: clamp(2.1rem, 3.5vw, 2.8rem);
   font-weight: 900;
   letter-spacing: -.05em;
   line-height: 1.02;
@@ -120,8 +121,8 @@
 
 .lede {
   max-width: 54ch;
-  margin: 1.5rem 0 0;
-  color: rgba(255, 255, 255, .62);
+  margin: .85rem 0 0;
+  color: rgba(255, 255, 255, .7);
   font-size: clamp(.875rem, 1.5vw, 1rem);
   line-height: 1.75;
 }
@@ -130,7 +131,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: clamp(.75rem, 2vw, 1.5rem);
-  margin-top: clamp(2rem, 5vh, 3.75rem);
+  margin-top: 1.25rem;
 }
 
 .stat {
@@ -183,15 +184,31 @@
 
 .hardwareSummary {
   max-width: 56ch;
-  margin: 1.35rem 0 0;
-  color: rgba(255, 255, 255, .48);
+  margin: 1rem 0 0;
+  color: rgba(255, 255, 255, .62);
   font-size: .75rem;
   line-height: 1.6;
 }
 
 .controls {
-  margin-top: clamp(1.75rem, 4vh, 3rem);
-  padding-block: 1.75rem;
+  margin-top: clamp(.75rem, 2vh, 1.25rem);
+  padding-block: clamp(.75rem, 2vh, 1.25rem);
+}
+
+.welcomeStep,
+.hardwareStep {
+  min-height: clamp(16rem, 34vh, 24rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.welcomeStep .titleSmall {
+  max-width: 12ch;
+}
+
+.hardwareStep .controlTitle {
+  margin-top: 2rem;
 }
 
 .controlHeader {
@@ -202,7 +219,7 @@
 }
 
 .sectionEyebrow {
-  color: rgba(255, 255, 255, .42);
+  color: rgba(255, 255, 255, .62);
   font-size: .56rem;
   letter-spacing: .18em;
 }
@@ -541,10 +558,13 @@
 .stepRail {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: .75rem;
-  padding-top: 1.1rem;
+  row-gap: .9rem;
+  margin: 0;
+  padding: .8rem 0 0;
   border-top: 1px solid rgba(255, 255, 255, .1);
+  list-style: none;
 }
 
 .stepItem {
@@ -552,8 +572,8 @@
   align-items: center;
   gap: .5rem;
   min-width: 0;
-  color: rgba(255, 255, 255, .25);
-  font-size: .58rem;
+  color: rgba(255, 255, 255, .48);
+  font-size: .62rem;
   font-weight: 900;
   letter-spacing: .12em;
   line-height: 1.3;
@@ -562,6 +582,10 @@
 
 .stepItem[data-active="true"] {
   color: rgba(255, 255, 255, .72);
+}
+
+.stepItem[data-current="true"] {
+  color: rgba(255, 255, 255, .96);
 }
 
 .stepDot {
@@ -689,6 +713,58 @@
   gap: 1rem;
 }
 
+.hardwareActions {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  flex: 0 0 auto;
+}
+
+.hardwareCompactSummary {
+  margin: .4rem 0 0;
+  color: rgba(255, 255, 255, .78);
+  font-size: .75rem;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.detailsToggle,
+.privacyCompact button {
+  border: 0;
+  background: transparent;
+  padding: .5rem .25rem;
+  color: rgba(37, 244, 238, .9);
+  cursor: pointer;
+  font: inherit;
+  font-size: .62rem;
+  font-weight: 900;
+  letter-spacing: .05em;
+  text-decoration: underline;
+  text-underline-offset: .18em;
+}
+
+.detailsToggle:focus-visible,
+.privacyCompact button:focus-visible {
+  outline: 2px solid rgba(37, 244, 238, .9);
+  outline-offset: 3px;
+  border-radius: .25rem;
+}
+
+.privacyCompact {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  margin: .7rem 0 0;
+  color: rgba(255, 255, 255, .62);
+  font-size: .68rem;
+  line-height: 1.5;
+}
+
+.privacyCompact svg {
+  flex: 0 0 auto;
+  color: #25f4ee;
+}
+
 .localBadge {
   display: inline-flex;
   align-items: center;
@@ -710,7 +786,7 @@
   margin-top: 1.35rem;
   border-left: 2px solid rgba(37, 244, 238, .45);
   padding: .1rem 0 .1rem .8rem;
-  color: rgba(255, 255, 255, .46);
+  color: rgba(255, 255, 255, .68);
   font-size: .67rem;
   line-height: 1.6;
 }
@@ -726,18 +802,28 @@
 }
 
 .privacyNote strong {
-  color: rgba(255, 255, 255, .78);
+  color: rgba(255, 255, 255, .92);
 }
 
 .stepContent {
   min-width: 0;
 }
 
+.questionCounter {
+  margin: 1.35rem 0 0;
+  color: rgba(37, 244, 238, .72);
+  font-size: .58rem;
+  font-weight: 900;
+  letter-spacing: .14em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
 .questionList {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  margin-top: 1.75rem;
+  margin-top: 1.35rem;
 }
 
 .questionBlock {
@@ -777,6 +863,7 @@
 
 .optionCard {
   align-items: flex-start;
+  min-height: 3.25rem;
   gap: .65rem;
   padding: .8rem;
 }
@@ -1081,11 +1168,24 @@
 }
 
 .navigation {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: .75rem;
   align-items: center;
-  margin-top: 1.35rem;
+  margin-top: 1.1rem;
+  padding: 1rem .25rem .5rem;
+  background: linear-gradient(180deg, transparent 0%, rgba(4, 6, 12, .94) 35%);
+}
+
+.navigation[data-first-step="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.backOnlyNavigation {
+  grid-template-columns: auto;
 }
 
 .backButton {
@@ -1161,8 +1261,22 @@
 }
 
 @media (max-width: 680px) {
+  .hardwareHeader {
+    align-items: flex-start;
+  }
+
+  .hardwareActions {
+    align-items: flex-end;
+    flex-direction: column;
+    gap: .25rem;
+  }
+
   .wizardHeader {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stepRail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .stepCounter {
@@ -1187,6 +1301,16 @@
 }
 
 @media (max-width: 460px) {
+  .hardwareHeader {
+    flex-direction: column;
+  }
+
+  .hardwareActions {
+    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
   .optionGrid,
   .navigation {
     grid-template-columns: 1fr;
@@ -1208,19 +1332,28 @@
   .stage {
     align-items: flex-start;
     padding-top: 1.5rem;
-    padding-bottom: 2.5rem;
+    padding-bottom: 1.5rem;
   }
 
   .heroCopy {
-    margin-top: 1rem;
+    margin-top: .75rem;
   }
 
   .stats {
-    margin-top: 1.5rem;
+    margin-top: 1rem;
   }
 
   .controls {
-    margin-top: 1.25rem;
-    padding-block: 1rem;
+    margin-top: .75rem;
+    padding-block: .75rem;
+  }
+
+  .lede {
+    margin-top: .65rem;
+    line-height: 1.55;
+  }
+
+  .stepRail {
+    padding-top: .65rem;
   }
 }

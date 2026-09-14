@@ -6,6 +6,8 @@ use std::fmt;
 // Sin dependencias de Infraestructura (UI, DB o Python), 100% Rust puro.
 // ========================================================================
 
+pub const EMBEDDING_DIMS: usize = 384;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QueueStep {
     #[serde(rename = "queued")]
@@ -159,4 +161,11 @@ pub struct JobMessage {
     pub url: String,
     pub attempt: u32,
     pub cookies_browser: Option<String>,
+    pub formats: String,
+    pub download_dir: String,
+    pub retention: String,
+    pub processing_quality: String,
+    pub whisper_model: String,
+    pub whisper_device: String,
+    pub whisper_compute_type: String,
 }

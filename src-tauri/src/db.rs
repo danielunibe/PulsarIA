@@ -1,42 +1,12 @@
+use crate::domain::models::EMBEDDING_DIMS;
+pub use crate::domain::models::{JobRecord, SearchResult};
 use rusqlite::{params, Connection, OptionalExtension, Result, Row};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct JobRecord {
-    pub id: i64,
-    pub url: String,
-    pub status: String,
-    pub progress: i32,
-    pub retry_count: u32,
-    pub created_at: String,
-    pub title: Option<String>,
-    pub author: Option<String>,
-    pub thumbnail: Option<String>,
-    pub duration: Option<i32>,
-    pub video_path: Option<String>,
-    pub audio_path: Option<String>,
-    pub transcript_path: Option<String>,
-    pub keep_status: Option<String>,
-    pub platform: Option<String>,
-    pub error_message: Option<String>,
-    pub visual_analysis: Option<String>,
-    pub instructional_guide: Option<String>,
-    pub video_bytes: Option<u64>,
-    pub audio_bytes: Option<u64>,
-    pub downloaded_at: Option<String>,
-    pub last_accessed_at: Option<String>,
-    pub play_count: u64,
-    pub open_count: u64,
-    pub search_hit_count: u64,
-    pub favorite: bool,
-    pub pinned: bool,
-    pub source_state: String,
-    pub purged_at: Option<String>,
-    pub purged_reason: Option<String>,
-    pub poster_path: Option<String>,
-}
+pub const EMBEDDING_MODEL_ID: &str = "all-MiniLM-L6-v2";
 
 /// Metadata written by ingestion and progress events.
 ///
@@ -55,26 +25,13 @@ pub struct MediaMetadata<'a> {
     pub platform: &'a str,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct SearchResult {
-    #[serde(rename = "video_id")]
-    pub job_id: i64,
-    pub title: Option<String>,
-    pub thumbnail: Option<String>,
-    #[serde(rename = "matched_text")]
-    pub chunk_text: String,
-    pub chunk_index: i64,
-    pub similarity_score: f32,
-}
-
-pub const EMBEDDING_DIMENSIONS: usize = 384;
-const EMBEDDING_BYTES: usize = EMBEDDING_DIMENSIONS * std::mem::size_of::<f32>();
+const EMBEDDING_BYTES: usize = EMBEDDING_DIMS * std::mem::size_of::<f32>();
 
 fn validate_embedding(embedding: &[f32]) -> Result<()> {
-    if embedding.len() != EMBEDDING_DIMENSIONS {
+    if embedding.len() != EMBEDDING_DIMS {
         return Err(rusqlite::Error::InvalidParameterName(format!(
             "embedding dimension mismatch: expected {}, got {}",
-            EMBEDDING_DIMENSIONS,
+            EMBEDDING_DIMS,
             embedding.len()
         )));
     }
@@ -115,6 +72,83 @@ fn deserialize_embedding(blob: &[u8], column: usize) -> Result<Vec<f32>> {
         )
     })?;
     Ok(embedding)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EmbeddingIndexStatus {
+    pub model_id: String,
+    pub stored_hash: Option<String>,
+    pub current_hash: String,
+    pub dimensions: usize,
+    pub stale: bool,
+}
+
+pub fn embedding_model_fingerprint(model_dir: &Path) -> std::result::Result<String, String> {
+    let model_path = model_dir.join("model.onnx");
+    let tokenizer_path = model_dir.join("tokenizer.json");
+    let model = fs::read(&model_path)
+        .map_err(|error| format!("could not read {}: {error}", model_path.display()))?;
+    let tokenizer = fs::read(&tokenizer_path)
+        .map_err(|error| format!("could not read {}: {error}", tokenizer_path.display()))?;
+    let mut hasher = Sha256::new();
+    hasher.update(b"pulsaria-embedding-model-v1\0");
+    hasher.update(model);
+    hasher.update(b"\0tokenizer\0");
+    hasher.update(tokenizer);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+pub fn get_embedding_index_status(
+    connection: &Connection,
+    model_dir: &Path,
+) -> std::result::Result<EmbeddingIndexStatus, String> {
+    let current_hash = embedding_model_fingerprint(model_dir)?;
+    let stored = connection
+        .query_row(
+            "SELECT model_id, model_hash, dimensions FROM embedding_metadata WHERE id = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let (model_id, stored_hash, dimensions) = stored.unwrap_or_else(|| {
+        (
+            EMBEDDING_MODEL_ID.to_string(),
+            String::new(),
+            EMBEDDING_DIMS as i64,
+        )
+    });
+    Ok(EmbeddingIndexStatus {
+        stale: stored_hash != current_hash || dimensions != EMBEDDING_DIMS as i64,
+        model_id,
+        stored_hash: if stored_hash.is_empty() {
+            None
+        } else {
+            Some(stored_hash)
+        },
+        current_hash,
+        dimensions: usize::try_from(dimensions).unwrap_or_default(),
+    })
+}
+
+pub fn record_embedding_model(connection: &Connection, model_hash: &str) -> Result<()> {
+    connection.execute(
+        "INSERT INTO embedding_metadata (id, model_id, model_hash, dimensions)
+         VALUES (1, ?1, ?2, ?3)
+         ON CONFLICT(id) DO UPDATE SET
+             model_id = excluded.model_id,
+             model_hash = excluded.model_hash,
+             dimensions = excluded.dimensions,
+             updated_at = CURRENT_TIMESTAMP",
+        params![EMBEDDING_MODEL_ID, model_hash, EMBEDDING_DIMS as i64],
+    )?;
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -174,9 +208,29 @@ pub struct LibraryRepairReport {
     pub missing_media_paths: usize,
     pub preserved_jobs: usize,
     pub backup_path: Option<String>,
+    #[serde(default)]
+    pub storage: Option<StorageReconciliationReport>,
 }
 
-pub const SCHEMA_VERSION: i64 = 6;
+/// Resultado de reconciliar las referencias derivadas de almacenamiento.
+///
+/// La reconciliación nunca elimina el archivo físico de un usuario. Solo
+/// refresca tamaños, repara una ruta de exportación que todavía puede
+/// recuperarse desde la papelera y retira filas cuyo archivo ya no existe.
+/// El conocimiento durable (transcript, segmentos y embeddings) queda fuera
+/// de este contrato.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct StorageReconciliationReport {
+    pub checked_artifacts: usize,
+    pub corrected_artifact_sizes: usize,
+    pub removed_stale_artifacts: usize,
+    pub checked_generated_outputs: usize,
+    pub corrected_output_sizes: usize,
+    pub repaired_output_paths: usize,
+    pub removed_stale_outputs: usize,
+}
+
+pub const SCHEMA_VERSION: i64 = 7;
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn migration_error(message: impl Into<String>) -> rusqlite::Error {
@@ -302,6 +356,8 @@ pub fn init_db() -> Result<Connection> {
     // Keep all writable application data in one configurable location. In
     // development this resolves to the repository's data/ directory; in an
     // installed build it falls back to the user's application data folder.
+    // New Windows installs use `%APPDATA%\\Pulsar Eventide`; the legacy
+    // `%APPDATA%\\Pulsaria` directory is retained when it already exists.
     let data_dir = data_dir_path();
     fs::create_dir_all(&data_dir)
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
@@ -435,6 +491,33 @@ pub fn init_db() -> Result<Connection> {
         [],
     )?;
     transaction.execute(
+        "CREATE TABLE IF NOT EXISTS generated_outputs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            format TEXT NOT NULL,
+            path TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            validated BOOLEAN NOT NULL DEFAULT 0,
+            label TEXT NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(job_id, format),
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS generated_output_purge (
+            purge_id INTEGER NOT NULL,
+            output_id INTEGER NOT NULL,
+            original_path TEXT NOT NULL,
+            trash_path TEXT NOT NULL,
+            FOREIGN KEY(purge_id) REFERENCES purge_history(id) ON DELETE CASCADE,
+            FOREIGN KEY(output_id) REFERENCES generated_outputs(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    transaction.execute(
         "CREATE TABLE IF NOT EXISTS purge_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id INTEGER NOT NULL,
@@ -506,6 +589,17 @@ pub fn init_db() -> Result<Connection> {
             end_time REAL NOT NULL,
             text TEXT NOT NULL,
             FOREIGN KEY(job_id) REFERENCES jobs(id)
+        )",
+        [],
+    )?;
+
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS embedding_metadata (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            model_id TEXT NOT NULL,
+            model_hash TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         )",
         [],
     )?;
@@ -945,6 +1039,22 @@ pub fn insert_transcript_chunk(
     Ok(())
 }
 
+pub fn get_all_embedding_rows(conn: &Connection) -> Result<Vec<(i64, i64, Vec<f32>)>> {
+    let mut statement = conn.prepare(
+        "SELECT job_id, chunk_index, embedding_vector
+         FROM transcript_embeddings
+         ORDER BY job_id ASC, chunk_index ASC",
+    )?;
+    let rows = statement.query_map([], |row| {
+        let job_id = row.get(0)?;
+        let chunk_index = row.get(1)?;
+        let blob: Vec<u8> = row.get(2)?;
+        let embedding = deserialize_embedding(&blob, 2)?;
+        Ok((job_id, chunk_index, embedding))
+    })?;
+    rows.collect()
+}
+
 /// Replaces only the derived embedding rows for a job in one transaction.
 ///
 /// Transcript segments are source data and must survive an embedding rebuild.
@@ -1301,20 +1411,31 @@ pub fn data_dir_path() -> std::path::PathBuf {
 
     #[cfg(windows)]
     if let Some(app_data) = std::env::var_os("APPDATA") {
-        return std::path::PathBuf::from(app_data).join("Pulsaria");
+        return user_data_dir(std::path::PathBuf::from(app_data));
     }
 
     if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
-        return std::path::PathBuf::from(data_home).join("Pulsaria");
+        return user_data_dir(std::path::PathBuf::from(data_home));
     }
     if let Some(home) = std::env::var_os("HOME") {
-        return std::path::PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("Pulsaria");
+        return user_data_dir(std::path::PathBuf::from(home).join(".local").join("share"));
     }
 
     std::path::PathBuf::from("data")
+}
+
+/// New installations keep writable data under the product-family name used
+/// by the desktop contract. Existing users may still have the original
+/// `Pulsaria` directory; retaining it when the new directory is absent avoids
+/// silently presenting an empty library after an upgrade.
+fn user_data_dir(base: std::path::PathBuf) -> std::path::PathBuf {
+    let current = base.join("Pulsar Eventide");
+    let legacy = base.join("Pulsaria");
+    if !current.exists() && legacy.exists() {
+        legacy
+    } else {
+        current
+    }
 }
 
 pub fn find_job_id_by_url(conn: &Connection, url: &str) -> Result<Option<i64>> {
@@ -1520,6 +1641,75 @@ pub fn persist_worker_result(
     update_media_analysis(&transaction, job_id, visual_analysis, instructional_guide)?;
 
     transaction.commit()
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedOutputRecord {
+    pub id: i64,
+    pub job_id: i64,
+    pub category: String,
+    pub format: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub validated: bool,
+    pub label: String,
+    pub created_at: String,
+}
+
+pub struct GeneratedOutputInput<'a> {
+    pub job_id: i64,
+    pub category: &'a str,
+    pub format: &'a str,
+    pub path: &'a str,
+    pub size_bytes: u64,
+    pub validated: bool,
+    pub label: &'a str,
+}
+
+pub fn register_generated_output(conn: &Connection, input: GeneratedOutputInput<'_>) -> Result<()> {
+    conn.execute(
+        "INSERT INTO generated_outputs
+            (job_id, category, format, path, size_bytes, validated, label)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(job_id, format) DO UPDATE SET
+            category = excluded.category,
+            path = excluded.path,
+            size_bytes = excluded.size_bytes,
+            validated = excluded.validated,
+            label = excluded.label",
+        params![
+            input.job_id,
+            input.category,
+            input.format,
+            input.path,
+            i64::try_from(input.size_bytes).unwrap_or(i64::MAX),
+            input.validated,
+            input.label
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_generated_outputs(conn: &Connection, job_id: i64) -> Result<Vec<GeneratedOutputRecord>> {
+    let mut statement = conn.prepare(
+        "SELECT id, job_id, category, format, path, size_bytes, validated, label, created_at
+         FROM generated_outputs WHERE job_id = ?1 ORDER BY category, format",
+    )?;
+    let rows = statement.query_map(params![job_id], |row| {
+        Ok(GeneratedOutputRecord {
+            id: row.get(0)?,
+            job_id: row.get(1)?,
+            category: row.get(2)?,
+            format: row.get(3)?,
+            path: row.get(4)?,
+            size_bytes: row.get::<_, i64>(5)?.max(0) as u64,
+            validated: row.get::<_, i64>(6)? != 0,
+            label: row.get(7)?,
+            created_at: row.get(8)?,
+        })
+    })?;
+    rows.collect()
 }
 
 pub struct AutoPlaylistInput<'a> {
@@ -1953,6 +2143,175 @@ pub fn prune_health_events(conn: &Connection, keep: usize) -> Result<()> {
     Ok(())
 }
 
+fn path_is_within_existing(path: &Path, root: &Path) -> bool {
+    let Ok(path) = fs::canonicalize(path) else {
+        return false;
+    };
+    let Ok(root) = fs::canonicalize(root) else {
+        return false;
+    };
+    path.starts_with(root)
+}
+
+/// Reconciles durable derivative references after a crash, manual file move or
+/// an interrupted purge. Existing files are never deleted here: this routine
+/// only updates their measured size, repairs a generated output whose
+/// recoverable copy is still present, or removes a database row whose file is
+/// gone. Knowledge tables are intentionally not queried or modified.
+pub fn reconcile_storage(
+    conn: &Connection,
+    media_root: &Path,
+) -> Result<StorageReconciliationReport> {
+    let artifact_rows = {
+        let mut statement = conn.prepare(
+            "SELECT id, job_id, path, size_bytes
+             FROM media_artifacts
+             ORDER BY id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    let output_rows = {
+        let mut statement = conn.prepare(
+            "SELECT id, path, size_bytes
+             FROM generated_outputs
+             ORDER BY id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+
+    let artifact_root = data_dir_path().join("artifacts");
+    let trash_root = media_root.join(".pulsaria").join("trash");
+    let transaction = conn.unchecked_transaction()?;
+    let mut report = StorageReconciliationReport {
+        checked_artifacts: artifact_rows.len(),
+        checked_generated_outputs: output_rows.len(),
+        ..StorageReconciliationReport::default()
+    };
+
+    for (artifact_id, job_id, raw_path, stored_size) in artifact_rows {
+        let path = PathBuf::from(&raw_path);
+        let expected_root = artifact_root.join(job_id.to_string());
+        if path.is_file() && path_is_within_existing(&path, &expected_root) {
+            let actual_size = i64::try_from(
+                fs::metadata(&path)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
+                    .len(),
+            )
+            .unwrap_or(i64::MAX);
+            if stored_size != actual_size {
+                transaction.execute(
+                    "UPDATE media_artifacts SET size_bytes = ?1 WHERE id = ?2",
+                    params![actual_size, artifact_id],
+                )?;
+                report.corrected_artifact_sizes += 1;
+            }
+        } else {
+            // A stale or unsafe artifact reference is removed from the index,
+            // never from disk. This prevents later UI actions from following
+            // a path that no longer belongs to the application.
+            transaction.execute(
+                "DELETE FROM media_artifacts WHERE id = ?1",
+                params![artifact_id],
+            )?;
+            report.removed_stale_artifacts += 1;
+        }
+    }
+
+    for (output_id, raw_path, stored_size) in output_rows {
+        let path = PathBuf::from(&raw_path);
+        if path.is_file() {
+            // A user can change the media root between sessions. Preserve an
+            // existing output in that case and only refresh its size; purge
+            // still performs its own root-safety check before moving it.
+            let actual_size = i64::try_from(
+                fs::metadata(&path)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
+                    .len(),
+            )
+            .unwrap_or(i64::MAX);
+            if stored_size != actual_size {
+                transaction.execute(
+                    "UPDATE generated_outputs SET size_bytes = ?1 WHERE id = ?2",
+                    params![actual_size, output_id],
+                )?;
+                report.corrected_output_sizes += 1;
+            }
+            continue;
+        }
+
+        // A purge may have committed its history immediately before the
+        // process stopped. If the row still points at the old path, recover
+        // the path to the copy that is present in the configured media root or
+        // in the app-owned trash so undo remains possible.
+        let replacement = transaction
+            .query_row(
+                "SELECT original_path, trash_path
+                 FROM generated_output_purge
+                 WHERE output_id = ?1
+                 ORDER BY purge_id DESC
+                 LIMIT 1",
+                params![output_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let replacement = replacement.and_then(|(original, trash)| {
+            [PathBuf::from(trash), PathBuf::from(original)]
+                .into_iter()
+                .find(|candidate| {
+                    candidate.is_file()
+                        && (path_is_within_existing(candidate, media_root)
+                            || path_is_within_existing(candidate, &trash_root))
+                })
+        });
+
+        if let Some(replacement) = replacement {
+            let actual_size = i64::try_from(
+                fs::metadata(&replacement)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
+                    .len(),
+            )
+            .unwrap_or(i64::MAX);
+            transaction.execute(
+                "UPDATE generated_outputs SET path = ?1, size_bytes = ?2 WHERE id = ?3",
+                params![
+                    replacement.to_string_lossy().to_string(),
+                    actual_size,
+                    output_id
+                ],
+            )?;
+            report.repaired_output_paths += 1;
+        } else {
+            transaction.execute(
+                "DELETE FROM generated_output_purge WHERE output_id = ?1",
+                params![output_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM generated_outputs WHERE id = ?1",
+                params![output_id],
+            )?;
+            report.removed_stale_outputs += 1;
+        }
+    }
+
+    transaction.commit()?;
+    Ok(report)
+}
+
 pub fn repair_library(conn: &Connection) -> Result<LibraryRepairReport> {
     let total_jobs: usize = conn.query_row("SELECT COUNT(*) FROM jobs", [], |row| row.get(0))?;
 
@@ -2055,6 +2414,7 @@ pub fn repair_library(conn: &Connection) -> Result<LibraryRepairReport> {
         interrupted_jobs,
         missing_media_paths,
         backup_path: None,
+        storage: None,
     })
 }
 
@@ -2121,6 +2481,25 @@ mod tests {
 
     static DATA_DIR_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    #[test]
+    fn user_data_directory_prefers_new_name_without_orphaning_legacy_data() {
+        let base = std::env::temp_dir().join(format!(
+            "pulsaria-data-path-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let current = base.join("Pulsar Eventide");
+        let legacy = base.join("Pulsaria");
+
+        assert_eq!(user_data_dir(base.clone()), current);
+        fs::create_dir_all(&legacy).unwrap();
+        assert_eq!(user_data_dir(base.clone()), legacy);
+        fs::create_dir_all(&current).unwrap();
+        assert_eq!(user_data_dir(base.clone()), current);
+
+        fs::remove_dir_all(base).unwrap();
+    }
+
     fn memory_db() -> Connection {
         let conn = Connection::open_in_memory().expect("Failed to open in-memory SQLite");
         conn.execute_batch(
@@ -2178,18 +2557,35 @@ mod tests {
                 end_time REAL NOT NULL,
                 text TEXT NOT NULL
             );
-            CREATE TABLE media_artifacts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_id INTEGER NOT NULL,
-                kind TEXT NOT NULL,
+             CREATE TABLE media_artifacts (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 job_id INTEGER NOT NULL,
+                 kind TEXT NOT NULL,
                 path TEXT NOT NULL,
                 timestamp REAL,
                 label TEXT,
                 protected BOOLEAN NOT NULL DEFAULT 0,
-                size_bytes INTEGER NOT NULL DEFAULT 0,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE purge_history (
+                 size_bytes INTEGER NOT NULL DEFAULT 0,
+                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+             );
+             CREATE TABLE generated_outputs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 job_id INTEGER NOT NULL,
+                 category TEXT NOT NULL,
+                 format TEXT NOT NULL,
+                 path TEXT NOT NULL,
+                 size_bytes INTEGER NOT NULL DEFAULT 0,
+                 validated BOOLEAN NOT NULL DEFAULT 0,
+                 label TEXT NOT NULL,
+                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+             );
+             CREATE TABLE generated_output_purge (
+                 purge_id INTEGER NOT NULL,
+                 output_id INTEGER NOT NULL,
+                 original_path TEXT NOT NULL,
+                 trash_path TEXT NOT NULL
+             );
+             CREATE TABLE purge_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id INTEGER NOT NULL,
                 original_video_path TEXT,
@@ -2224,6 +2620,13 @@ mod tests {
                 diagnosis TEXT NOT NULL,
                 action TEXT,
                 result TEXT
+            );
+            CREATE TABLE embedding_metadata (
+                id INTEGER PRIMARY KEY CHECK(id = 1),
+                model_id TEXT NOT NULL,
+                model_hash TEXT NOT NULL,
+                dimensions INTEGER NOT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );",
         )
         .expect("Failed to create test schema");
@@ -2231,7 +2634,7 @@ mod tests {
     }
 
     fn test_embedding(first: f32, second: f32) -> Vec<f32> {
-        let mut embedding = vec![0.0; EMBEDDING_DIMENSIONS];
+        let mut embedding = vec![0.0; EMBEDDING_DIMS];
         embedding[0] = first;
         embedding[1] = second;
         embedding
@@ -2520,6 +2923,113 @@ mod tests {
     }
 
     #[test]
+    fn storage_reconciliation_refreshes_sizes_and_removes_only_stale_references() {
+        let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
+        let previous_data_dir = std::env::var_os("PULSAR_DATA_DIR");
+        let data_dir = std::env::temp_dir().join(format!(
+            "pulsaria-reconcile-data-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let media_root = std::env::temp_dir().join(format!(
+            "pulsaria-reconcile-media-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::env::set_var("PULSAR_DATA_DIR", &data_dir);
+
+        let conn = memory_db();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/reconcile").unwrap();
+        let artifact_dir = data_dir.join("artifacts").join(job_id.to_string());
+        fs::create_dir_all(&artifact_dir).unwrap();
+        let artifact_path = artifact_dir.join("poster.jpg");
+        fs::write(&artifact_path, b"poster").unwrap();
+        let stale_artifact = artifact_dir.join("missing.jpg");
+        conn.execute(
+            "INSERT INTO media_artifacts (job_id, kind, path, size_bytes)
+             VALUES (?1, 'poster', ?2, 999), (?1, 'keyframe', ?3, 123)",
+            params![
+                job_id,
+                artifact_path.to_string_lossy().to_string(),
+                stale_artifact.to_string_lossy().to_string()
+            ],
+        )
+        .unwrap();
+
+        let output_path = media_root
+            .join("media")
+            .join(job_id.to_string())
+            .join("exports")
+            .join("video.mp4");
+        fs::create_dir_all(output_path.parent().unwrap()).unwrap();
+        fs::write(&output_path, b"generated video").unwrap();
+        let stale_output = media_root
+            .join("media")
+            .join(job_id.to_string())
+            .join("gone.mp4");
+        conn.execute(
+            "INSERT INTO generated_outputs
+                 (job_id, category, format, path, size_bytes, validated, label)
+             VALUES (?1, 'video', 'mp4', ?2, 999, 1, 'VIDEO MP4'),
+                    (?1, 'video', 'mkv', ?3, 999, 1, 'VIDEO MKV')",
+            params![
+                job_id,
+                output_path.to_string_lossy().to_string(),
+                stale_output.to_string_lossy().to_string()
+            ],
+        )
+        .unwrap();
+
+        let report = reconcile_storage(&conn, &media_root).unwrap();
+        assert_eq!(report.checked_artifacts, 2);
+        assert_eq!(report.corrected_artifact_sizes, 1);
+        assert_eq!(report.removed_stale_artifacts, 1);
+        assert_eq!(report.checked_generated_outputs, 2);
+        assert_eq!(report.corrected_output_sizes, 1);
+        assert_eq!(report.removed_stale_outputs, 1);
+        assert_eq!(fs::metadata(&artifact_path).unwrap().len(), 6);
+        assert_eq!(fs::metadata(&output_path).unwrap().len(), 15);
+        assert_eq!(
+            conn.query_row(
+                "SELECT size_bytes FROM media_artifacts WHERE path = ?1",
+                params![artifact_path.to_string_lossy().to_string()],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            6
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT size_bytes FROM generated_outputs WHERE path = ?1",
+                params![output_path.to_string_lossy().to_string()],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            15
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM media_artifacts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM generated_outputs", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+
+        if let Some(previous) = previous_data_dir {
+            std::env::set_var("PULSAR_DATA_DIR", previous);
+        } else {
+            std::env::remove_var("PULSAR_DATA_DIR");
+        }
+        fs::remove_dir_all(data_dir).unwrap();
+        fs::remove_dir_all(media_root).unwrap();
+    }
+
+    #[test]
     fn clear_staging_never_removes_durable_transcript() {
         let conn = memory_db();
         let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/staging").unwrap();
@@ -2631,6 +3141,38 @@ mod tests {
         assert_eq!(migrated_source.url, "https://www.tiktok.com/@creator");
         assert_eq!(migrated_source.source_type, "profile");
         assert!(!migrated_source.active);
+    }
+
+    #[test]
+    fn embedding_metadata_marks_index_stale_when_model_fingerprint_changes() {
+        let conn = memory_db();
+        let model_dir = std::env::temp_dir().join(format!(
+            "pulsaria-embedding-model-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&model_dir).unwrap();
+        fs::write(model_dir.join("model.onnx"), b"model-v1").unwrap();
+        fs::write(model_dir.join("tokenizer.json"), b"tokenizer-v1").unwrap();
+
+        let initial = get_embedding_index_status(&conn, &model_dir).unwrap();
+        assert!(initial.stale);
+        assert!(initial.stored_hash.is_none());
+        record_embedding_model(&conn, &initial.current_hash).unwrap();
+
+        let current = get_embedding_index_status(&conn, &model_dir).unwrap();
+        assert!(!current.stale);
+        assert_eq!(
+            current.stored_hash.as_deref(),
+            Some(initial.current_hash.as_str())
+        );
+
+        fs::write(model_dir.join("tokenizer.json"), b"tokenizer-v2").unwrap();
+        let changed = get_embedding_index_status(&conn, &model_dir).unwrap();
+        assert!(changed.stale);
+        assert_ne!(changed.current_hash, initial.current_hash);
+
+        fs::remove_dir_all(model_dir).unwrap();
     }
 
     #[test]

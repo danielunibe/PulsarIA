@@ -9,7 +9,6 @@ import { Sidebar } from '@/components/Sidebar';
 import { Header, WindowTitlebar, type SearchMode } from '@/components/Header';
 
 import { VideoGrid } from '@/components/VideoGrid';
-import { SettingsPanel } from '@/components/SettingsPanel';
 import { toast } from 'sonner';
 import { useScrollParallax } from '@/hooks/useScrollParallax';
 import { FaMagnifyingGlass, FaArrowLeft, FaBrain } from 'react-icons/fa6';
@@ -22,9 +21,14 @@ import { generateGeminiChatResponse } from '@/lib/gemini';
 import { useJobs, type JobRecord, isCompletedJob } from '@/hooks/use-jobs';
 import { isTauriRuntime, useProcessingSettings } from '@/hooks/use-processing-settings';
 import { ProcessingSetupModal } from '@/components/ProcessingSetupModal';
+import { LegalConsentModal } from '@/components/LegalConsentModal';
+import { WelcomeAnimation } from '@/components/WelcomeAnimation';
+import { useLegalConsent } from '@/hooks/use-legal-consent';
 import { CinemaMode } from '@/components/CinemaMode';
 import type { PageConfig, SortKey } from '@/components/PagePanel';
 import type { CinemaVideo, VideoData } from '@/types';
+import { apiFetch } from '@/lib/api-client';
+import { LocalizedErrorBoundary } from '@/components/ErrorBoundary';
 
 type SearchVideoDetails = VideoData & {
     sourceState?: 'local' | 'online' | 'unavailable';
@@ -40,6 +44,11 @@ const ColorBends = dynamic(
 
 const ExpandedVideoModal = dynamic(
     () => import('@/components/ExpandedVideoModal').then((mod) => mod.ExpandedVideoModal),
+    { ssr: false }
+);
+
+const SettingsPanel = dynamic(
+    () => import('@/components/SettingsPanel').then((mod) => mod.SettingsPanel),
     { ssr: false }
 );
 
@@ -85,6 +94,9 @@ export default function Page() {
     const { settings } = useSettings();
     const { t } = useI18n();
     const processingSetup = useProcessingSettings();
+    const legalConsent = useLegalConsent();
+    const legalGateReady = !isTauriRuntime() || legalConsent.accepted;
+    const [welcomeAnimationVisible, setWelcomeAnimationVisible] = useState(false);
     const activeTheme = settings.theme || 'carbon';
     const [settingsOpen, setSettingsOpen] = useState(false);
     const settingsPanelRef = useRef<HTMLDivElement>(null);
@@ -104,6 +116,25 @@ export default function Page() {
         refresh: refreshJobs,
     } = useJobs();
     const [basePath, setBasePath] = useState('');
+
+    useEffect(() => {
+        if (!isTauriRuntime() || processingSetup.loading || !processingSetup.runtimeReady || !processingSetup.hardware || !processingSetup.processing) return;
+        try {
+            if (window.localStorage.getItem('pulsaria.welcome-animation.v1') === 'completed') return;
+            setWelcomeAnimationVisible(true);
+        } catch {
+            setWelcomeAnimationVisible(true);
+        }
+    }, [processingSetup.hardware, processingSetup.loading, processingSetup.processing, processingSetup.runtimeReady]);
+
+    const finishWelcomeAnimation = useCallback(() => {
+        try {
+            window.localStorage.setItem('pulsaria.welcome-animation.v1', 'completed');
+        } catch {
+            // A failed preference write must not trap the user in the animation.
+        }
+        setWelcomeAnimationVisible(false);
+    }, []);
 
     const completedJobs = jobs.filter((j: JobRecord) => {
         if (!isCompletedJob(j)) return false;
@@ -284,7 +315,7 @@ export default function Page() {
                 const endpoint = requestedMode === 'literal'
                     ? `${REST_API_BASE}/search/literal`
                     : `${REST_API_BASE}/search`;
-                const response = await fetch(endpoint, {
+                const response = await apiFetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ query: normalizedQuery, limit: 10 }),
@@ -380,9 +411,10 @@ export default function Page() {
                     jobId: result.video_id,
                     accessKind: 'search',
                 }))
-                .catch(() => {
+                .catch((error) => {
                     // Search navigation remains usable if telemetry is
                     // unavailable during a browser/native transition.
+                    console.warn('Could not record search media access:', error);
                 });
         }
         setActiveVideoId(result.video_id);
@@ -567,7 +599,7 @@ export default function Page() {
                         <span>{jobsError || 'La biblioteca local no está disponible en este momento.'}</span>
                         <button
                             type="button"
-                            onClick={() => void refreshJobs().catch(() => {})}
+                            onClick={() => void refreshJobs().catch((error) => console.warn('Manual job refresh failed:', error))}
                             className="shrink-0 font-bold uppercase tracking-wider text-[#25f4ee] hover:text-white"
                         >
                             Reintentar
@@ -616,14 +648,14 @@ export default function Page() {
                                 <div className="min-w-0">
                                     <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#8ab4f8]">Gemini opcional</p>
                                     <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-white/65">
-                                        Solo se ejecuta cuando lo solicitas. Si lo activas, los fragmentos seleccionados de esta búsqueda se envían a Google para generar la síntesis y no se guardan como parte de la operación.
+                                        Solo se ejecuta cuando lo solicitas. Si lo activas, hasta cinco fragmentos relevantes de esta búsqueda se envían a Google para generar la síntesis y no se guardan localmente como parte de la operación.
                                     </p>
                                 </div>
                                 <button
                                     type="button"
                                     onClick={() => void handleGeminiSynthesis()}
                                     disabled={!isTauriRuntime() || geminiLoading || !lastSearchQuery}
-                                    title={isTauriRuntime() ? 'Enviar los fragmentos seleccionados a Gemini' : 'Gemini requiere la aplicación de escritorio'}
+                                    title={isTauriRuntime() ? 'Enviar hasta cinco fragmentos relevantes a Gemini' : 'Gemini requiere la aplicación de escritorio'}
                                     className="shrink-0 rounded-xl border border-[#4285f4]/40 bg-[#4285f4]/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-[#b9d4ff] transition-colors hover:bg-[#4285f4]/25 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                     {geminiLoading ? 'Generando…' : isTauriRuntime() ? 'Sintetizar con Gemini' : 'Solo app de escritorio'}
@@ -779,7 +811,8 @@ export default function Page() {
                                 </button>
                             </div>
                         )}
-                        <VideoGrid
+                        <LocalizedErrorBoundary>
+                          <VideoGrid
                             activeVideoId={activeVideoId}
                             onVideoPlayStart={handlePlayStart}
                             onVideoPlayStop={handlePlayStop}
@@ -795,7 +828,8 @@ export default function Page() {
                             jobsLoading={jobsLoading}
                             jobsReady={jobsReady}
                             onVisibleVideosChange={setCinemaVideos}
-                        />
+                          />
+                        </LocalizedErrorBoundary>
                     </>
                 )}
 
@@ -836,10 +870,23 @@ export default function Page() {
                     borderLeft: '1px solid rgba(255,255,255,0.12)',
                 }}
             >
-                            <SettingsPanel onClose={() => setSettingsOpen(false)} jobs={jobs} onPlaylistSelect={handlePlaylistSelect} />
+                            <LocalizedErrorBoundary>
+                              <SettingsPanel onClose={() => setSettingsOpen(false)} jobs={jobs} onPlaylistSelect={handlePlaylistSelect} />
+                            </LocalizedErrorBoundary>
             </div>
 
-            {processingSetup.showSetup && (
+            {welcomeAnimationVisible && <WelcomeAnimation onFinish={finishWelcomeAnimation} />}
+
+            {!welcomeAnimationVisible && isTauriRuntime() && (legalConsent.loading || legalConsent.needsConsent) && (
+                <LegalConsentModal
+                    loading={legalConsent.loading}
+                    saving={legalConsent.saving}
+                    error={legalConsent.error}
+                    onAccept={legalConsent.accept}
+                />
+            )}
+
+            {legalGateReady && processingSetup.showSetup && (
                 <ProcessingSetupModal
                     hardware={processingSetup.hardware}
                     processing={processingSetup.processing}
@@ -857,6 +904,7 @@ export default function Page() {
                     onDismiss={processingSetup.dismissSetup}
                 />
             )}
+
         </div>
     );
 }

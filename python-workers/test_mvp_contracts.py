@@ -34,6 +34,46 @@ class MvpContractTests(unittest.TestCase):
         missing = sorted(frontend_commands - registered)
         self.assertEqual(missing, [], f"Frontend IPC commands missing from Tauri: {missing}")
 
+    def test_setup_sends_structured_mvp_settings_payload(self) -> None:
+        hook = (ROOT / "hooks" / "use-processing-settings.ts").read_text(encoding="utf-8")
+        self.assertIn(
+            "invoke<ProcessingSettings>('save_mvp_settings', {\n        input: {",
+            hook,
+            "The setup wizard must pass MvpSettingsInput under Tauri's input argument.",
+        )
+        self.assertIn(
+            "downloadDir: setup.downloadDir || ''",
+            hook,
+            "The structured payload must retain the selected media directory.",
+        )
+
+    def test_setup_floors_storage_recommendations_before_persisting(self) -> None:
+        modal = (ROOT / "components" / "ProcessingSetupModal.tsx").read_text(encoding="utf-8")
+        self.assertIn(
+            "Math.floor(normalized.quotaBytes / GIB)",
+            modal,
+            "Native storage recommendations must not round above the safe free-space boundary.",
+        )
+        self.assertIn(
+            "Math.floor(fallbackRecommendation.quotaBytes / GIB)",
+            modal,
+            "Fallback storage recommendations must use the same safe flooring rule.",
+        )
+
+    def test_native_settings_use_named_tauri_argument(self) -> None:
+        panel = (ROOT / "components" / "SettingsPanel.tsx").read_text(encoding="utf-8")
+        context = (ROOT / "lib" / "settings-context.tsx").read_text(encoding="utf-8")
+        self.assertIn(
+            ">('save_app_settings', {\n                    settings: {",
+            panel,
+            "SettingsPanel must pass AppSettingsSnapshot under Tauri's named settings argument.",
+        )
+        self.assertIn(
+            "invoke('save_app_settings', {\n                                    settings: {",
+            context,
+            "Native localStorage migration must use the same Tauri argument contract.",
+        )
+
     def test_python_workers_have_one_canonical_source(self) -> None:
         config = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
         resources = config["bundle"]["resources"]

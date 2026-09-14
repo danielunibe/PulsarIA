@@ -4,18 +4,24 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { FaFileLines, FaLink, FaPlus, FaRocket, FaXmark } from 'react-icons/fa6';
 import { useI18n } from '@/lib/i18n';
+import { validateTikTokUrl, type TikTokUrlIssue } from '@/lib/url-validation';
 
 interface AddLinksProps {
   onSubmitLinks: (urls: string[]) => Promise<void>;
 }
 
-const ACCEPTED_URL = /^https:\/\/(?:www\.|vm\.|vt\.)?tiktok\.com\//i;
 const CONTENT_RIGHTS_ACCEPTANCE_KEY = 'pulsaria.content-rights.v1';
 
-function parseLinks(raw: string): { valid: string[]; invalid: number } {
+function parseLinks(raw: string): { valid: string[]; invalid: number; issues: Partial<Record<TikTokUrlIssue, number>> } {
   const unique = [...new Set(raw.split(/\r?\n|,|;/).map((value) => value.trim()).filter(Boolean))];
-  const valid = unique.filter((value) => ACCEPTED_URL.test(value));
-  return { valid, invalid: unique.length - valid.length };
+  const issues: Partial<Record<TikTokUrlIssue, number>> = {};
+  const valid = unique.filter((value) => {
+    const result = validateTikTokUrl(value);
+    if (result.ok) return true;
+    issues[result.issue] = (issues[result.issue] ?? 0) + 1;
+    return false;
+  });
+  return { valid, invalid: unique.length - valid.length, issues };
 }
 
 export function AddLinks({ onSubmitLinks }: AddLinksProps) {
@@ -24,7 +30,7 @@ export function AddLinks({ onSubmitLinks }: AddLinksProps) {
   const [localLinks, setLocalLinks] = useState<string[]>(['']);
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [validation, setValidation] = useState<{ valid: number; invalid: number } | null>(null);
+  const [validation, setValidation] = useState<ReturnType<typeof parseLinks> | null>(null);
   const [rightsAccepted, setRightsAccepted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -43,7 +49,7 @@ export function AddLinks({ onSubmitLinks }: AddLinksProps) {
     ? parsedLinkInput.valid.length > 0
     : Boolean(file);
   const visibleValidation = activeTab === 'link' && linkCount > 0
-    ? { valid: parsedLinkInput.valid.length, invalid: parsedLinkInput.invalid }
+    ? parsedLinkInput
     : validation;
 
   const updateLink = (index: number, value: string) => {
@@ -64,7 +70,7 @@ export function AddLinks({ onSubmitLinks }: AddLinksProps) {
     if (activeTab === 'file' && file) raw = await file.text();
 
     const parsed = parseLinks(raw);
-    setValidation({ valid: parsed.valid.length, invalid: parsed.invalid });
+      setValidation(parsed);
     if (parsed.valid.length === 0) return;
 
     setSubmitting(true);
@@ -112,6 +118,7 @@ export function AddLinks({ onSubmitLinks }: AddLinksProps) {
       {activeTab === 'link' ? (
         <div className="relative z-10 flex flex-col gap-2">
           <p className="px-1 text-[10px] leading-relaxed text-white/45">{t('pasteLinks')}</p>
+          <p className="px-1 text-[9px] uppercase tracking-wider text-[#25f4ee]/65">{t('supportedSources')}</p>
           <div className="flex max-h-[132px] flex-col gap-2 overflow-y-auto pr-1">
             {localLinks.map((link, index) => (
               <div key={`${index}-${localLinks.length}`} className="flex items-center gap-2">
@@ -132,7 +139,7 @@ export function AddLinks({ onSubmitLinks }: AddLinksProps) {
         </div>
       )}
 
-      {visibleValidation && <div role="status" className="relative z-10 rounded-[12px] border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] text-white/60"><span className="font-bold text-[#25f4ee]">{visibleValidation.valid} enlace{visibleValidation.valid === 1 ? '' : 's'} listo{visibleValidation.valid === 1 ? '' : 's'} para enviar.</span>{visibleValidation.invalid > 0 && <span className="ml-1 text-white/45">{visibleValidation.invalid} omitido{visibleValidation.invalid === 1 ? '' : 's'} por formato no compatible.</span>}</div>}
+      {visibleValidation && <div role="status" className="relative z-10 rounded-[12px] border border-white/10 bg-white/[.03] px-3 py-2 text-[10px] text-white/60"><span className="font-bold text-[#25f4ee]">{visibleValidation.valid.length} enlace{visibleValidation.valid.length === 1 ? '' : 's'} listo{visibleValidation.valid.length === 1 ? '' : 's'} para enviar.</span>{visibleValidation.issues.too_long && <span className="ml-1 text-amber-200">{t('urlTooLong', { count: visibleValidation.issues.too_long })}</span>}{visibleValidation.issues.non_https && <span className="ml-1 text-white/45">{t('nonHttpsLinks', { count: visibleValidation.issues.non_https })}</span>}{visibleValidation.issues.unsupported_platform && <span className="ml-1 text-white/45">{t('unsupportedPlatformLinks', { count: visibleValidation.issues.unsupported_platform })}</span>}{visibleValidation.issues.malformed && <span className="ml-1 text-white/45">{t('malformedLinks', { count: visibleValidation.issues.malformed })}</span>}{visibleValidation.issues.empty && <span className="ml-1 text-white/45">{t('invalidLinks', { count: visibleValidation.issues.empty })}</span>}</div>}
 
       <div className="relative z-10 rounded-[12px] border border-amber-300/20 bg-amber-300/[.05] px-3 py-2.5 text-[9px] leading-relaxed text-white/60">
         <p className="font-black uppercase tracking-wider text-amber-200">{t('contentRightsTitle')}</p>

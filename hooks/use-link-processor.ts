@@ -215,7 +215,8 @@ export function useLinkProcessor() {
             }
           } else {
             const { REST_API_BASE } = await import('@/lib/api-config');
-            const response = await fetch(`${REST_API_BASE}/ingest`, {
+            const { apiFetch } = await import('@/lib/api-client');
+            const response = await apiFetch(`${REST_API_BASE}/ingest`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ url }),

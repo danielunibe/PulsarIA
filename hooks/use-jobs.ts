@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { REST_API_BASE } from '@/lib/api-config';
+import { apiFetch } from '@/lib/api-client';
 
 export interface JobRecord {
   id: number;
@@ -124,7 +125,7 @@ async function fetchJobsFromSources(): Promise<JobRecord[]> {
     // Dentro de la ventana nativa un error de IPC es el error real del
     // backend. No lo ocultamos intentando un REST localhost inexistente.
     if (isNativeShell()) throw error;
-    const response = await fetch(`${REST_API_BASE}/jobs`);
+  const response = await apiFetch(`${REST_API_BASE}/jobs`);
     if (!response.ok) throw new Error(`No se pudo actualizar la biblioteca (${response.status})`);
     return response.json() as Promise<JobRecord[]>;
   }
@@ -135,7 +136,7 @@ async function enqueueThroughSources(url: string): Promise<number> {
     return await invokeTauri<number>('add_job', { url });
   } catch (error) {
     if (isNativeShell()) throw error;
-    const response = await fetch(`${REST_API_BASE}/ingest`, {
+  const response = await apiFetch(`${REST_API_BASE}/ingest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -215,14 +216,17 @@ jobsRef.current = jobs;
       const events = ['job_progress', 'job_completed_notify', 'media_indexed'];
       const subscriptions = await Promise.all(events.map(async (eventName) => {
         try {
-          return await listen(eventName, () => { void refresh().catch(() => {}); });
-        } catch {
+          return await listen(eventName, () => {
+            void refresh().catch((error) => console.warn(`Job refresh after ${eventName} failed:`, error));
+          });
+        } catch (error) {
+          console.warn(`Could not subscribe to ${eventName}:`, error);
           return () => {};
         }
       }));
       if (mounted) cleanups = subscriptions;
       else subscriptions.forEach((cleanup) => cleanup());
-    }).catch(() => {});
+    }).catch((error) => console.warn('Could not initialize native job events:', error));
 
     return () => {
       mounted = false;
@@ -261,7 +265,7 @@ jobsRef.current = jobs;
       await invokeTauri<void>('retry_job', { jobId });
     } catch (error) {
       if (isNativeShell()) throw error;
-      const response = await fetch(`${REST_API_BASE}/jobs/${jobId}/retry`, { method: 'POST' });
+      const response = await apiFetch(`${REST_API_BASE}/jobs/${jobId}/retry`, { method: 'POST' });
       if (!response.ok) throw new Error(`No se pudo reintentar el trabajo (${response.status})`);
     }
     await refresh();

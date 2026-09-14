@@ -121,6 +121,7 @@ jobs:
 
       - name: Build signed Tauri release
         env:
+          NEXT_PUBLIC_PULSARIA_UPDATER_ENABLED: 'true'
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -129,6 +130,7 @@ jobs:
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
         run: |
           $isCandidate = $env:RELEASE_TAG -match '-rc\.'
+          $env:NEXT_PUBLIC_PULSARIA_UPDATE_CHANNEL = if ($isCandidate) { 'rc' } else { 'stable' }
           $endpoint = if ($isCandidate) {
             "https://github.com/danielunibe/PulsarIA/releases/download/$env:RELEASE_TAG/latest.json"
           } else {
@@ -190,6 +192,15 @@ jobs:
             -Version ($env:RELEASE_TAG -replace '^v', '') `
             -ReleaseTag $env:RELEASE_TAG
           if ($LASTEXITCODE -ne 0) { throw 'Updater manifest generation failed.' }
+          $checksumPath = Join-Path (Resolve-Path 'target-tauri/release/bundle').Path 'SHA256SUMS.txt'
+          $checksumFiles = Get-ChildItem -LiteralPath 'target-tauri/release/bundle' -File -Recurse |
+            Where-Object { $_.Name -match '(_x64-setup\.exe|_x64.*\.msi|\.nsis\.zip|\.sig$|^latest\.json$)' } |
+            Sort-Object FullName
+          $checksumLines = foreach ($file in $checksumFiles) {
+            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+            "$hash  $($file.Name)"
+          }
+          $checksumLines | Set-Content -LiteralPath $checksumPath -Encoding utf8
           npm run verify:release-artifacts -- -ArtifactRoot target-tauri/release/bundle -RequireAuthenticode
           if ($LASTEXITCODE -ne 0) { throw 'Release artifact verification failed.' }
 
@@ -199,7 +210,7 @@ jobs:
           if (Test-Path -LiteralPath $assetRoot) { Remove-Item -LiteralPath $assetRoot -Recurse -Force }
           New-Item -ItemType Directory -Path $assetRoot -Force | Out-Null
           $files = Get-ChildItem -LiteralPath 'target-tauri/release/bundle' -File -Recurse |
-            Where-Object { $_.Name -match '(_x64-setup\.exe|_x64.*\.msi|\.nsis\.zip|\.sig$|^latest\.json$)' }
+            Where-Object { $_.Name -match '(_x64-setup\.exe|_x64.*\.msi|\.nsis\.zip|\.sig$|^latest\.json$|^SHA256SUMS\.txt$)' }
           if ($files.Count -lt 5) { throw 'The public release asset set is incomplete.' }
           foreach ($file in $files) { Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $assetRoot $file.Name) -Force }
           "RELEASE_ASSET_ROOT=$assetRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

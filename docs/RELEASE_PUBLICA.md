@@ -2,14 +2,22 @@
 
 Este runbook define el cierre de `0.1.0` como baseline, `0.1.1-rc.1` como candidato y `0.1.1` como release estable para `danielunibe/PulsarIA`. La aplicación sigue siendo desktop-first y el gateway REST permanece enlazado exclusivamente a `127.0.0.1`.
 
+La base canónica es `main`; la landing pública se sirve desde `website/` por
+GitHub Pages y los instaladores/updater se sirven desde GitHub Releases. El
+primer arranque nativo exige la aceptación versionada de EULA, términos,
+privacidad y política de contenido antes de mostrar el dashboard.
+
 ## Estado de esta fase
 
 | Gate | Estado actual | Qué falta para marcarlo PASS |
 |---|---|---|
-| Frontend, Rust, Python y recursos fuente | PASS local | Manifest de 56 archivos, FFmpeg/FFprobe y `FFMPEG-LICENSE.txt` verificados; el bundle debug vigente ya fue reconstruido |
-| Smoke del bundle instalado | PASS QA | NSIS vigente `B19946…`: instalación, recursos 8/8, manifest 56/56, health, ingest live completo, reinicio y desinstalación; repetir con build release firmado antes de publicar |
+| Frontend, Rust, Python y recursos fuente | PASS local | Manifest de 51 registros canónicos, FFmpeg/FFprobe y `FFMPEG-LICENSE.txt` verificados; el bundle debug final ya fue reconstruido |
+| Smoke del bundle instalado | PASS NSIS / PARTIAL MSI | NSIS Release `Pulsaria_0.1.0_x64-setup.exe` (`2E27F6520A41EBFA93B2F7CD54EEE7666929682F88689B365522B2F4F1459427`, 580,779,620 bytes) pasó instalación, health, reinicio, runtime 51/51 y desinstalación. MSI Release `Pulsaria_0.1.0_x64_en-US.msi` (`A445463E0CB26AC3620EBFB74DC28ACD21559E9CEA2C6C97A2EE016181756176`, 710,191,833 bytes) queda para smoke elevado |
 | Contrato LLM local | PASS local | Repetir descarga, integridad y sidecar en el candidato de release |
+| Contrato Gemini opcional | PASS local condicionado | IPC nativo y tests de seguridad pasan; requiere clave autorizada para probar una llamada real y no forma parte del modo offline |
 | Updater JavaScript | Implementado, inactivo | Clave pública Tauri, clave privada en GitHub Environment y `latest.json` publicado |
+| Consentimiento legal nativo | Implementado localmente | Repetir en un instalador Release y verificar una nueva aceptación cuando cambie una versión legal |
+| GitHub Pages | Preparado en `website/` | Habilitar Pages con el workflow `pages.yml` y comprobar la URL publicada |
 | Aceptación visual Tauri | BLOCKED_EXTERNAL | Capturas asistidas en el equipo objetivo a 1280×800 y 860×640 |
 | Next/PostCSS | PASS parcial aislado | Next 16.3.5 y audit 0 demostrados en el experimento; repetir sobre un checkpoint limpio con la estabilización vigente antes de promover |
 | Firma Authenticode | Pendiente externo | Certificado PFX temporal, timestamp server y verificación válida |
@@ -35,7 +43,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-runtime-man
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-runtime-manifest.ps1
 ```
 
-El manifest exige Python embebido, módulos críticos, workers, ONNX/MiniLM, Whisper tiny, `ffmpeg.exe`, `ffprobe.exe` y la evidencia local de licencia dentro de `resources/`. No se acepta un ejecutable del `PATH` ni se descarga/copia FFprobe automáticamente. En el checkout actual la verificación fuente devuelve `PASS`; el bundle instalado solo puede marcarse `PASS` después de reconstruirlo con el manifest y repetir `scripts/verify-installed-bundle.ps1`.
+El manifest exige Python embebido, módulos críticos, workers, ONNX/MiniLM, Whisper tiny, `ffmpeg.exe`, `ffprobe.exe` y la evidencia local de licencia dentro de `resources/`. No se acepta un ejecutable del `PATH` ni se descarga/copia FFprobe automáticamente. En el checkout actual la verificación fuente y la instalada devuelven `PASS` con 51/51 registros. El smoke aislado deja los recursos junto al ejecutable en solo lectura y crea el estado escribible bajo `%APPDATA%\Pulsar Eventide`, conservando compatibilidad con `%APPDATA%\Pulsaria` legado.
 
 El gate de artefactos se ejecuta después de un build release que haya producido los archivos del updater:
 
@@ -102,13 +110,13 @@ npm audit --omit=dev
 npm run verify:installed
 ```
 
-PostCSS y el adaptador Tailwind deben fijarse a las versiones compatibles verificadas que resuelvan los advisories reales, regenerar `package-lock.json` y quedar revisados en el diff. No se debe dejar un placeholder de versión en el manifiesto. React 19 y `output: export` son contratos que no se pueden retirar.
+PostCSS y el adaptador Tailwind deben fijarse a las versiones compatibles verificadas que resuelvan los advisories reales, regenerar `package-lock.json` y quedar revisados en el diff. No se debe dejar un placeholder de versión en el manifiesto. React 19 y `output: export` son contratos que no se pueden retirar. El estado actual de `main` conserva Next 15.5.25 hasta que el worktree aislado repita también los gates Tauri e instalados.
 
 La promoción exige cero vulnerabilidades de producción y todos los gates PASS. El script `scripts/set-release-version.mjs` sincroniza `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `Cargo.toml` y `Cargo.lock` en el runner a partir del tag, sin crear commits ni tags automáticamente.
 
 ## Fase 4 — updater y firma
 
-La UI usa `@tauri-apps/plugin-updater` con comprobación manual. Los estados son `idle`, `checking`, `up-to-date`, `available`, `downloading`, `installing` y `error`. `downloadAndInstall` valida la firma Tauri antes de instalar; en Windows reinicia la aplicación mediante el flujo del plugin. No se habilitan downgrades silenciosos.
+La UI usa `@tauri-apps/plugin-updater` con comprobación manual y automática como máximo una vez cada 24 horas cuando el build firmado está habilitado. Los estados son `idle`, `checking`, `up-to-date`, `available`, `downloading`, `installing`, `blocked-by-active-job` y `error`. `downloadAndInstall` valida la firma Tauri antes de instalar; en Windows reinicia la aplicación mediante el flujo del plugin. La instalación requiere confirmación, se bloquea mientras haya trabajos activos y no se habilitan downgrades silenciosos.
 
 Endpoint estable:
 
@@ -152,7 +160,7 @@ Para `v0.1.1-rc.1`:
 
 1. Construir con el endpoint fijo del candidato.
 2. Instalar la baseline firmada `0.1.0` en una máquina aislada.
-3. Buscar manualmente la actualización, confirmar instalación y verificar progreso/reinicio.
+3. Esperar la detección diaria o buscar manualmente la actualización, confirmar instalación y verificar progreso/reinicio. Si hay trabajos activos, la instalación debe quedar bloqueada hasta que terminen.
 4. Confirmar que SQLite, configuración, biblioteca, archivos locales, backups HNSW y datos del usuario sobreviven.
 5. Probar sin actualización, endpoint inaccesible, `latest.json` inválido, descarga interrumpida, firma inválida y artefacto alterado.
 

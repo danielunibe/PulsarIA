@@ -24,12 +24,14 @@ cambios locales intencionales, archivos nuevos y eliminaciones; no se debe usar
 | Next build | PASS | `npm run build` |
 | Rust formato | PASS | `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` |
 | Rust check | PASS | `cargo check --manifest-path src-tauri/Cargo.toml` |
-| Rust tests | PASS | 40 pruebas, 0 fallos |
-| Python contracts | PASS | 18 pruebas; skip live intencional sin URL |
-| Runtime manifest | PASS | 50/50 archivos canónicos y FFmpeg/FFprobe verificados |
-| Bundle instalado | PASS previo a esta consolidación | NSIS release vigente `77095348…` fue generado antes de retirar recursos duplicados; requiere reconstrucción con el `tauri.conf.json` canónico |
-| Artefactos de release pública | BLOCKED_EXTERNAL | `target-tauri/release/bundle` y firmas del updater requieren build release/credenciales de firma; updater y Authenticode permanecen fuera del MVP local |
-| Pipeline TikTok live | PASS parcial | Release `77095348…`: job real, deduplicación, URL inválida, shapes de búsqueda y persistencia; reintento de un job fallido y búsqueda UI requieren smoke asistido |
+| Rust tests | PASS | 56 pruebas, 0 fallos |
+| Python contracts | PASS | 26 pruebas; skip live intencional sin URL |
+| Runtime manifest | PASS | 51/51 archivos canónicos y FFmpeg/FFprobe verificados |
+| Bundle instalado | PASS NSIS / PARTIAL MSI | NSIS Release `Pulsaria_0.1.0_x64-setup.exe`: `2E27F6520A41EBFA93B2F7CD54EEE7666929682F88689B365522B2F4F1459427`, 580,779,620 bytes; smoke instalado Release PASS con runtime 51/51, health, reinicio y desinstalación. MSI Release `Pulsaria_0.1.0_x64_en-US.msi`: `A445463E0CB26AC3620EBFB74DC28ACD21559E9CEA2C6C97A2EE016181756176`, 710,191,833 bytes; requiere repetir smoke en host elevado |
+| Smoke MSI instalado | BLOCKED_EXTERNAL | `-Bundle msi` alcanza `msiexec` pero el paquete Tauri es `perMachine`; este host no está elevado y devuelve 1603/Error 1925. Repetir en un host Windows x64 con administrador |
+| Contrato Gemini | PASS local condicionado | `generate_gemini_response` por IPC nativo; tests de clave ausente, header, prompt, respuesta vacía, HTTP y timeout; no se ejecuta sin clave autorizada |
+| Artefactos de release pública | BLOCKED_EXTERNAL | El build y smoke NSIS local están verificados, pero `latest.json`, `.sig`, clave Tauri, runtime externo reproducible y Authenticode requieren configuración de GitHub Environment/secretos |
+| Pipeline TikTok live | PASS parcial | NSIS `D69B6908…`: job real completo, exportación de `mp4/mp3/txt`, deduplicación, URL inválida, shapes de búsqueda, staging limpio y persistencia tras reinicio; la muestra no produjo texto reconocible |
 
 ## Cambios protegidos
 
@@ -46,35 +48,52 @@ real se hidrata correctamente y que los estados fallidos no se ocultan.
 
 ## Evidencia reproducida
 
-- `npm run verify:mvp`: PASS; 12/12 gates, incluyendo formato Rust, contrato
-  canónico y contrato español/inglés.
-  español/inglés.
-- `pwsh -File scripts/verify-installed-bundle.ps1 -Configuration release`: PASS
-  con NSIS SHA-256
-  `77095348AA234D1152000A34DD02258DF68D9C8E5FF5267701063483FB12DB13`;
-  recursos 8/8, manifest 56/56, health antes/después del reinicio,
-  desinstalación 0 y limpieza temporal correcta. Este artefacto es anterior a
-  la publicación canónica y debe reconstruirse para release.
-- `pwsh -File scripts/verify-installed-bundle.ps1 -Configuration release -RunLive`:
-  PASS; `job_id=1` completó al 100%, generó video MP4, audio MP3, análisis
-  visual e instructivo, conservó el job tras reinicio, devolvió `existing` para
-  la URL duplicada, HTTP 400 para URL inválida y shape válido para búsqueda
-  literal/semántica. La transcripción durable quedó en 0 bytes para el video
-  seleccionado, por lo que aún falta certificar un TikTok con voz reconocible.
+- `npm run verify:mvp`: PASS; 13/13 gates, incluyendo formato Rust, contrato
+  canónico, contrato español/inglés y contrato de recursos.
+- `pwsh -File scripts/verify-installed-bundle.ps1 -Configuration debug -RunLive`:
+  PASS con NSIS SHA-256
+  `D69B690811B71579018FDCE980379E2707397DF6BBB688C25288017A8D0AE44E`;
+  instalación 0, recursos 8/8, manifest 51/51, health antes/después del
+  reinicio, desinstalación 0 y limpieza temporal correcta. El proceso se
+  ejecutó sin `PULSAR_DATA_DIR`, con `%APPDATA%` temporal y `PATH` vacío:
+  `usesAppDataFallback=true`, `pathCleared=true` y
+  `externalRuntimeOverridesCleared=true`; el staging de un job completado
+  quedó sin archivos (`clean=true`).
+- El smoke live del mismo NSIS `D69B6908…` completó `job_id=1` al 100%, generó MP4 de
+  2,953,029 bytes, MP3 de 60,936 bytes y `text.txt` de 0 bytes como exportación
+  válida para transcript vacío; conservó análisis visual/instructivo, el job tras
+  reinicio, devolvió `existing` para la URL duplicada, HTTP 400 para URL inválida
+  y shape válido para búsqueda literal/semántica. Falta certificar un TikTok con
+  voz reconocible.
+- `cargo test --manifest-path src-tauri/Cargo.toml`: PASS, 56 pruebas; incluye
+  migración, cuota, purga explicable y undo físico seguro, reconciliación de
+  referencias/tamaños, recencia, artifacts, loopback, LLM local y contrato
+  Gemini nativo.
+- El contrato Python adicional confirma que metadata de duración `0` fuerza
+  la consulta a `ffprobe`, y que el preflight falla antes de red si falta
+  FFmpeg o FFprobe.
+- `npm run verify:local-llm`: PASS; sidecar llama.cpp y manifiesto fijado
+  presentes, sin modelo GGUF incluido en el bundle.
+- `npm audit --omit=dev`: BLOCKED por 2 vulnerabilidades de producción; el
+  experimento aislado Next 16.3.5/audit 0 no se ha promovido a `main`.
 - `npm run verify:release-artifacts -- -ArtifactRoot target-tauri/release/bundle`:
   BLOCKED_EXTERNAL porque el build local no genera `latest.json` ni firmas
   `.sig`; no se fabricaron firmas ni se habilitó el updater para cerrar
   artificialmente ese gate fuera de alcance.
 - La validación visual de la ventana Tauri instalada y el cambio de idioma con
-  clics reales todavía requieren revisión asistida en el equipo objetivo.
+  clics reales todavía requieren revisión asistida en el equipo objetivo; el
+  smoke de proceso/API no prueba composición, foco ni render nativo.
 
 ## Orden de cierre
 
 1. Gates técnicos y estados del onboarding.
 2. Selector persistente de idioma e interfaz traducible.
 3. Bundle determinista con FFmpeg/FFprobe y manifiesto actualizado.
-4. Smoke instalado con TikTok real, búsqueda, reinicio, duplicado y reintento.
-5. Salud, recuperación, accesibilidad y revisión de viewports.
+4. Smoke instalado con TikTok real, búsqueda, reinicio, duplicado y aislamiento
+   de datos persistentes.
+5. Salud, recuperación, accesibilidad y revisión de viewports nativos.
 
-OCR, benchmark de Whisper, generación local completa, nuevas plataformas y release firmada
-permanecen fuera del cierre del MVP local.
+OCR, benchmark de Whisper con voz reconocible, aceptación visual nativa,
+nuevas plataformas y release firmada permanecen fuera del cierre automatizado
+actual. La IA local y Gemini opcional tienen contratos separados y no son
+requisitos para arrancar offline.

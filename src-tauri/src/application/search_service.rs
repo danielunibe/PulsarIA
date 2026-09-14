@@ -1,7 +1,8 @@
 use crate::domain::models::{SearchConfig, SearchResult};
 use crate::domain::ports::EmbeddingEngine;
 use metrics::histogram;
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use tracing::{error, info, instrument};
 
 // ========================================================================
@@ -16,6 +17,8 @@ pub struct SearchService {
     query_coordinator: Arc<crate::distributed::query_coordinator::QueryCoordinator>,
     reranker: Arc<dyn crate::application::reranker::Reranker>,
     semantic_cache: Arc<crate::infrastructure::semantic_cache::SemanticCache>,
+    config_version: AtomicU64,
+    index_operation_lock: Arc<Mutex<()>>,
 }
 
 impl SearchService {
@@ -33,6 +36,8 @@ impl SearchService {
             query_coordinator,
             reranker,
             semantic_cache,
+            config_version: AtomicU64::new(0),
+            index_operation_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -40,6 +45,10 @@ impl SearchService {
     /// genera el embedding para cada uno y los persiste en el índice vectorial.
     #[instrument(skip(self, full_text))]
     pub fn index_document(&self, job_id: i64, full_text: &str) -> Result<(), String> {
+        let _operation_guard = self
+            .index_operation_lock
+            .lock()
+            .map_err(|_| "Semantic index operation lock poisoned".to_string())?;
         info!("Iniciando indexación semántica para Job ID: {}", job_id);
 
         let start_time = std::time::Instant::now();
@@ -81,6 +90,7 @@ impl SearchService {
             .write()
             .map_err(|_| "Search configuration lock poisoned".to_string())?;
         *current = config;
+        self.config_version.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -101,14 +111,14 @@ impl SearchService {
             .read()
             .map_err(|_| "Search configuration lock poisoned".to_string())?
             .clone();
+        let config_version = self.config_version.load(Ordering::SeqCst);
 
         // 2. Cache Semántico
-        if let Some(cached_results) = self
-            .semantic_cache
-            .lookup(&query_vec, config.max_results)
-            .await
+        if let Some(cached_results) =
+            self.semantic_cache
+                .lookup(&query_vec, config.max_results, config_version)
         {
-            info!("Búsqueda servida desde Redis Cache de forma instantánea.");
+            info!("Búsqueda servida desde caché local de forma instantánea.");
             histogram!("pipeline_latency_seconds").record(start_time.elapsed().as_secs_f64());
             return Ok(cached_results);
         }
@@ -129,9 +139,12 @@ impl SearchService {
             .collect::<Vec<_>>();
 
         // 5. Guardar el resultado procesado en Caché Semántico asíncrono.
-        self.semantic_cache
-            .set(&query_vec, config.max_results, &final_results)
-            .await;
+        self.semantic_cache.set(
+            &query_vec,
+            config.max_results,
+            config_version,
+            &final_results,
+        );
 
         histogram!("pipeline_latency_seconds").record(start_time.elapsed().as_secs_f64());
         Ok(final_results)
@@ -143,11 +156,44 @@ impl SearchService {
     }
 
     pub fn snapshot_index(&self) -> Result<(), String> {
+        let _operation_guard = self
+            .index_operation_lock
+            .lock()
+            .map_err(|_| "Semantic index operation lock poisoned".to_string())?;
         let path = crate::db::data_dir_path().join("vector_index.hnsw");
         self.query_coordinator.save_index(&path.to_string_lossy())
     }
 
+    pub fn rebuild_index(&self, rows: &[(i64, i64, Vec<f32>)]) -> Result<usize, String> {
+        let _operation_guard = self
+            .index_operation_lock
+            .lock()
+            .map_err(|_| "Semantic index operation lock poisoned".to_string())?;
+        let data_dir = crate::db::data_dir_path();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| format!("system clock before unix epoch: {error}"))?
+            .as_nanos();
+        let temporary_base = data_dir.join(format!("vector_index.rebuild-{nonce}.hnsw"));
+        let canonical_base = data_dir.join("vector_index.hnsw");
+        let result = self.query_coordinator.rebuild_local_index(
+            rows,
+            &temporary_base.to_string_lossy(),
+            &canonical_base.to_string_lossy(),
+        );
+        for index in 0..self.query_coordinator.shard_count() {
+            let temporary_shard =
+                data_dir.join(format!("vector_index.rebuild-{nonce}_shard_{index}.hnsw"));
+            let _ = std::fs::remove_file(temporary_shard);
+        }
+        result
+    }
+
     pub fn load_index(&self) -> Result<(), String> {
+        let _operation_guard = self
+            .index_operation_lock
+            .lock()
+            .map_err(|_| "Semantic index operation lock poisoned".to_string())?;
         let path = crate::db::data_dir_path().join("vector_index.hnsw");
         self.query_coordinator.load_index(&path.to_string_lossy())
     }

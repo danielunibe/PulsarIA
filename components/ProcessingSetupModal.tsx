@@ -32,7 +32,8 @@ interface ProcessingSetupModalProps {
 
 type SetupProfile = 'fast' | 'balanced' | 'high';
 type SetupIntent = 'knowledge' | 'balanced' | 'archive';
-type SetupStep = 'runtime' | 'language' | 'intent' | 'storage' | 'model' | 'success';
+type SetupStep = 'runtime' | 'welcome' | 'hardware' | 'language' | 'intent' | 'storage' | 'model' | 'success';
+type IntentQuestionIndex = 0 | 1 | 2 | 3;
 type PlaybackAnswer = 'yes' | 'not-needed';
 type PriorityAnswer = 'knowledge' | 'videos';
 type VolumeAnswer = 'occasional' | 'regular' | 'high';
@@ -78,8 +79,12 @@ const GIB = 1024 ** 3;
 const DEFAULT_MEDIA_ROOT = '%USERPROFILE%\\Downloads\\Pulsaria';
 
 const SETUP_STEPS: Array<{ id: Exclude<SetupStep, 'runtime' | 'success'>; label: string }> = [
+  { id: 'welcome', label: 'Bienvenida' },
+  { id: 'hardware', label: 'Equipo' },
   { id: 'language', label: 'Idioma' },
-  { id: 'intent', label: 'Intención' },
+  { id: 'intent', label: 'Intención 1' },
+  { id: 'intent', label: 'Intención 2' },
+  { id: 'intent', label: 'Intención 3' },
   { id: 'storage', label: 'Almacenamiento' },
   { id: 'model', label: 'Modelo local' },
 ];
@@ -223,14 +228,13 @@ function recommendationFor(intent: SetupIntent, freeBytes: number | null): Stora
 
 async function optionalInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T | null> {
   if (!isTauriRuntime()) return null;
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<T>(command, args);
-  } catch {
-    // The UI must continue to work against older native shells that do not
-    // expose the storage/preflight commands yet.
-    return null;
-  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<T>(command, args);
+}
+
+function commandErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.trim() || fallback;
 }
 
 function defaultAnswers(): SetupAnswers {
@@ -271,11 +275,13 @@ export function ProcessingSetupModal({
   const [localError, setLocalError] = useState<string | null>(null);
   const [savedProcessing, setSavedProcessing] = useState<ProcessingSettings | null>(null);
   const [step, setStep] = useState<SetupStep>('runtime');
+  const [intentQuestion, setIntentQuestion] = useState<IntentQuestionIndex>(0);
   const [answers, setAnswers] = useState<SetupAnswers>(defaultAnswers);
   const [preflight, setPreflight] = useState<RuntimePreflight | null>(null);
   const [storageStatus, setStorageStatus] = useState<StorageStatus | null>(null);
   const [nativeRecommendation, setNativeRecommendation] = useState<StorageRecommendation | null>(null);
   const [optionalLoading, setOptionalLoading] = useState(false);
+  const [hardwareDetailsOpen, setHardwareDetailsOpen] = useState(false);
   const userAdjustedQuality = useRef(false);
   const userAdjustedQuota = useRef(false);
   const intentOverridden = useRef(false);
@@ -283,6 +289,7 @@ export function ProcessingSetupModal({
   const reducedMotion = useReducedMotion();
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const previousFocusKeyRef = useRef<string | null>(null);
   const savingRef = useRef(false);
   const cancelRef = useRef(onCancelPreparation);
   const dismissRef = useRef(onDismiss);
@@ -300,8 +307,12 @@ export function ProcessingSetupModal({
   const lowDisk = storageStatus?.state === 'disk-low'
     || storageStatus?.state === 'path-error'
     || (availableSafeBytes !== null && availableSafeBytes < GIB);
+  const mediaRootInvalid = !answers.mediaRoot.trim() || storageStatus?.state === 'path-error';
+  const quotaInvalid = lowDisk || quotaGiB < 1;
   const missingResources = preflight?.missing ?? [];
-  const preflightBlocked = missingResources.length > 0
+  const preflightPending = isTauriRuntime() && hasSetupData && (optionalLoading || preflight === null);
+  const preflightBlocked = preflightPending
+    || missingResources.length > 0
     || preflight?.ok === false
     || preflight?.ready === false;
   const profile = profileForQuality(quality);
@@ -327,12 +338,14 @@ export function ProcessingSetupModal({
   const modelReadyForSelection = savedProcessing
     ? Boolean(modelStatus?.ready && modelStatus.model === savedProcessing.whisper_model)
     : Boolean(modelStatus?.ready && modelStatus.model === effectiveTargetModel);
-  const effectiveStep: SetupStep = !hasSetupData
+  const effectiveStep: SetupStep = !hasSetupData || loading || initializationError
     ? 'runtime'
     : step === 'runtime'
-      ? !settingsInitialized ? 'runtime' : !localeSelected ? 'language' : processing?.configured ? 'model' : 'intent'
+      ? !localeSelected ? 'welcome' : processing?.configured ? 'model' : 'welcome'
       : step;
-  const stepIndex = SETUP_STEPS.findIndex((item) => item.id === effectiveStep);
+  const stepIndex = effectiveStep === 'intent'
+    ? 3 + Math.min(intentQuestion, 2)
+    : Math.max(0, SETUP_STEPS.findIndex((item) => item.id === effectiveStep));
   const suggestedIntent = deriveIntent(answers);
 
   useEffect(() => {
@@ -364,11 +377,12 @@ export function ProcessingSetupModal({
     if (!hasSetupData) {
       setupStarted.current = false;
       setStep('runtime');
+      setIntentQuestion(0);
       return;
     }
     if (!setupStarted.current) {
       setupStarted.current = true;
-      setStep(!settingsInitialized || !localeSelected ? 'language' : processing?.configured ? 'model' : 'intent');
+      setStep(!settingsInitialized || !localeSelected ? 'welcome' : processing?.configured ? 'model' : 'welcome');
     }
   }, [hasSetupData, localeSelected, processing?.configured, settingsInitialized]);
 
@@ -406,18 +420,32 @@ export function ProcessingSetupModal({
   useEffect(() => {
     if (!isTauriRuntime() || !hasSetupData) return;
     let active = true;
+    setPreflight(null);
+    setStorageStatus(null);
     setOptionalLoading(true);
     void Promise.all([
       optionalInvoke<unknown>('get_runtime_preflight'),
-      optionalInvoke<unknown>('get_storage_status'),
+      optionalInvoke<unknown>('get_storage_status', { path: answers.mediaRoot }),
     ]).then(([rawPreflight, rawStorage]) => {
       if (!active) return;
-      setPreflight(normalizePreflight(rawPreflight));
+      setPreflight(normalizePreflight(rawPreflight) ?? {
+        ok: false,
+        ready: false,
+        message: 'El shell nativo no devolvió un preflight verificable. Reinstala Pulsaria para reparar el runtime.',
+      });
       const nextStorage = normalizeStorageStatus(rawStorage);
       setStorageStatus(nextStorage);
       if (nextStorage?.rootPath && answers.mediaRoot === DEFAULT_MEDIA_ROOT && !userAdjustedQuota.current) {
         setAnswers((current) => ({ ...current, mediaRoot: nextStorage.rootPath }));
       }
+    }).catch((error) => {
+      if (!active) return;
+      setPreflight({
+        ok: false,
+        ready: false,
+        message: commandErrorMessage(error, 'No se pudieron verificar los recursos o la carpeta de medios. Comprueba permisos y reinstala el runtime si es necesario.'),
+      });
+      setStorageStatus(null);
     }).finally(() => {
       if (active) setOptionalLoading(false);
     });
@@ -430,23 +458,30 @@ export function ProcessingSetupModal({
     if (!isTauriRuntime() || !hasSetupData) return;
     let active = true;
     setNativeRecommendation(null);
-    void optionalInvoke<unknown>('recommend_storage_setup', { intent: answers.intent }).then((raw) => {
+    void optionalInvoke<unknown>('recommend_storage_setup', {
+      intent: answers.intent,
+      path: answers.mediaRoot,
+    }).then((raw) => {
       if (!active || !raw) return;
       const normalized = normalizeRecommendation(raw, fallbackRecommendation);
       setNativeRecommendation(normalized);
       if (!userAdjustedQuota.current) {
-        setAnswers((current) => ({ ...current, quotaGiB: Math.max(1, Math.round(normalized.quotaBytes / GIB)) }));
+        setAnswers((current) => ({ ...current, quotaGiB: Math.max(1, Math.floor(normalized.quotaBytes / GIB)) }));
       }
+    }).catch(() => {
+      // The storage status/preflight effect remains authoritative and blocks
+      // saving when the path cannot be measured. The local recommendation is
+      // only a display fallback and must not hide that error.
     });
     return () => {
       active = false;
     };
-  }, [answers.intent, fallbackRecommendation, hasSetupData]);
+  }, [answers.intent, answers.mediaRoot, fallbackRecommendation, hasSetupData]);
 
   useEffect(() => {
     if (!storageStatus || userAdjustedQuota.current) return;
     if (fallbackRecommendation.quotaBytes > 0) {
-      setAnswers((current) => ({ ...current, quotaGiB: Math.max(1, Math.round(fallbackRecommendation.quotaBytes / GIB)) }));
+      setAnswers((current) => ({ ...current, quotaGiB: Math.max(1, Math.floor(fallbackRecommendation.quotaBytes / GIB)) }));
     }
   }, [fallbackRecommendation, storageStatus]);
 
@@ -512,6 +547,17 @@ export function ProcessingSetupModal({
     };
   }, []);
 
+  useEffect(() => {
+    const focusKey = `${effectiveStep}:${effectiveStep === 'intent' ? intentQuestion : ''}`;
+    if (previousFocusKeyRef.current === null) {
+      previousFocusKeyRef.current = focusKey;
+      return;
+    }
+    if (previousFocusKeyRef.current === focusKey) return;
+    previousFocusKeyRef.current = focusKey;
+    dialogRef.current?.querySelector<HTMLElement>('[data-setup-step-heading="true"]')?.focus({ preventScroll: true });
+  }, [effectiveStep, intentQuestion]);
+
   const updateAnswers = (patch: Partial<SetupAnswers>) => {
     setAnswers((current) => {
       const next = { ...current, ...patch };
@@ -536,12 +582,13 @@ export function ProcessingSetupModal({
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (qualityOverride?: number) => {
     if (!hasSetupData || preflightBlocked || lowDisk || quotaGiB < 1) return;
+    const selectedQuality = qualityOverride ?? quality;
     setSaving(true);
     setLocalError(null);
     try {
-      const saved = await onSave(quality, {
+      const saved = await onSave(selectedQuality, {
         downloadDir: answers.mediaRoot,
         retention: recommendation.retention,
         browser: '',
@@ -568,20 +615,48 @@ export function ProcessingSetupModal({
   };
 
   const nextStep = () => {
-    if (effectiveStep === 'language') setStep(processing?.configured ? 'model' : 'intent');
-    else if (effectiveStep === 'intent') setStep('storage');
+    if (effectiveStep === 'welcome') {
+      setStep('hardware');
+    } else if (effectiveStep === 'hardware') {
+      setStep('language');
+      setIntentQuestion(0);
+    } else if (effectiveStep === 'language') {
+      setStep(processing?.configured ? 'model' : 'intent');
+      setIntentQuestion(0);
+    } else if (effectiveStep === 'intent') {
+      if (intentQuestion < 3) {
+        setIntentQuestion((current) => (current + 1) as IntentQuestionIndex);
+      } else {
+        setStep('storage');
+      }
+    }
     else if (effectiveStep === 'storage') setStep('model');
     else if (effectiveStep === 'model') void handleSave();
   };
 
   const previousStep = () => {
-    if (effectiveStep === 'language') return;
-    if (effectiveStep === 'storage') setStep('intent');
+    if (effectiveStep === 'welcome') return;
+    if (effectiveStep === 'hardware') {
+      setStep('welcome');
+      return;
+    }
+    if (effectiveStep === 'language') {
+      setStep('hardware');
+      return;
+    }
+    if (effectiveStep === 'intent') {
+      if (intentQuestion > 0) setIntentQuestion((current) => (current - 1) as IntentQuestionIndex);
+      return;
+    }
+    if (effectiveStep === 'storage') {
+      setStep('intent');
+      setIntentQuestion(3);
+    }
     if (effectiveStep === 'model') setStep('storage');
   };
 
   const runtimeStatusLabel = preflightBlocked
-    ? 'Requiere atención'
+    ? (preflightPending ? 'Comprobando recursos locales' : 'Requiere atención')
     : optionalLoading || loading
       ? 'Comprobando recursos locales'
       : 'Recursos locales listos';
@@ -627,7 +702,7 @@ export function ProcessingSetupModal({
                   Prepara tu <span className={styles.titleAccent}>espacio local</span>
                 </h2>
                 <p id="processing-setup-description" className={styles.lede}>
-                  Tres decisiones breves para equilibrar conocimiento, videos y espacio en disco. El procesamiento permanece local.
+                  Configura Pulsaria paso a paso. Puedes cambiar estas opciones después desde Ajustes.
                 </p>
               </div>
               <div className={styles.stepCounter} aria-label={`Paso ${stepIndex + 1} de ${SETUP_STEPS.length}`}>
@@ -635,14 +710,14 @@ export function ProcessingSetupModal({
                 <strong>{Math.max(1, stepIndex + 1).toString().padStart(2, '0')}</strong>
                 <small>/ {SETUP_STEPS.length.toString().padStart(2, '0')}</small>
               </div>
-              <div className={styles.stepRail} aria-label="Progreso de configuración">
+              <ol className={styles.stepRail} aria-label="Progreso de configuración">
                 {SETUP_STEPS.map((item, index) => (
-                  <div key={item.id} className={styles.stepItem} data-active={index <= stepIndex}>
+                  <li key={`${item.id}-${index}`} className={styles.stepItem} data-active={index <= stepIndex} data-current={index === stepIndex} aria-current={index === stepIndex ? 'step' : undefined}>
                     <span className={styles.stepDot}>{index < stepIndex ? <FaCheck size={8} /> : index + 1}</span>
                     <span>{item.label}</span>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ol>
             </div>
           )}
 
@@ -691,51 +766,78 @@ export function ProcessingSetupModal({
 
           {effectiveStep !== 'runtime' && effectiveStep !== 'success' && (
             <div className={styles.layout}>
-              <div className={styles.intro}>
-                <div className={styles.hardwareHeader}>
-                  <p className={styles.sectionEyebrow}>Perfil detectado</p>
-                  <span className={styles.localBadge}><FaShieldHalved size={9} /> Local</span>
-                </div>
-                <div className={styles.stats}>
-                  <div className={styles.stat}>
-                    <div className={styles.statLabel}><FaMicrochip size={12} /><span>CPU</span></div>
-                    <p className={styles.statValue} title={hardware?.cpu_name || undefined}>{hardware?.cpu_name || 'No disponible'}</p>
-                    <p className={styles.statMeta}>{hardware?.logical_cores ?? '—'} hilos disponibles</p>
-                  </div>
-                  <div className={styles.stat}>
-                    <div className={styles.statLabel}><FaMemory size={12} /><span>Memoria</span></div>
-                    <p className={styles.statValue}>{formatMemory(hardware?.ram_bytes)} RAM</p>
-                    <p className={styles.statMeta}>{hardware?.vram_bytes ? `${formatMemory(hardware.vram_bytes)} VRAM` : 'GPU no detectada'}</p>
-                  </div>
-                  <div className={styles.stat}>
-                    <div className={styles.statLabel}><FaGaugeHigh size={12} /><span>Capacidad</span></div>
-                    <p className={styles.statValue}>{hardware?.whisper_gpu_supported ? 'GPU + CPU' : 'CPU local'}</p>
-                    <p className={styles.statMeta}>Sugerencia: {profileLabel(hardware?.recommended_quality ?? 'balanced')}</p>
-                  </div>
-                </div>
-                <p className={styles.hardwareSummary}>{hardwareSummary}</p>
-                <div className={styles.privacyNote}>
-                  <FaShieldHalved size={13} />
-                  <p><strong>Privacidad por defecto.</strong> Whisper, transcripción, embeddings y ficha se procesan en este equipo. La IA generativa local es opcional, se descarga sólo bajo demanda y no envía tus fragmentos a la nube.</p>
-                </div>
-              </div>
-
               <div className={styles.controls}>
+                {effectiveStep === 'welcome' && (
+                  <div className={styles.welcomeStep}>
+                    <p className={styles.sectionEyebrow}>Primer arranque · Espacio local</p>
+                    <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.titleSmall}>Tu biblioteca empieza aquí</h3>
+                    <p className={styles.ledeSmall}>Pulsaria organiza tus videos, audio y conocimiento en este equipo. Primero revisaremos su capacidad y después podrás elegir cómo quieres trabajar.</p>
+                  </div>
+                )}
+
+                {effectiveStep === 'hardware' && (
+                  <div className={styles.hardwareStep}>
+                    <div className={styles.hardwareHeader}>
+                      <div>
+                        <p className={styles.sectionEyebrow}>Capacidad de tu equipo</p>
+                        <p className={styles.hardwareCompactSummary}>
+                          {hardware?.logical_cores ?? '—'} hilos · {formatMemory(hardware?.ram_bytes)} RAM · {hardware?.whisper_gpu_supported ? 'GPU + CPU' : 'CPU local'}
+                        </p>
+                      </div>
+                      <div className={styles.hardwareActions}>
+                        <span className={styles.localBadge}><FaShieldHalved size={9} /> Local</span>
+                        <button type="button" className={styles.detailsToggle} aria-expanded={hardwareDetailsOpen} onClick={() => setHardwareDetailsOpen((open) => !open)}>
+                          {hardwareDetailsOpen ? 'Ocultar detalles' : 'Ver detalles'}
+                        </button>
+                      </div>
+                    </div>
+                    <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.controlTitle}>Conoce el equipo que usará Pulsaria</h3>
+                    <p className={styles.controlDescription}>El procesamiento principal se realiza localmente. Estas métricas solo sirven para recomendarte una configuración inicial.</p>
+                    {hardwareDetailsOpen && (
+                      <>
+                        <div className={styles.stats}>
+                          <div className={styles.stat}>
+                            <div className={styles.statLabel}><FaMicrochip size={12} /><span>CPU</span></div>
+                            <p className={styles.statValue} title={hardware?.cpu_name || undefined}>{hardware?.cpu_name || 'No disponible'}</p>
+                            <p className={styles.statMeta}>{hardware?.logical_cores ?? '—'} hilos disponibles</p>
+                          </div>
+                          <div className={styles.stat}>
+                            <div className={styles.statLabel}><FaMemory size={12} /><span>Memoria</span></div>
+                            <p className={styles.statValue}>{formatMemory(hardware?.ram_bytes)} RAM</p>
+                            <p className={styles.statMeta}>{hardware?.vram_bytes ? `${formatMemory(hardware.vram_bytes)} VRAM` : 'GPU no detectada'}</p>
+                          </div>
+                          <div className={styles.stat}>
+                            <div className={styles.statLabel}><FaGaugeHigh size={12} /><span>Capacidad</span></div>
+                            <p className={styles.statValue}>{hardware?.whisper_gpu_supported ? 'GPU + CPU' : 'CPU local'}</p>
+                            <p className={styles.statMeta}>Sugerencia: {profileLabel(hardware?.recommended_quality ?? 'balanced')}</p>
+                          </div>
+                        </div>
+                        <p className={styles.hardwareSummary}>{hardwareSummary}</p>
+                        <div className={styles.privacyNote}>
+                          <FaShieldHalved size={13} />
+                          <p><strong>Privacidad por defecto.</strong> Whisper, transcripción, embeddings y ficha se procesan en este equipo. Gemini solo puede enviar hasta cinco fragmentos a Google cuando solicites una síntesis.</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {effectiveStep === 'language' && (
                   <div className={styles.stepContent}>
                     <p className={styles.sectionEyebrow}>{t('firstLaunch')} · {t('language')}</p>
-                    <h3 className={styles.controlTitle}>{t('chooseLanguage')}</h3>
+                    <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.controlTitle}>{t('chooseLanguage')}</h3>
                     <p className={styles.controlDescription}>{t('chooseLanguageDescription')}</p>
-                    <div className={styles.optionGrid} role="group" aria-label={t('language')}>
+                    <div className={styles.optionGrid} role="radiogroup" aria-label={t('language')}>
                       {([
-                        ['es-MX', t('spanish'), 'Español'],
-                        ['en-US', t('english'), 'English'],
+                        ['es-MX', t('spanish'), locale === 'en-US' ? 'Interface in Spanish' : 'Interfaz en español'],
+                        ['en-US', t('english'), locale === 'en-US' ? 'Interface in English' : 'Interfaz en inglés'],
                       ] as const).map(([value, label, description]) => (
                         <button
                           key={value}
                           type="button"
-                          aria-pressed={locale === value}
-                          onClick={() => setLocale(value)}
+                          role="radio"
+                          aria-checked={locale === value}
+                          onClick={() => { setLocale(value); setStep('intent'); setIntentQuestion(0); }}
                           className={styles.optionCard}
                           data-selected={locale === value}
                         >
@@ -749,85 +851,116 @@ export function ProcessingSetupModal({
 
                 {effectiveStep === 'intent' && (
                   <div className={styles.stepContent}>
-                    <p className={styles.sectionEyebrow}>1 · Intención</p>
-                    <h3 className={styles.controlTitle}>¿Cómo quieres usar Pulsaria?</h3>
-                    <p className={styles.controlDescription}>Tus respuestas calculan un perfil explicable; podrás cambiarlo antes de guardar.</p>
+                    <p className={styles.sectionEyebrow}>2 · Intención</p>
+                    {intentQuestion < 3 ? (
+                      <>
+                        <p className={styles.questionCounter} aria-live="polite">
+                          Pregunta {String(intentQuestion + 1).padStart(2, '0')} / 03
+                        </p>
+                        <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.controlTitle}>
+                          {intentQuestion === 0
+                            ? '¿Necesitas reproducir videos sin conexión?'
+                            : intentQuestion === 1
+                              ? '¿Qué te importa más?'
+                              : '¿Qué volumen esperas descargar?'}
+                        </h3>
+                        <p className={styles.controlDescription}>
+                          {intentQuestion === 0
+                            ? 'Esto define cuánto espacio conviene reservar para medios locales.'
+                            : intentQuestion === 1
+                              ? 'Tus respuestas calculan un perfil explicable; podrás cambiarlo antes de guardar.'
+                              : 'Indica el ritmo esperado para ajustar una cuota segura.'}
+                        </p>
 
-                    <div className={styles.questionList}>
-                      <fieldset className={styles.questionBlock}>
-                        <legend>¿Necesitas reproducir videos sin conexión?</legend>
-                        <div className={styles.optionGrid}>
+                        <div className={styles.questionList}>
+                          {intentQuestion === 0 && (
+                            <fieldset className={styles.questionBlock}>
+                              <legend className="sr-only">¿Necesitas reproducir videos sin conexión?</legend>
+                              <div className={styles.optionGrid} role="radiogroup">
+                                {[
+                                  ['yes', 'Sí, con frecuencia', 'Conserva una reserva de video local.'],
+                                  ['not-needed', 'No es prioridad', 'Prioriza transcript, búsqueda y análisis.'],
+                                ].map(([value, label, description]) => (
+                                  <button key={value} type="button" role="radio" aria-checked={answers.offlinePlayback === value} aria-label={`${label}. ${description}`} onClick={() => { updateAnswers({ offlinePlayback: value as PlaybackAnswer }); setIntentQuestion(1); }} className={styles.optionCard} data-selected={answers.offlinePlayback === value}>
+                                    <span className={styles.choiceMark}>{answers.offlinePlayback === value && <FaCheck size={9} />}</span>
+                                    <span><strong>{label}</strong><small>{description}</small></span>
+                                  </button>
+                                ))}
+                              </div>
+                            </fieldset>
+                          )}
+
+                          {intentQuestion === 1 && (
+                            <fieldset className={styles.questionBlock}>
+                              <legend className="sr-only">¿Qué te importa más?</legend>
+                              <div className={styles.optionGrid} role="radiogroup">
+                                {[
+                                  ['knowledge', 'Conocimiento', 'Transcript, búsqueda y análisis durables.'],
+                                  ['videos', 'Conservar videos', 'Medios locales disponibles sin red.'],
+                                ].map(([value, label, description]) => (
+                                  <button key={value} type="button" role="radio" aria-checked={answers.priority === value} aria-label={`${label}. ${description}`} onClick={() => { updateAnswers({ priority: value as PriorityAnswer }); setIntentQuestion(2); }} className={styles.optionCard} data-selected={answers.priority === value}>
+                                    <span className={styles.choiceMark}>{answers.priority === value && <FaCheck size={9} />}</span>
+                                    <span><strong>{label}</strong><small>{description}</small></span>
+                                  </button>
+                                ))}
+                              </div>
+                            </fieldset>
+                          )}
+
+                          {intentQuestion === 2 && (
+                            <fieldset className={styles.questionBlock}>
+                              <legend className="sr-only">¿Qué volumen esperas descargar?</legend>
+                              <div className={styles.optionGrid} role="radiogroup">
+                                {[
+                                  ['occasional', 'Ocasional', 'Pocas piezas y revisiones puntuales.'],
+                                  ['regular', 'Regular', 'Uso frecuente con cuota moderada.'],
+                                  ['high', 'Alto', 'Muchas piezas o biblioteca de archivo.'],
+                                ].map(([value, label, description]) => (
+                                  <button key={value} type="button" role="radio" aria-checked={answers.volume === value} aria-label={`${label}. ${description}`} onClick={() => { updateAnswers({ volume: value as VolumeAnswer }); setIntentQuestion(3); }} className={styles.optionCard} data-selected={answers.volume === value}>
+                                    <span className={styles.choiceMark}>{answers.volume === value && <FaCheck size={9} />}</span>
+                                    <span><strong>{label}</strong><small>{description}</small></span>
+                                  </button>
+                                ))}
+                              </div>
+                            </fieldset>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className={styles.questionCounter} aria-live="polite">Perfil recomendado</p>
+                        <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.controlTitle}>Confirma tu perfil de uso</h3>
+                        <p className={styles.controlDescription}>Puedes aceptar la sugerencia o elegir otro perfil antes de configurar el almacenamiento.</p>
+
+                        <div className={styles.recommendationStrip}>
+                          <span className={styles.recommendationKicker}>Perfil sugerido</span>
+                          <strong>{suggestedIntent === 'knowledge' ? 'Knowledge' : suggestedIntent === 'balanced' ? 'Balanced' : 'Archive'}</strong>
+                          <p>{suggestedIntent === 'knowledge' ? 'Conserva el conocimiento y mantiene los medios sujetos a cuota.' : suggestedIntent === 'balanced' ? 'Equilibra video local y espacio disponible.' : 'Da prioridad a la reproducción offline y a una cuota amplia.'}</p>
+                        </div>
+
+                        <div className={styles.profileGrid} role="radiogroup" aria-label="Perfil de almacenamiento">
                           {[
-                            ['yes', 'Sí, con frecuencia', 'Conserva una reserva de video local.'],
-                            ['not-needed', 'No es prioridad', 'Prioriza transcript, búsqueda y análisis.'],
-                          ].map(([value, label, description]) => (
-                            <button key={value} type="button" aria-pressed={answers.offlinePlayback === value} onClick={() => updateAnswers({ offlinePlayback: value as PlaybackAnswer })} className={styles.optionCard} data-selected={answers.offlinePlayback === value}>
-                              <span className={styles.choiceMark}>{answers.offlinePlayback === value && <FaCheck size={9} />}</span>
-                              <span><strong>{label}</strong><small>{description}</small></span>
+                            ['knowledge', 'Knowledge', 'Transcript y búsqueda', 'Solo medios grandes entran en la retención online.'],
+                            ['balanced', 'Balanced', 'Equilibrio', 'Conserva video dentro de una cuota moderada.'],
+                            ['archive', 'Archive', 'Offline primero', 'Cuota amplia para conservar biblioteca local.'],
+                          ].map(([value, label, short, description]) => (
+                            <button key={value} type="button" role="radio" aria-checked={answers.intent === value} onClick={() => { intentOverridden.current = true; updateAnswers({ intent: value as SetupIntent }); setStep('storage'); }} className={styles.profileCard} data-selected={answers.intent === value}>
+                              <span className={styles.choiceMark}>{answers.intent === value && <FaCheck size={9} />}</span>
+                              <strong>{label}</strong>
+                              <span>{short}</span>
+                              <small>{description}</small>
                             </button>
                           ))}
                         </div>
-                      </fieldset>
-
-                      <fieldset className={styles.questionBlock}>
-                        <legend>¿Qué te importa más?</legend>
-                        <div className={styles.optionGrid}>
-                          {[
-                            ['knowledge', 'Conocimiento', 'Transcript, búsqueda y análisis durables.'],
-                            ['videos', 'Conservar videos', 'Medios locales disponibles sin red.'],
-                          ].map(([value, label, description]) => (
-                            <button key={value} type="button" aria-pressed={answers.priority === value} onClick={() => updateAnswers({ priority: value as PriorityAnswer })} className={styles.optionCard} data-selected={answers.priority === value}>
-                              <span className={styles.choiceMark}>{answers.priority === value && <FaCheck size={9} />}</span>
-                              <span><strong>{label}</strong><small>{description}</small></span>
-                            </button>
-                          ))}
-                        </div>
-                      </fieldset>
-
-                      <fieldset className={styles.questionBlock}>
-                        <legend>¿Qué volumen esperas descargar?</legend>
-                        <div className={styles.optionGrid}>
-                          {[
-                            ['occasional', 'Ocasional', 'Pocas piezas y revisiones puntuales.'],
-                            ['regular', 'Regular', 'Uso frecuente con cuota moderada.'],
-                            ['high', 'Alto', 'Muchas piezas o biblioteca de archivo.'],
-                          ].map(([value, label, description]) => (
-                            <button key={value} type="button" aria-pressed={answers.volume === value} onClick={() => updateAnswers({ volume: value as VolumeAnswer })} className={styles.optionCard} data-selected={answers.volume === value}>
-                              <span className={styles.choiceMark}>{answers.volume === value && <FaCheck size={9} />}</span>
-                              <span><strong>{label}</strong><small>{description}</small></span>
-                            </button>
-                          ))}
-                        </div>
-                      </fieldset>
-                    </div>
-
-                    <div className={styles.recommendationStrip}>
-                      <span className={styles.recommendationKicker}>Perfil sugerido</span>
-                      <strong>{suggestedIntent === 'knowledge' ? 'Knowledge' : suggestedIntent === 'balanced' ? 'Balanced' : 'Archive'}</strong>
-                      <p>{suggestedIntent === 'knowledge' ? 'Conserva el conocimiento y mantiene los medios sujetos a cuota.' : suggestedIntent === 'balanced' ? 'Equilibra video local y espacio disponible.' : 'Da prioridad a la reproducción offline y a una cuota amplia.'}</p>
-                    </div>
-
-                    <div className={styles.profileGrid} aria-label="Perfil de almacenamiento">
-                      {[
-                        ['knowledge', 'Knowledge', 'Transcript y búsqueda', 'Solo medios grandes entran en la retención online.'],
-                        ['balanced', 'Balanced', 'Equilibrio', 'Conserva video dentro de una cuota moderada.'],
-                        ['archive', 'Archive', 'Offline primero', 'Cuota amplia para conservar biblioteca local.'],
-                      ].map(([value, label, short, description]) => (
-                        <button key={value} type="button" aria-pressed={answers.intent === value} onClick={() => { intentOverridden.current = true; updateAnswers({ intent: value as SetupIntent }); }} className={styles.profileCard} data-selected={answers.intent === value}>
-                          <span className={styles.choiceMark}>{answers.intent === value && <FaCheck size={9} />}</span>
-                          <strong>{label}</strong>
-                          <span>{short}</span>
-                          <small>{description}</small>
-                        </button>
-                      ))}
-                    </div>
+                      </>
+                    )}
                   </div>
                 )}
 
                 {effectiveStep === 'storage' && (
                   <div className={styles.stepContent}>
-                    <p className={styles.sectionEyebrow}>2 · Almacenamiento</p>
-                    <h3 className={styles.controlTitle}>Define una cuota segura</h3>
+                    <p className={styles.sectionEyebrow}>3 · Almacenamiento</p>
+                    <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.controlTitle}>Define una cuota segura</h3>
                     <p className={styles.controlDescription}>Solo cuenta video, audio, staging y cachés grandes. Transcript, segmentos, embeddings, metadata y capturas quedan fuera.</p>
 
                     <div className={styles.storagePanel}>
@@ -838,18 +971,18 @@ export function ProcessingSetupModal({
                       </div>
                       <label className={styles.storageField} htmlFor="setup-media-root">
                         <span>Carpeta de medios</span>
-                        <input id="setup-media-root" type="text" value={answers.mediaRoot} onChange={(event) => updateAnswers({ mediaRoot: event.target.value })} />
+                        <input id="setup-media-root" type="text" value={answers.mediaRoot} onChange={(event) => updateAnswers({ mediaRoot: event.target.value })} aria-invalid={mediaRootInvalid} aria-describedby="setup-storage-status" />
                       </label>
                       <label className={styles.storageField} htmlFor="setup-quota">
                         <span>Cuota para medios grandes (GiB)</span>
                         <div className={styles.storageInputWrap}>
-                          <input id="setup-quota" type="number" min="1" max="200" step="1" value={quotaGiB} onChange={(event) => { userAdjustedQuota.current = true; updateAnswers({ quotaGiB: clampNumber(Number(event.target.value) || 1, 1, 200) }); }} />
+                          <input id="setup-quota" type="number" min="1" max="200" step="1" value={quotaGiB} onChange={(event) => { userAdjustedQuota.current = true; updateAnswers({ quotaGiB: clampNumber(Number(event.target.value) || 1, 1, 200) }); }} aria-invalid={quotaInvalid} aria-describedby="setup-storage-status" />
                           <span>GiB</span>
                         </div>
                       </label>
-                      <p className={styles.storageReason}>{recommendation.reason}</p>
-                      {lowDisk && <p role="alert" className={styles.warningMessage}>No se habilitarán nuevas descargas hasta liberar espacio o elegir otra unidad. La purga nunca será automática.</p>}
-                      {optionalLoading && <p className={styles.statusMessage}>Midiendo el disco con el shell nativo…</p>}
+                      <p id="setup-storage-status" className={styles.storageReason}>{recommendation.reason}</p>
+                      {lowDisk && <p id="setup-storage-error" role="alert" className={styles.warningMessage}>No se habilitarán nuevas descargas hasta liberar espacio o elegir otra unidad. La purga nunca será automática.</p>}
+                      {optionalLoading && <p role="status" className={styles.statusMessage}>Midiendo el disco con el shell nativo…</p>}
                     </div>
 
                     <div className={styles.retentionSummary}>
@@ -862,11 +995,11 @@ export function ProcessingSetupModal({
 
                 {effectiveStep === 'model' && (
                   <div className={styles.stepContent}>
-                    <p className={styles.sectionEyebrow}>3 · Modelo local</p>
-                    <h3 className={styles.controlTitle}>Elige tu nivel de análisis</h3>
+                    <p className={styles.sectionEyebrow}>4 · Modelo local</p>
+                    <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.controlTitle}>Elige tu nivel de análisis</h3>
                     <p className={styles.controlDescription}>Whisper tiny viene incluido para arrancar offline. Small y medium son opcionales y se preparan solo cuando confirmas.</p>
 
-                    <div className={styles.modelGrid}>
+                    <div className={styles.modelGrid} role="radiogroup" aria-label="Modelo local">
                       {[
                         ['tiny', 'Incluido', 'Arranque offline', 'Rápido y siempre disponible.'],
                         ['small', 'Opcional', 'Más detalle', 'Recomendado para uso diario.'],
@@ -875,7 +1008,7 @@ export function ProcessingSetupModal({
                         const typedModel = model as 'tiny' | 'small' | 'medium';
                         const disabled = typedModel === 'medium' && !hardware?.whisper_gpu_supported;
                         return (
-                          <button key={model} type="button" disabled={disabled} aria-pressed={selectedModel === typedModel} onClick={() => { if (!disabled) { userAdjustedQuality.current = true; setQuality(modelQuality(typedModel)); } }} className={styles.modelCard} data-selected={selectedModel === typedModel} data-disabled={disabled}>
+                          <button key={model} type="button" role="radio" disabled={disabled || saving} aria-checked={selectedModel === typedModel} onClick={() => { if (!disabled) { userAdjustedQuality.current = true; setQuality(modelQuality(typedModel)); void handleSave(modelQuality(typedModel)); } }} className={styles.modelCard} data-selected={selectedModel === typedModel} data-disabled={disabled}>
                             <span className={styles.modelTopline}><strong>Whisper {model}</strong><small>{badge}</small></span>
                             <span>{label}</span>
                             <small>{description}</small>
@@ -912,12 +1045,27 @@ export function ProcessingSetupModal({
                   </div>
                 )}
 
-                <div className={styles.navigation}>
-              <button type="button" onClick={previousStep} disabled={effectiveStep === 'intent' || effectiveStep === 'language' || saving} className={styles.backButton}>{t('back')}</button>
-                  <button type="button" onClick={nextStep} disabled={saving || preflightBlocked || (effectiveStep === 'storage' && (lowDisk || quotaGiB < 1))} className={styles.saveButton}>
-                    {effectiveStep === 'model' ? (completed ? 'Configuración lista' : saving ? 'Preparando modelo…' : 'Guardar y preparar modelo') : t('continue')}
-                  </button>
-                </div>
+                {['welcome', 'hardware', 'storage'].includes(effectiveStep) && (
+                  <div className={styles.navigation} data-first-step={effectiveStep === 'welcome'}>
+                    {effectiveStep !== 'welcome' && <button type="button" onClick={previousStep} disabled={saving} className={styles.backButton}>{t('back')}</button>}
+                    <button type="button" onClick={nextStep} disabled={saving || preflightBlocked || (effectiveStep === 'storage' && (lowDisk || quotaGiB < 1))} className={styles.saveButton}>
+                      {effectiveStep === 'welcome' ? 'Comenzar' : t('continue')}
+                    </button>
+                  </div>
+                )}
+                {effectiveStep === 'model' && !completed && (
+                  <div className={styles.navigation}>
+                    <button type="button" onClick={previousStep} disabled={saving} className={styles.backButton}>{t('back')}</button>
+                    <button type="button" onClick={() => void handleSave()} disabled={saving || preflightBlocked || lowDisk || quotaGiB < 1} className={styles.saveButton}>
+                      {saving ? 'Preparando modelo…' : 'Guardar y preparar modelo'}
+                    </button>
+                  </div>
+                )}
+                {['language', 'intent'].includes(effectiveStep) && (
+                  <div className={`${styles.navigation} ${styles.backOnlyNavigation}`}>
+                    <button type="button" onClick={previousStep} disabled={saving} className={styles.backButton}>{t('back')}</button>
+                  </div>
+                )}
                 {saving && <button type="button" onClick={() => void onCancelPreparation()} className={styles.cancelButton}>Cancelar preparación</button>}
               </div>
             </div>

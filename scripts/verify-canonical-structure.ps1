@@ -83,6 +83,30 @@ if (-not (Test-Path -LiteralPath $archiveIndex -PathType Leaf)) {
     Add-Blocker 'Historical documentation index is missing: docs/archive/README.md'
 }
 
+# Historical reports may mention old branches and paths. Active documentation
+# must not advertise an archived branch as the current development authority.
+$activeDocumentation = @(
+    Get-Item -LiteralPath (Join-Path $ProjectRoot 'README.md') -ErrorAction SilentlyContinue
+    Get-Item -LiteralPath (Join-Path $ProjectRoot 'PROJECT_TRUTH.md') -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'docs') -Filter '*.md' -File -ErrorAction SilentlyContinue
+)
+foreach ($file in $activeDocumentation) {
+    $contents = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
+    if ($contents -match '(?im)^\s*(?:active\s+branch|rama\s+activa|fuente\s+vigente)\s*[:=]\s*`?(?:master|feat/frontend-integration|chestnut-dugout|codex/)') {
+        Add-Blocker "Active documentation names an archived branch as authority: $($file.FullName)"
+    }
+}
+
+# Canonical source directories must remain present and non-empty. This catches
+# a future merge that leaves only a generated bundle while the source was
+# accidentally moved to an alternate copy.
+foreach ($relative in @('app', 'components', 'hooks', 'lib', 'types', 'semantic', 'sdk/typescript', 'src-tauri/src', 'python-workers')) {
+    $directory = Join-Path $ProjectRoot $relative
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+        Add-Blocker "Canonical source directory is missing: $relative"
+    }
+}
+
 $status = if ($blockers.Count -eq 0) { 'PASS' } else { 'FAIL' }
 [ordered]@{
     status = $status

@@ -1,12 +1,12 @@
-import { useCallback, useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 
 import { cn } from '@/lib/utils';
 import { SHADOW, SURFACE, ACCENT } from '@/lib/design-tokens';
-import { useSettings, AppTheme, RetentionPolicy } from '@/lib/settings-context';
+import { useSettings, AppTheme, RetentionPolicy, StorageIntent } from '@/lib/settings-context';
 import { useI18n } from '@/lib/i18n';
 import { isTauriRuntime, useProcessingSettings } from '@/hooks/use-processing-settings';
 import { useUpdater } from '@/hooks/use-updater';
-import type { JobRecord } from '@/hooks/use-jobs';
+import { isCompletedJob, isFailedJob, type JobRecord } from '@/hooks/use-jobs';
 import { cancelLocalLlmDownload, ensureLocalLlm, getLocalLlmStatus, type LocalLlmStatus } from '@/lib/local-llm';
 
 import { 
@@ -396,7 +396,8 @@ async function invokeOptionalCommand<T>(command: string, args?: Record<string, u
     try {
         const { invoke } = await import('@tauri-apps/api/core');
         return await invoke<T>(command, args);
-    } catch {
+    } catch (error) {
+        if (isTauriRuntime()) throw error;
         return null;
     }
 }
@@ -405,7 +406,10 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
     const { settings, updateSettings } = useSettings();
     const { locale, setLocale, t } = useI18n();
     const processingSetup = useProcessingSettings();
-    const updater = useUpdater();
+    const hasActiveJob = jobs.some((job) => !isCompletedJob(job) && !isFailedJob(job));
+    const updater = useUpdater({ hasActiveJob });
+    const updaterBlocked = process.env.NEXT_PUBLIC_PULSARIA_UPDATER_ENABLED !== 'true';
+    const updaterChannel = process.env.NEXT_PUBLIC_PULSARIA_UPDATE_CHANNEL === 'rc' ? 'RC' : 'estable';
 
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [formats, setFormats] = useState<string[]>(settings.formats);
@@ -415,6 +419,11 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
     const [cookiesBrowser, setCookiesBrowser] = useState<typeof settings.cookiesBrowser>(settings.cookiesBrowser || '');
     const [processingQuality, setProcessingQuality] = useState(settings.processingQuality);
     const [videoFit, setVideoFit] = useState(settings.videoFit);
+    const [storageIntent, setStorageIntent] = useState(settings.storageIntent);
+    const [quotaBytes, setQuotaBytes] = useState(settings.quotaBytes);
+    const [reserveBytes, setReserveBytes] = useState(settings.reserveBytes);
+    const [autostartEnabled, setAutostartEnabled] = useState(false);
+    const initialSettingsRef = useRef(settings);
     const selectedWhisperModel = processingQuality < 35
         ? 'tiny'
         : processingQuality < 72
@@ -443,6 +452,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
     const [purgeConfirming, setPurgeConfirming] = useState(false);
     const [lastPurgeId, setLastPurgeId] = useState<number | null>(null);
     const [trashConfirming, setTrashConfirming] = useState(false);
+    const [retentionPreviewPending, setRetentionPreviewPending] = useState(false);
     const [localLlmStatus, setLocalLlmStatus] = useState<LocalLlmStatus | null>(null);
     const [localLlmBusy, setLocalLlmBusy] = useState(false);
     const [localLlmMessage, setLocalLlmMessage] = useState<string | null>(null);
@@ -521,14 +531,38 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
             setFolder(settings.folder);
             setSelectedTheme(settings.theme || 'carbon');
             setRetention(settings.retention || 'keep');
+            setRetentionPreviewPending(false);
             setCookiesBrowser(settings.cookiesBrowser || '');
             setProcessingQuality(settings.processingQuality);
             setVideoFit(settings.videoFit);
+            setStorageIntent(settings.storageIntent);
+            setQuotaBytes(settings.quotaBytes);
+            setReserveBytes(settings.reserveBytes);
         });
         return () => {
             active = false;
         };
     }, [settings]);
+
+    useEffect(() => {
+        if (!isTauriRuntime()) return;
+        let active = true;
+        void (async () => {
+            try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                const response = await invoke<{ autostartEnabled: boolean; settings: { minScore: number; storageIntent: StorageIntent; quotaBytes: number; reserveBytes: number } }>('get_app_settings');
+                if (!active) return;
+                setAutostartEnabled(response.autostartEnabled);
+                setSimilarityThreshold(response.settings.minScore);
+                setStorageIntent(response.settings.storageIntent);
+                setQuotaBytes(response.settings.quotaBytes);
+                setReserveBytes(response.settings.reserveBytes);
+            } catch (error) {
+                if (active) setSettingsError(error instanceof Error ? error.message : String(error));
+            }
+        })();
+        return () => { active = false; };
+    }, [settings.storageIntent]);
 
     const refreshHealth = async () => {
         if (!isTauriRuntime()) return;
@@ -545,7 +579,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
 
     const refreshStorageStatus = useCallback(async () => {
         if (!isTauriRuntime()) return;
-        const rawStatus = await invokeOptionalCommand<unknown>('get_storage_status');
+        const rawStatus = await invokeOptionalCommand<unknown>('get_storage_status', { path: folder });
         const nextStatus = normalizeStorageStatus(rawStatus);
         if (nextStatus) {
             setStorageStatus(nextStatus);
@@ -554,14 +588,14 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
         }
         setStorageStatus(null);
         setStorageMessage('El shell nativo actual todavía no expone la medición detallada de cuota; no se ha eliminado ningún archivo.');
-    }, []);
+    }, [folder]);
 
     const handlePreviewPurge = async () => {
         setStorageBusy(true);
         setStorageError(null);
         setStorageMessage(null);
         try {
-            const rawPreview = await invokeOptionalCommand<unknown>('preview_media_purge');
+            const rawPreview = await invokeOptionalCommand<unknown>('preview_media_purge', { path: folder });
             const nativePreview = normalizePurgePreview(rawPreview);
             if (nativePreview) {
                 setPurgePreview(nativePreview);
@@ -601,6 +635,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
             const result = await invoke<unknown>('apply_media_purge', {
                 jobIds: purgeSelection,
                 reason: 'Purga manual confirmada por el usuario',
+                path: folder,
             });
             // Rust returns one action per selected job. Keep the last action
             // id as the immediate undo target and never pretend a browser
@@ -636,7 +671,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
         setStorageError(null);
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            await invoke('undo_media_purge', { purgeId: lastPurgeId });
+            await invoke('undo_media_purge', { purgeId: lastPurgeId, path: folder });
             setLastPurgeId(null);
             setStorageMessage('La última purga se deshizo correctamente.');
             await refreshStorageStatus();
@@ -656,7 +691,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
         setStorageError(null);
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            const rawFreed = await invoke<unknown>('empty_media_trash');
+            const rawFreed = await invoke<unknown>('empty_media_trash', { path: folder });
             const freedBytes = typeof rawFreed === 'number' ? rawFreed : Number(rawFreed);
             setLastPurgeId(null);
             setTrashConfirming(false);
@@ -671,6 +706,27 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
         }
     };
 
+    const handleRetentionChange = (nextRetention: RetentionPolicy) => {
+        if (nextRetention === retention) return;
+        setRetention(nextRetention);
+        if (nextRetention !== 'online') {
+            setRetentionPreviewPending(false);
+            setPurgePreview(null);
+            setPurgeSelection([]);
+            return;
+        }
+
+        // Changing the global policy must surface the same explainable
+        // preview used by manual purge. It never deletes media: the user is
+        // only acknowledging which existing online candidates are eligible.
+        if (settings.retention !== 'online') {
+            setRetentionPreviewPending(true);
+            setPurgePreview(null);
+            setPurgeSelection([]);
+            void handlePreviewPurge();
+        }
+    };
+
     useEffect(() => {
         if (activeTab !== 'general' || !isTauriRuntime()) return;
         queueMicrotask(() => { void refreshStorageStatus(); });
@@ -679,7 +735,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
     useEffect(() => {
         let active = true;
         queueMicrotask(() => {
-            if (active) void refreshHealth().catch(() => {});
+            if (active) void refreshHealth().catch((error) => console.warn('Initial health refresh failed:', error));
         });
         return () => {
             active = false;
@@ -760,6 +816,11 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
         updateSettings({ theme: themeId });
     };
 
+    const handleCancel = () => {
+        updateSettings(initialSettingsRef.current);
+        onClose();
+    };
+
     const runClustering = async () => {
         setClusteringLoading(true);
         setClusteringError(null);
@@ -821,6 +882,11 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
     };
 
     const handleSave = async () => {
+        if (retentionPreviewPending) {
+            setActiveTab('general');
+            setStorageError('Revisa la previsualización y confirma el cambio a «Solo online» antes de guardar. Esta confirmación no elimina medios.');
+            return;
+        }
         setSettingsError(null);
         try {
             const isNative = isTauriRuntime();
@@ -835,17 +901,45 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                     // save_mvp_settings aplica el fallback local verificable.
                 }
                 const { invoke } = await import('@tauri-apps/api/core');
-                savedProcessing = await invoke<SavedProcessingSettings>('save_mvp_settings', {
-                    input: {
+                const processing = processingSetup.processing;
+                const nativeSettings = await invoke<{
+                    processingQuality: number;
+                    processingProfile: 'fast' | 'balanced' | 'high';
+                    videoFit: 'cover' | 'contain';
+                }>('save_app_settings', {
+                    settings: {
+                        schemaVersion: 1,
+                        source: 'native',
+                        locale,
+                        theme: selectedTheme,
                         downloadDir: folder,
-                        retention,
-                        browser: cookiesBrowser,
                         formats,
-                        minScore: similarityThreshold,
-                        quality: processingQuality,
+                        retention,
+                        cookiesBrowser,
+                        processingQuality,
+                        processingProfile: processing?.profile ?? (processingQuality < 35 ? 'fast' : processingQuality < 72 ? 'balanced' : 'high'),
+                        whisperModel: processing?.whisper_model ?? selectedWhisperModel,
+                        device: processing?.device ?? 'cpu',
+                        computeType: processing?.compute_type ?? 'int8',
                         videoFit,
+                        storageIntent,
+                        quotaBytes,
+                        reserveBytes,
+                        minScore: similarityThreshold,
+                        maxResults: 10,
+                        similarityMetric: 'Cosine',
+                        chunkSize: 150,
+                        chunkOverlap: 50,
+                        autostartEnabled,
+                        updaterStatus: 'BLOCKED_EXTERNAL',
                     },
                 });
+                await invoke<boolean>('set_autostart', { enabled: autostartEnabled });
+                savedProcessing = {
+                    quality: nativeSettings.processingQuality,
+                    profile: nativeSettings.processingProfile,
+                    video_fit: nativeSettings.videoFit,
+                };
                 await processingSetup.refresh();
             }
 
@@ -858,6 +952,9 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                 processingQuality: savedProcessing?.quality ?? processingQuality,
                 processingProfile: savedProcessing?.profile ?? (processingQuality < 35 ? 'fast' : processingQuality < 72 ? 'balanced' : 'high'),
                 videoFit: savedProcessing?.video_fit ?? videoFit,
+                storageIntent,
+                quotaBytes,
+                reserveBytes,
             });
             onClose();
         } catch (error) {
@@ -897,16 +994,16 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
             <div className="flex items-center justify-between px-5 pt-4 pb-3">
                 <div className="flex flex-col">
                     <div className="flex items-center gap-1.5 font-bold uppercase tracking-widest text-[9px] text-white/40">
-                        <span>PANEL DE CONTROL</span>
+                        <span>{t('panelControl')}</span>
                     </div>
                     <h2 className="text-base font-black tracking-tight leading-tight text-white">
-                        CONFIGURACIÓN <span className="text-[var(--accent-primary)]">GLOBAL</span>
+                        {t('globalConfig')}
                     </h2>
                 </div>
                                 <button
                     type="button"
-                    aria-label="Cerrar configuración"
-                    onClick={onClose}
+                    aria-label={t('closeSettings')}
+                    onClick={handleCancel}
 
                     className="w-9 h-9 rounded-[12px] flex items-center justify-center transition-all border border-white/10 bg-white/[0.04] hover:bg-[#fe2c55]/20 hover:border-[#fe2c55]/40 text-white/60 hover:text-white cursor-pointer"
                 >
@@ -929,7 +1026,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                         }`}
                     >
                         <FaSliders size={11} />
-                        <span className="truncate">General</span>
+                        <span className="truncate">{t('general')}</span>
                     </button>
                                         <button
                         type="button"
@@ -943,7 +1040,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                         }`}
                     >
                         <FaChartSimple size={11} />
-                        <span className="truncate">Stats</span>
+                        <span className="truncate">{t('stats')}</span>
                     </button>
                                         <button
                         type="button"
@@ -957,7 +1054,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                         }`}
                     >
                         <FaMicrochip size={11} />
-                        <span className="truncate">Engine</span>
+                        <span className="truncate">{t('engine')}</span>
                     </button>
                                         <button
                         type="button"
@@ -971,7 +1068,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                         }`}
                     >
                         <FaBrain size={11} />
-                        <span className="truncate">AI</span>
+                        <span className="truncate">{t('ai')}</span>
                     </button>
                 </div>
             </div>
@@ -1198,7 +1295,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                                         <button
                                             key={option.id}
                                             type="button"
-                                            onClick={() => setRetention(option.id)}
+                                            onClick={() => handleRetentionChange(option.id)}
                                             className="p-3 rounded-[14px] border text-left transition-all"
                                             style={{
                                                 background: selected ? `${option.color}12` : 'rgba(255,255,255,0.02)',
@@ -1217,6 +1314,48 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                             <p className="mt-2 px-1 text-[10px] text-white/40 leading-relaxed">
                                 La opción «Solo online» mantiene metadata, transcript, segmentos, embeddings y artifacts. Cualquier retiro de video/audio debe aparecer en una previsualización y pedir confirmación; nunca se purga conocimiento en silencio.
                             </p>
+                            {retentionPreviewPending && (
+                                <div className="rounded-[14px] border border-cyan-300/20 bg-cyan-300/[.04] p-3" role="alert">
+                                    <p className="text-[10px] font-bold text-cyan-100">Revisión necesaria antes de cambiar a «Solo online»</p>
+                                    <p className="mt-1 text-[10px] leading-relaxed text-white/55">
+                                        La vista previa identifica los medios grandes que podrían retirarse más adelante. Confirmar aquí solo guarda la política; no borra videos, audio, transcripts, embeddings ni artifacts.
+                                    </p>
+                                    <p className="mt-2 text-[10px] text-white/65">
+                                        {storageBusy
+                                            ? 'Calculando candidatos…'
+                                            : purgePreview
+                                                ? `${storageCandidates.length} candidato(s) elegible(s) · ${formatStorageBytes(storageCandidates.reduce((total, candidate) => total + candidate.mediaBytes, 0))}`
+                                                : 'Aún no se pudo obtener la vista previa.'}
+                                    </p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={storageBusy}
+                                            onClick={() => {
+                                                setRetention(settings.retention || 'keep');
+                                                setRetentionPreviewPending(false);
+                                                setPurgePreview(null);
+                                                setPurgeSelection([]);
+                                            }}
+                                            className="rounded-[10px] border border-white/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-white/60 transition hover:bg-white/5 hover:text-white disabled:opacity-35"
+                                        >
+                                            Mantener local
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={storageBusy || !purgePreview}
+                                            onClick={() => {
+                                                setRetentionPreviewPending(false);
+                                                setStorageError(null);
+                                                setStorageMessage('Política «Solo online» confirmada. La purga de medios continúa siendo manual y reversible.');
+                                            }}
+                                            className="rounded-[10px] border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-cyan-100 transition hover:bg-cyan-300/15 disabled:cursor-not-allowed disabled:opacity-35"
+                                        >
+                                            Confirmar política
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </SectionCard>
 
                         <SectionCard className="flex flex-col gap-3">
@@ -1478,7 +1617,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
 
                         <SectionCard>
                             <div className="flex items-center justify-between gap-3">
-                                <SectionTitle icon={FaTriangleExclamation} label="Salud y sincronización" />
+                            <SectionTitle icon={FaTriangleExclamation} label={`${t('health')} y sincronización`} />
                                 <button
                                     type="button"
                                     disabled={healthBusy}
@@ -1556,18 +1695,20 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
 
                         <SectionCard className="flex flex-col gap-3">
                             <div className="flex items-start justify-between gap-3">
-                                <SectionTitle icon={FaRotate} label="Actualizaciones" />
+                                <SectionTitle icon={FaRotate} label={t('updater')} />
                                 <span className="rounded-full border border-[#25f4ee]/25 bg-[#25f4ee]/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-[#25f4ee]">
-                                    Firmadas
+                                    {updaterBlocked ? 'Bloqueado externamente' : `Firmado · canal ${updaterChannel}`}
                                 </span>
                             </div>
                             <p className="text-[10px] leading-relaxed text-white/45">
-                                Busca manualmente nuevas versiones publicadas en GitHub Releases. La instalación valida la firma Tauri y reinicia Pulsaria en Windows; no se realizan comprobaciones automáticas.
+                                {updaterBlocked
+                                    ? 'El updater permanecerá bloqueado hasta contar con un manifiesto firmado, clave pública y artefactos oficiales verificables.'
+                                    : 'Pulsaria comprueba nuevas releases una vez al día y solo instala una actualización firmada después de tu confirmación.'}
                             </p>
 
-                            {!updater.isNative && (
+                            {(updaterBlocked || !updater.isNative) && (
                                 <p className="rounded-[10px] border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-[9px] leading-relaxed text-amber-300/80">
-                                    Las actualizaciones solo están disponibles desde la aplicación de escritorio nativa.
+                                    Las actualizaciones firmadas no están disponibles en este build; no se ejecutará ninguna instalación sin evidencia de firma.
                                 </p>
                             )}
 
@@ -1581,12 +1722,13 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                                         {updater.status === 'available' && `Disponible: ${updater.version}`}
                                         {updater.status === 'downloading' && `Descargando… ${updater.progress}%`}
                                         {updater.status === 'installing' && 'Instalando y preparando reinicio…'}
+                                        {updater.status === 'blocked-by-active-job' && 'Esperando a que terminen los trabajos activos'}
                                         {updater.status === 'error' && 'No se pudo actualizar'}
                                     </span>
                                 </div>
                                 <button
                                     type="button"
-                                    disabled={!updater.isNative || updater.status === 'checking' || updater.status === 'downloading' || updater.status === 'installing'}
+                                    disabled={updaterBlocked || !updater.isNative || updater.status === 'checking' || updater.status === 'downloading' || updater.status === 'installing'}
                                     onClick={() => {
                                         setUpdateConfirming(false);
                                         void updater.checkForUpdate();
@@ -1597,7 +1739,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                                 </button>
                             </div>
 
-                            {updater.status === 'available' && updater.version && (
+                            {updater.status === 'available' && updater.version && !updaterBlocked && (
                                 <div className="rounded-[12px] border border-[#25f4ee]/20 bg-[#25f4ee]/5 p-3">
                                     <p className="text-[10px] font-black text-white">Versión {updater.version} disponible</p>
                                     <p className="mt-1 text-[9px] leading-relaxed text-white/50">
@@ -1628,7 +1770,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                                                     type="button"
                                                     onClick={() => {
                                                         setUpdateConfirming(false);
-                                                        void updater.installUpdate();
+                                                    void updater.installUpdate();
                                                     }}
                                                     className="rounded-[8px] bg-[#25f4ee]/20 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-[#25f4ee] transition hover:bg-[#25f4ee]/30"
                                                 >
@@ -1662,7 +1804,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                         {/* Save Folder */}
                         <SectionCard>
 
-                            <SectionTitle icon={SolidFolderIcon} label="Carpeta de Guardado" />
+                            <SectionTitle icon={SolidFolderIcon} label={t('saveFolder')} />
                             <div
                                 className="flex items-center gap-2 px-3 py-2.5 rounded-[12px] bg-black/40 border border-white/10"
                             >
@@ -1681,13 +1823,67 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                                 Los videos procesados se almacenan automáticamente en este directorio.
                             </p>
                         </SectionCard>
+
+                        <SectionCard className="flex flex-col gap-3">
+                            <SectionTitle icon={FaHardDrive} label={t('systemStorage')} />
+                            <label className="text-[10px] font-bold uppercase tracking-wider text-white/55">
+                                Intención de uso
+                                <select
+                                    value={storageIntent}
+                                    onChange={(event) => setStorageIntent(event.target.value as typeof storageIntent)}
+                                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs font-normal normal-case tracking-normal text-white outline-none focus:border-[#25f4ee]/50"
+                                >
+                                    <option value="knowledge">Conocimiento local</option>
+                                    <option value="balanced">Equilibrado</option>
+                                    <option value="archive">Archivo multimedia</option>
+                                </select>
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[9px] font-bold uppercase tracking-wider text-white/45">
+                                    Cuota (GiB)
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        value={Math.max(1, Math.round(quotaBytes / BYTES_PER_GIB))}
+                                        onChange={(event) => setQuotaBytes(Math.max(1, Number(event.target.value) || 1) * BYTES_PER_GIB)}
+                                        className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs font-normal normal-case tracking-normal text-white outline-none focus:border-[#25f4ee]/50"
+                                    />
+                                </label>
+                                <label className="text-[9px] font-bold uppercase tracking-wider text-white/45">
+                                    Reserva (GiB)
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        value={Math.max(1, Math.round(reserveBytes / BYTES_PER_GIB))}
+                                        onChange={(event) => setReserveBytes(Math.max(1, Number(event.target.value) || 1) * BYTES_PER_GIB)}
+                                        className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs font-normal normal-case tracking-normal text-white outline-none focus:border-[#25f4ee]/50"
+                                    />
+                                </label>
+                            </div>
+                            <p className="text-[9px] leading-relaxed text-white/40">La cuota se comprueba contra el espacio libre real de la unidad y la reserva no puede ser consumida por medios.</p>
+                            <label className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-white/70">
+                                <span>
+                                    <span className="block font-bold text-white/80">Iniciar con Windows</span>
+                                    <span className="block text-[9px] text-white/35">Pulsaria se mantiene en la bandeja con --background.</span>
+                                </span>
+                                <input
+                                    type="checkbox"
+                                    checked={autostartEnabled}
+                                    disabled={!isTauriRuntime()}
+                                    onChange={(event) => setAutostartEnabled(event.target.checked)}
+                                    className="h-4 w-4 accent-[#25f4ee]"
+                                />
+                            </label>
+                        </SectionCard>
                     </>
                 )}
 
                 {/* TAB: ESTADÍSTICAS */}
                 {activeTab === 'stats' && (
                     <SectionCard className="flex flex-col gap-4">
-                        <SectionTitle icon={FaChartSimple} label="Métricas de la Biblioteca" />
+                        <SectionTitle icon={FaChartSimple} label={t('libraryMetrics')} />
 
                         <div className="grid grid-cols-2 gap-2.5">
                             <div className="flex flex-col p-3 rounded-[14px] bg-black/40 border border-white/5 shadow-inner">
@@ -1895,7 +2091,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                                             onClick={() => setPendingSourceDelete(null)}
                                             className="flex-1 rounded-xl bg-white/5 py-2 text-xs text-white/60 transition-colors hover:bg-white/10"
                                         >
-                                            Cancelar
+                                            {t('cancel')}
                                         </button>
                                         <button
                                             type="button"
@@ -1925,7 +2121,8 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                     </div>
                 )}
 
-                                <button
+                <div className="flex gap-2">
+                <button
                     type="button"
                     onClick={() => { void handleSave(); }}
 
@@ -1939,6 +2136,14 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                 >
                     Guardar Cambios
                 </button>
+                <button
+                    type="button"
+                    onClick={handleCancel}
+                    className="rounded-[12px] border border-white/10 px-4 text-[10px] font-black uppercase tracking-wider text-white/55 transition hover:bg-white/5 hover:text-white"
+                >
+                    {t('cancel')}
+                </button>
+                </div>
             </div>
         </div>
     );

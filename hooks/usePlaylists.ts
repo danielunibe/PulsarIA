@@ -16,9 +16,10 @@ export interface PlaylistRecord {
 }
 
 import { REST_API_BASE } from '@/lib/api-config';
+import { apiFetch } from '@/lib/api-client';
 
 async function restRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${REST_API_BASE}${path}`, {
+  const response = await apiFetch(`${REST_API_BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',

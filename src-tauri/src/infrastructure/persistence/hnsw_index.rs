@@ -1,3 +1,4 @@
+use crate::domain::models::EMBEDDING_DIMS;
 use crate::domain::ports::VectorIndex;
 use hnsw::{Hnsw, Searcher};
 use metrics::{gauge, histogram};
@@ -18,10 +19,8 @@ use std::sync::{Arc, RwLock};
 
 use serde_big_array::BigArray;
 
-const DIMS: usize = 384; // all-MiniLM-L6-v2 size
-
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct Vector(#[serde(with = "BigArray")] pub [f32; DIMS]);
+pub struct Vector(#[serde(with = "BigArray")] pub [f32; EMBEDDING_DIMS]);
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Euclidean;
@@ -32,7 +31,7 @@ impl Metric<Vector> for Euclidean {
     #[inline]
     fn distance(&self, a: &Vector, b: &Vector) -> u32 {
         let mut dist = 0.0;
-        for i in 0..DIMS {
+        for i in 0..EMBEDDING_DIMS {
             let diff = a.0[i] - b.0[i];
             dist += diff * diff;
         }
@@ -78,6 +77,50 @@ impl HnswVectorIndex {
     pub fn new() -> Self {
         Self::default()
     }
+
+    pub fn vector_count(&self) -> Result<usize, String> {
+        self.metadata
+            .read()
+            .map(|metadata| metadata.len())
+            .map_err(|_| "Poison error HNSW metadata read".to_string())
+    }
+
+    pub fn metadata_entries(&self) -> Result<Vec<(i64, i64)>, String> {
+        self.metadata
+            .read()
+            .map(|metadata| metadata.values().copied().collect())
+            .map_err(|_| "Poison error HNSW metadata read".to_string())
+    }
+
+    pub fn replace_from(&self, source: &Self) -> Result<(), String> {
+        let source_index = source
+            .index
+            .read()
+            .map_err(|_| "Poison error source HNSW index read")?;
+        let source_metadata = source
+            .metadata
+            .read()
+            .map_err(|_| "Poison error source HNSW metadata read")?;
+        let bytes = bincode::serialize(&IndexSnapshotRef {
+            hnsw: &source_index,
+            metadata: &source_metadata,
+        })
+        .map_err(|error| format!("Failed to serialize replacement index: {error}"))?;
+        let snapshot: IndexSnapshot = bincode::deserialize(&bytes)
+            .map_err(|error| format!("Failed to deserialize replacement index: {error}"))?;
+
+        let mut destination_index = self
+            .index
+            .write()
+            .map_err(|_| "Poison error destination HNSW index".to_string())?;
+        let mut destination_metadata = self
+            .metadata
+            .write()
+            .map_err(|_| "Poison error destination HNSW metadata".to_string())?;
+        *destination_index = snapshot.hnsw;
+        *destination_metadata = snapshot.metadata;
+        Ok(())
+    }
 }
 
 impl VectorIndex for HnswVectorIndex {
@@ -88,15 +131,15 @@ impl VectorIndex for HnswVectorIndex {
         chunk_index: i64,
         embedding: &[f32],
     ) -> Result<(), String> {
-        if embedding.len() != DIMS {
+        if embedding.len() != EMBEDDING_DIMS {
             return Err(format!(
                 "Vector dimension mismatch: expected {}, got {}",
-                DIMS,
+                EMBEDDING_DIMS,
                 embedding.len()
             ));
         }
 
-        let mut arr = [0.0; DIMS];
+        let mut arr = [0.0; EMBEDDING_DIMS];
         arr.copy_from_slice(embedding);
 
         // Bug #64 FIX: Hold metadata write lock across check+insert to prevent TOCTOU.
@@ -126,22 +169,31 @@ impl VectorIndex for HnswVectorIndex {
     }
 
     fn search(&self, query_vec: &[f32], limit: usize) -> Result<Vec<(usize, f32)>, String> {
-        if query_vec.len() != DIMS {
+        if query_vec.len() != EMBEDDING_DIMS {
             return Err("Invalid query vector dimension".into());
         }
         if limit == 0 {
             return Ok(Vec::new());
         }
 
-        let mut arr = [0.0; DIMS];
+        let mut arr = [0.0; EMBEDDING_DIMS];
         arr.copy_from_slice(query_vec);
+
+        let indexed_count = self
+            .metadata
+            .read()
+            .map_err(|_| "Poison error HNSW metadata read")?
+            .len();
+        if indexed_count == 0 {
+            return Ok(Vec::new());
+        }
 
         let index_guard = self
             .index
             .read()
             .map_err(|_| "Poison error HNSW index read")?;
         let mut searcher = Searcher::default();
-        let search_limit = limit.max(24);
+        let search_limit = limit.min(indexed_count);
         let mut dest = vec![
             space::Neighbor {
                 index: 0,
@@ -260,5 +312,39 @@ impl VectorIndex for HnswVectorIndex {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HnswVectorIndex;
+    use crate::domain::models::EMBEDDING_DIMS;
+    use crate::domain::ports::VectorIndex;
+
+    #[test]
+    fn snapshot_round_trip_preserves_vectors_and_metadata() {
+        let path =
+            std::env::temp_dir().join(format!("pulsaria-hnsw-test-{}.hnsw", std::process::id()));
+        let index = HnswVectorIndex::new();
+        for job_id in 1..=10_i64 {
+            let mut embedding = vec![0.0_f32; EMBEDDING_DIMS];
+            embedding[0] = job_id as f32;
+            index
+                .insert(job_id as usize, job_id, 0, &embedding)
+                .unwrap();
+        }
+        index.snapshot_index(&path.to_string_lossy()).unwrap();
+
+        let restored = HnswVectorIndex::new();
+        restored.load_index(&path.to_string_lossy()).unwrap();
+        assert_eq!(restored.vector_count().unwrap(), 10);
+        let mut query = vec![0.0_f32; EMBEDDING_DIMS];
+        query[0] = 5.0;
+        let hits = restored.search(&query, 10).unwrap();
+        assert!(!hits.is_empty());
+        assert!(restored.get_chunk_info(hits[0].0).is_ok());
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}.tmp", path.display()));
     }
 }

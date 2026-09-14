@@ -3,11 +3,12 @@
 //! All #[tauri::command] handlers extracted from main.rs to reduce
 //! the composition root to pure bootstrap logic.
 
-use crate::api::middleware::security::is_valid_sandbox_url;
+use crate::api::middleware::security::{is_valid_sandbox_url, validate_sandbox_url};
 use crate::application::collection_service::sync_due_collections;
 use crate::application::queue_service::QueueService;
 use crate::application::semantic_chunker::SemanticChunker;
 use crate::db;
+pub use crate::domain::models::{SearchConfig, EMBEDDING_DIMS};
 use crate::embedding;
 use crate::storage;
 use crate::url_utils::is_collection_source;
@@ -24,6 +25,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tauri::{Emitter, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tokio::sync::Mutex;
+#[cfg(windows)]
+use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
 #[cfg(windows)]
 use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 
@@ -109,13 +112,20 @@ pub struct AppState {
 
     pub queue: Arc<QueueService>,
     pub api_runtime: crate::api::ApiRuntimeState,
+    pub api_session_token: String,
     pub onnx: Arc<Mutex<Option<embedding::ONNXModelManager>>>,
     pub search: Arc<crate::application::search_service::SearchService>,
     pub config: Arc<Mutex<SearchConfig>>,
     pub metrics: Arc<Mutex<SystemMetrics>>,
     pub worker_config: Arc<tokio::sync::RwLock<WorkerConfig>>,
+    pub app_settings: Arc<tokio::sync::RwLock<AppSettingsSnapshot>>,
     pub model_prepare_pid: Arc<Mutex<Option<u32>>>,
     pub local_llm: Arc<crate::infrastructure::local_llm::LocalLlmManager>,
+}
+
+#[tauri::command]
+pub fn get_api_session_token(state: State<'_, AppState>) -> String {
+    state.api_session_token.clone()
 }
 
 #[tauri::command]
@@ -200,25 +210,414 @@ pub struct MvpSettingsInput {
     pub reserve_bytes: Option<u64>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct SearchConfig {
+/// Canonical desktop configuration shared by the native shell, frontend and
+/// worker runtime. Individual legacy files remain compatibility projections,
+/// while this snapshot is the authoritative persisted record.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettingsSnapshot {
+    pub schema_version: u32,
+    pub source: String,
+    pub locale: String,
+    pub theme: String,
+    pub download_dir: String,
+    pub formats: Vec<String>,
+    pub retention: String,
+    pub cookies_browser: String,
+    pub processing_quality: u8,
+    pub processing_profile: String,
+    pub whisper_model: String,
+    pub device: String,
+    pub compute_type: String,
+    pub video_fit: String,
+    pub storage_intent: String,
+    pub quota_bytes: u64,
+    pub reserve_bytes: u64,
     pub min_score: f32,
     pub max_results: usize,
     pub similarity_metric: String,
     pub chunk_size: usize,
     pub chunk_overlap: usize,
+    pub autostart_enabled: bool,
+    pub updater_status: String,
 }
 
-impl Default for SearchConfig {
-    fn default() -> Self {
-        Self {
-            min_score: 0.35,
-            max_results: 10,
-            similarity_metric: "Cosine".into(),
-            chunk_size: 150,
-            chunk_overlap: 50,
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettingsResponse {
+    pub settings: AppSettingsSnapshot,
+    pub source: String,
+    pub version: u32,
+    pub autostart_enabled: bool,
+    pub runtime_status: String,
+    pub storage: storage::StorageStatus,
+    pub updater_status: String,
+    pub sync_errors: Vec<String>,
+}
+
+/// Versioned legal consent stored beside the canonical native settings.
+///
+/// Consent is deliberately kept in its own file so that updating the
+/// application settings schema cannot accidentally reset or reinterpret a
+/// user's legal acknowledgement. A new document version requires a new
+/// acknowledgement, while ordinary application updates do not.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegalConsent {
+    pub eula_version: String,
+    pub terms_version: String,
+    pub privacy_version: String,
+    pub content_policy_version: String,
+    pub accepted_at: Option<String>,
+    pub locale: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegalConsentInput {
+    pub eula_version: String,
+    pub terms_version: String,
+    pub privacy_version: String,
+    pub content_policy_version: String,
+    pub locale: String,
+}
+
+const CURRENT_EULA_VERSION: &str = "0.1";
+const CURRENT_TERMS_VERSION: &str = "0.1";
+const CURRENT_PRIVACY_VERSION: &str = "0.1";
+const CURRENT_CONTENT_POLICY_VERSION: &str = "0.1";
+
+const APP_SETTINGS_SCHEMA_VERSION: u32 = 1;
+const ALLOWED_FORMATS: &[&str] = &[
+    "mp4", "mkv", "webm", "mov", "mp3", "wav", "flac", "ogg", "m4a", "txt", "srt", "vtt", "json",
+];
+
+fn detected_system_locale() -> String {
+    #[cfg(windows)]
+    {
+        let mut buffer = [0u16; 85];
+        let written = unsafe { GetUserDefaultLocaleName(buffer.as_mut_ptr(), buffer.len() as i32) };
+        if written > 1 {
+            let locale = String::from_utf16_lossy(&buffer[..(written - 1) as usize]);
+            let normalized = locale.to_ascii_lowercase();
+            if normalized.starts_with("en") {
+                return "en-US".into();
+            }
+            if normalized.starts_with("es") {
+                return "es-MX".into();
+            }
         }
     }
+
+    let value = std::env::var("LANG")
+        .or_else(|_| std::env::var("LC_ALL"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if value.starts_with("en") {
+        "en-US".into()
+    } else {
+        "es-MX".into()
+    }
+}
+
+fn default_app_settings() -> AppSettingsSnapshot {
+    let search = SearchConfig::default();
+    let processing = ProcessingSettings::default();
+    AppSettingsSnapshot {
+        schema_version: APP_SETTINGS_SCHEMA_VERSION,
+        source: "default".into(),
+        locale: detected_system_locale(),
+        theme: "carbon".into(),
+        download_dir: default_download_dir().to_string_lossy().to_string(),
+        formats: vec!["mp4".into(), "mp3".into(), "txt".into()],
+        retention: "keep".into(),
+        cookies_browser: String::new(),
+        processing_quality: processing.quality,
+        processing_profile: processing.profile,
+        whisper_model: processing.whisper_model,
+        device: processing.device,
+        compute_type: processing.compute_type,
+        video_fit: processing.video_fit,
+        storage_intent: "balanced".into(),
+        quota_bytes: 0,
+        reserve_bytes: 0,
+        min_score: search.min_score,
+        max_results: search.max_results,
+        similarity_metric: search.similarity_metric,
+        chunk_size: search.chunk_size,
+        chunk_overlap: search.chunk_overlap,
+        // Autostart is opt-in for new installations. A persisted legacy
+        // snapshot can still carry the user's previous choice.
+        autostart_enabled: false,
+        updater_status: "BLOCKED_EXTERNAL".into(),
+    }
+}
+
+fn atomic_write(path: &std::path::Path, contents: &[u8]) -> Result<(), String> {
+    let temporary = path.with_extension(format!(
+        "{}.{}.tmp",
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("data"),
+        std::process::id()
+    ));
+    fs::write(&temporary, contents).map_err(|error| error.to_string())?;
+    if !path.exists() {
+        if let Err(error) = fs::rename(&temporary, path) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error.to_string());
+        }
+        return Ok(());
+    }
+
+    // `rename` does not replace an existing file on Windows. Keep the old
+    // value beside the destination while moving the new file into place so a
+    // failed replacement can restore the previous configuration.
+    let backup = path.with_file_name(format!(
+        ".{}.previous",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("settings")
+    ));
+    if backup.exists() {
+        fs::remove_file(&backup).map_err(|error| error.to_string())?;
+    }
+    fs::rename(path, &backup).map_err(|error| {
+        let _ = fs::remove_file(&temporary);
+        error.to_string()
+    })?;
+    match fs::rename(&temporary, path) {
+        Ok(()) => {
+            let _ = fs::remove_file(&backup);
+            Ok(())
+        }
+        Err(error) => {
+            let restore = fs::rename(&backup, path);
+            let _ = fs::remove_file(&temporary);
+            match restore {
+                Ok(()) => Err(error.to_string()),
+                Err(restore_error) => Err(format!(
+                    "configuration replacement failed: {}; previous value restoration failed: {}",
+                    error, restore_error
+                )),
+            }
+        }
+    }
+}
+
+fn valid_formats(formats: &[String]) -> bool {
+    !formats.is_empty()
+        && formats
+            .iter()
+            .all(|format| ALLOWED_FORMATS.contains(&format.to_ascii_lowercase().as_str()))
+}
+
+fn validate_app_settings(settings: &AppSettingsSnapshot) -> Result<(), String> {
+    if settings.schema_version != APP_SETTINGS_SCHEMA_VERSION {
+        return Err("Versión de configuración no compatible".into());
+    }
+    if !matches!(settings.locale.as_str(), "es-MX" | "en-US") {
+        return Err("Idioma no compatible".into());
+    }
+    if !matches!(
+        settings.theme.as_str(),
+        "carbon" | "chromatic" | "aurora" | "oled" | "cyberpunk"
+    ) {
+        return Err("Tema no compatible".into());
+    }
+    if !matches!(settings.retention.as_str(), "keep" | "online") {
+        return Err("Retención inválida".into());
+    }
+    if !settings.cookies_browser.is_empty()
+        && !matches!(
+            settings.cookies_browser.as_str(),
+            "chrome" | "edge" | "firefox"
+        )
+    {
+        return Err("Navegador de sesión inválido".into());
+    }
+    if !valid_formats(&settings.formats) {
+        return Err("La selección de formatos es inválida".into());
+    }
+    if !(0.0..=1.0).contains(&settings.min_score)
+        || settings.max_results == 0
+        || settings.chunk_size == 0
+        || settings.chunk_overlap >= settings.chunk_size
+    {
+        return Err("Los parámetros de búsqueda no son válidos".into());
+    }
+    if !(0..=100).contains(&settings.processing_quality)
+        || !matches!(settings.video_fit.as_str(), "cover" | "contain")
+    {
+        return Err("Los parámetros de procesamiento no son válidos".into());
+    }
+    if storage::SetupIntent::parse(&settings.storage_intent).is_none() {
+        return Err("La intención de almacenamiento no es válida".into());
+    }
+    if settings.download_dir.trim().is_empty() {
+        return Err("Selecciona una carpeta de guardado".into());
+    }
+    Ok(())
+}
+
+fn snapshot_search_config(settings: &AppSettingsSnapshot) -> SearchConfig {
+    SearchConfig {
+        min_score: settings.min_score,
+        max_results: settings.max_results,
+        similarity_metric: settings.similarity_metric.clone(),
+        chunk_size: settings.chunk_size,
+        chunk_overlap: settings.chunk_overlap,
+    }
+}
+
+pub fn snapshot_processing_settings(settings: &AppSettingsSnapshot) -> ProcessingSettings {
+    ProcessingSettings {
+        quality: settings.processing_quality,
+        profile: settings.processing_profile.clone(),
+        whisper_model: settings.whisper_model.clone(),
+        device: settings.device.clone(),
+        compute_type: settings.compute_type.clone(),
+        video_fit: settings.video_fit.clone(),
+        configured: true,
+    }
+}
+
+pub fn apply_app_settings_environment(settings: &AppSettingsSnapshot) {
+    std::env::set_var("PULSAR_DOWNLOAD_DIR", &settings.download_dir);
+    std::env::set_var("PULSAR_DEFAULT_RETENTION", &settings.retention);
+    std::env::set_var("PULSAR_SETUP_INTENT", &settings.storage_intent);
+    std::env::set_var("PULSAR_MEDIA_QUOTA_BYTES", settings.quota_bytes.to_string());
+    std::env::set_var(
+        "PULSAR_MEDIA_RESERVE_BYTES",
+        settings.reserve_bytes.to_string(),
+    );
+    if let Ok(serialized) = serde_json::to_string(&settings.formats) {
+        std::env::set_var("PULSAR_FORMATS", serialized);
+    }
+    if settings.cookies_browser.is_empty() {
+        std::env::remove_var("PULSAR_COOKIES_FROM_BROWSER");
+    } else {
+        std::env::set_var("PULSAR_COOKIES_FROM_BROWSER", &settings.cookies_browser);
+    }
+    apply_processing_environment(&snapshot_processing_settings(settings));
+}
+
+fn persist_app_settings(settings: &AppSettingsSnapshot) -> Result<(), String> {
+    validate_app_settings(settings)?;
+    let directory = settings_data_dir();
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let serialized = serde_json::to_vec_pretty(settings).map_err(|error| error.to_string())?;
+    atomic_write(&directory.join("app-settings.json"), &serialized)?;
+    // Keep the historical projections readable by older builds and recovery
+    // tools. The canonical file is written first and remains authoritative.
+    atomic_write(
+        &directory.join("download_dir.txt"),
+        settings.download_dir.as_bytes(),
+    )?;
+    atomic_write(
+        &directory.join("retention.txt"),
+        settings.retention.as_bytes(),
+    )?;
+    atomic_write(
+        &directory.join("cookie_browser.txt"),
+        settings.cookies_browser.as_bytes(),
+    )?;
+    atomic_write(
+        &directory.join("formats.json"),
+        &serde_json::to_vec_pretty(&settings.formats).map_err(|error| error.to_string())?,
+    )?;
+    atomic_write(
+        &directory.join("search_config.json"),
+        &serde_json::to_vec_pretty(&snapshot_search_config(settings))
+            .map_err(|error| error.to_string())?,
+    )?;
+    atomic_write(
+        &directory.join("processing_settings.json"),
+        &serde_json::to_vec_pretty(&snapshot_processing_settings(settings))
+            .map_err(|error| error.to_string())?,
+    )?;
+    atomic_write(
+        &directory.join("intent.txt"),
+        settings.storage_intent.as_bytes(),
+    )?;
+    atomic_write(
+        &directory.join("quota_bytes.txt"),
+        settings.quota_bytes.to_string().as_bytes(),
+    )?;
+    atomic_write(
+        &directory.join("reserve_bytes.txt"),
+        settings.reserve_bytes.to_string().as_bytes(),
+    )?;
+    Ok(())
+}
+
+pub fn load_persisted_app_settings() -> AppSettingsSnapshot {
+    let canonical = settings_data_dir().join("app-settings.json");
+    if let Ok(contents) = fs::read_to_string(&canonical) {
+        if let Ok(mut settings) = serde_json::from_str::<AppSettingsSnapshot>(&contents) {
+            if validate_app_settings(&settings).is_ok() {
+                settings.source = "native".into();
+                apply_app_settings_environment(&settings);
+                return settings;
+            }
+        }
+    }
+
+    // Read the legacy projections once, then immediately expose the merged
+    // result through the canonical file on the next successful save.
+    load_persisted_download_dir();
+    load_persisted_cookie_browser();
+    load_persisted_retention();
+    load_persisted_formats();
+    load_persisted_storage_settings();
+    let processing = load_persisted_processing_settings();
+    let search = load_persisted_search_config();
+    let mut settings = default_app_settings();
+    settings.source = if settings_data_dir()
+        .read_dir()
+        .ok()
+        .into_iter()
+        .flatten()
+        .next()
+        .is_some()
+    {
+        "migrated".into()
+    } else {
+        "default".into()
+    };
+    settings.download_dir =
+        std::env::var("PULSAR_DOWNLOAD_DIR").unwrap_or_else(|_| settings.download_dir.clone());
+    settings.cookies_browser = std::env::var("PULSAR_COOKIES_FROM_BROWSER").unwrap_or_default();
+    settings.retention =
+        std::env::var("PULSAR_DEFAULT_RETENTION").unwrap_or_else(|_| settings.retention.clone());
+    settings.formats = std::env::var("PULSAR_FORMATS")
+        .ok()
+        .and_then(|value| serde_json::from_str(&value).ok())
+        .filter(|formats: &Vec<String>| valid_formats(formats))
+        .unwrap_or(settings.formats);
+    settings.storage_intent =
+        std::env::var("PULSAR_SETUP_INTENT").unwrap_or_else(|_| settings.storage_intent.clone());
+    settings.quota_bytes = std::env::var("PULSAR_MEDIA_QUOTA_BYTES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_default();
+    settings.reserve_bytes = std::env::var("PULSAR_MEDIA_RESERVE_BYTES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_default();
+    settings.processing_quality = processing.quality;
+    settings.processing_profile = processing.profile;
+    settings.whisper_model = processing.whisper_model;
+    settings.device = processing.device;
+    settings.compute_type = processing.compute_type;
+    settings.video_fit = processing.video_fit;
+    settings.min_score = search.min_score;
+    settings.max_results = search.max_results;
+    settings.similarity_metric = search.similarity_metric;
+    settings.chunk_size = search.chunk_size;
+    settings.chunk_overlap = search.chunk_overlap;
+    apply_app_settings_environment(&settings);
+    settings
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -612,66 +1011,127 @@ fn runtime_check(name: &str, relative_paths: &[&str], required: bool) -> Runtime
     }
 }
 
-fn runtime_check_group(
+fn runtime_executable_check(
     name: &str,
-    relative_paths: &[&str],
+    relative_path: &str,
+    probe_args: &[&str],
     required: bool,
 ) -> RuntimeResourceCheck {
-    let missing = relative_paths
+    let mut check = runtime_check(name, &[relative_path], required);
+    if !check.available {
+        return check;
+    }
+
+    let executable = PathBuf::from(&check.path);
+    match Command::new(&executable).args(probe_args).output() {
+        Ok(output) if output.status.success() => {
+            check.message = format!("Ejecutable disponible y responde a {:?}", probe_args);
+        }
+        Ok(output) => {
+            check.available = false;
+            check.message = format!(
+                "El ejecutable terminó con código {:?}; reinstala el runtime o corrige la ruta",
+                output.status.code()
+            );
+        }
+        Err(error) => {
+            check.available = false;
+            check.message = format!(
+                "No se pudo ejecutar {}: {}; reinstala el runtime o corrige la ruta",
+                executable.display(),
+                error
+            );
+        }
+    }
+    check
+}
+
+fn runtime_worker_check() -> RuntimeResourceCheck {
+    const WORKERS: &[&str] = &[
+        "main.py",
+        "downloader.py",
+        "events.py",
+        "models.py",
+        "transcriber.py",
+        "visual_analyzer.py",
+        "audio_extractor.py",
+        "daemon.py",
+        "embed_query.py",
+        "export_onnx.py",
+        "export_onnx_embeddings.py",
+        "prepare_whisper_model.py",
+    ];
+    let missing = WORKERS
         .iter()
-        .filter(|relative| first_resource_path(&[**relative]).is_none())
+        .filter(|name| !crate::runtime::worker_script(name).is_file())
         .copied()
         .collect::<Vec<_>>();
-    let available = missing.is_empty();
-    let path = if available {
-        relative_paths
-            .first()
-            .copied()
-            .unwrap_or_default()
-            .to_string()
-    } else {
-        missing.first().copied().unwrap_or_default().to_string()
-    };
     RuntimeResourceCheck {
-        name: name.to_string(),
-        path,
-        required,
-        available,
-        message: if available {
-            format!("{} recursos encontrados", relative_paths.len())
+        name: "Workers Python".to_string(),
+        path: crate::runtime::worker_script("main.py")
+            .to_string_lossy()
+            .to_string(),
+        required: true,
+        available: missing.is_empty(),
+        message: if missing.is_empty() {
+            format!("{} workers encontrados", WORKERS.len())
         } else {
-            format!("Faltan recursos requeridos: {}", missing.join(", "))
+            format!("Faltan workers Python: {}", missing.join(", "))
         },
+    }
+}
+
+fn probe_worker_imports(check: &mut RuntimeResourceCheck) {
+    if !check.available {
+        return;
+    }
+    let Some(python) = first_resource_path(&["python/python.exe"]) else {
+        check.available = false;
+        check.message = "No se encontró python.exe para probar los workers".to_string();
+        return;
+    };
+    let worker_dir = crate::runtime::worker_script("main.py")
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::runtime::root().join("python-workers"));
+    let probe = Command::new(&python)
+        .current_dir(worker_dir)
+        .args(["-c", "import main"])
+        .output();
+    match probe {
+        Ok(output) if output.status.success() => {
+            check.message = "Workers Python encontrados y sus imports responden".to_string();
+        }
+        Ok(output) => {
+            check.available = false;
+            let detail = String::from_utf8_lossy(&output.stderr);
+            check.message = format!(
+                "Los imports de workers Python fallaron: {}",
+                detail.lines().next().unwrap_or("error desconocido")
+            );
+        }
+        Err(error) => {
+            check.available = false;
+            check.message = format!("No se pudieron probar los imports Python: {error}");
+        }
     }
 }
 
 #[tauri::command]
 pub fn get_runtime_preflight() -> RuntimePreflight {
     let mut resources = vec![
-        runtime_check("Python embebido", &["python/python.exe"], true),
-        runtime_check_group(
-            "Workers Python",
-            &[
-                "python-workers/main.py",
-                "python-workers/downloader.py",
-                "python-workers/events.py",
-                "python-workers/models.py",
-                "python-workers/transcriber.py",
-                "python-workers/visual_analyzer.py",
-                "python-workers/audio_extractor.py",
-                "python-workers/daemon.py",
-                "python-workers/embed_query.py",
-                "python-workers/export_onnx.py",
-                "python-workers/export_onnx_embeddings.py",
-                "python-workers/prepare_whisper_model.py",
-            ],
-            true,
-        ),
-        runtime_check("FFmpeg", &["bin/ffmpeg.exe"], true),
-        runtime_check("ffprobe", &["bin/ffprobe.exe"], true),
+        runtime_executable_check("Python embebido", "python/python.exe", &["--version"], true),
+        runtime_worker_check(),
+        runtime_executable_check("FFmpeg", "bin/ffmpeg.exe", &["-version"], true),
+        runtime_executable_check("ffprobe", "bin/ffprobe.exe", &["-version"], true),
         runtime_check(
             "ONNX MiniLM",
             &["assets/models/all-MiniLM-L6-v2/model.onnx"],
+            true,
+        ),
+        runtime_check(
+            "Tokenizer MiniLM",
+            &["assets/models/all-MiniLM-L6-v2/tokenizer.json"],
             true,
         ),
         runtime_check(
@@ -681,6 +1141,12 @@ pub fn get_runtime_preflight() -> RuntimePreflight {
         ),
         runtime_check("Manifiesto de runtime", &["runtime-manifest.json"], true),
     ];
+    if let Some(workers) = resources
+        .iter_mut()
+        .find(|resource| resource.name == "Workers Python")
+    {
+        probe_worker_imports(workers);
+    }
     // The bundled tiny model may be represented by a Hugging Face pointer
     // rather than a regular file. Treat the native validator as authoritative
     // for that one resource while still exposing the checked path.
@@ -723,24 +1189,86 @@ pub fn get_runtime_preflight() -> RuntimePreflight {
 }
 
 #[tauri::command]
-pub fn get_storage_status(
+pub fn get_embedding_index_status(
+    state: State<'_, AppState>,
+) -> Result<db::EmbeddingIndexStatus, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_embedding_index_status(&connection, &resolve_model_dir())
+}
+
+#[tauri::command]
+pub async fn get_storage_status(
     path: Option<String>,
     quota_bytes: Option<u64>,
+    state: State<'_, AppState>,
 ) -> Result<storage::StorageStatus, String> {
+    let path_was_provided = path.as_ref().is_some_and(|value| !value.trim().is_empty());
     let root = path
         .filter(|value| !value.trim().is_empty())
         .map(|value| expand_user_path(&value))
         .unwrap_or_else(storage::default_media_root);
+    let root = if !path_was_provided {
+        let configured = state.worker_config.read().await.download_dir.clone();
+        if configured.trim().is_empty() {
+            root
+        } else {
+            PathBuf::from(configured)
+        }
+    } else {
+        root
+    };
     if !root.exists() {
         fs::create_dir_all(&root)
             .map_err(|error| format!("No se pudo preparar la carpeta de medios: {}", error))?;
     }
     storage::ensure_media_root(&root).map_err(|error| error.to_string())?;
+    let configured = state.worker_config.read().await;
+    let configured_quota = configured.quota_bytes;
+    let configured_reserve = configured.reserve_bytes;
+    drop(configured);
     Ok(storage::storage_status(
         &root,
-        quota_bytes.unwrap_or_else(storage::configured_quota_bytes),
-        storage::configured_reserve_bytes(),
+        quota_bytes.unwrap_or(if configured_quota > 0 {
+            configured_quota
+        } else {
+            storage::configured_quota_bytes()
+        }),
+        if configured_reserve > 0 {
+            Some(configured_reserve)
+        } else {
+            storage::configured_reserve_bytes()
+        },
     ))
+}
+
+#[tauri::command]
+pub async fn reconcile_storage(
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<db::StorageReconciliationReport, String> {
+    let path_was_provided = path.as_ref().is_some_and(|value| !value.trim().is_empty());
+    let root = path
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| expand_user_path(&value))
+        .unwrap_or_else(storage::default_media_root);
+    let root = if !path_was_provided {
+        let configured = state.worker_config.read().await.download_dir.clone();
+        if configured.trim().is_empty() {
+            root
+        } else {
+            PathBuf::from(configured)
+        }
+    } else {
+        root
+    };
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::reconcile_storage(&db, &root).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -806,10 +1334,21 @@ pub async fn apply_media_purge(
     path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<storage::PurgeAction>, String> {
+    let path_was_provided = path.as_ref().is_some_and(|value| !value.trim().is_empty());
     let root = path
         .filter(|value| !value.trim().is_empty())
         .map(|value| expand_user_path(&value))
         .unwrap_or_else(storage::default_media_root);
+    let root = if !path_was_provided {
+        let configured = state.worker_config.read().await.download_dir.clone();
+        if configured.trim().is_empty() {
+            root
+        } else {
+            PathBuf::from(configured)
+        }
+    } else {
+        root
+    };
     let mut db = state
         .db
         .lock()
@@ -828,10 +1367,21 @@ pub async fn undo_media_purge(
     path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<storage::PurgeAction, String> {
+    let path_was_provided = path.as_ref().is_some_and(|value| !value.trim().is_empty());
     let root = path
         .filter(|value| !value.trim().is_empty())
         .map(|value| expand_user_path(&value))
         .unwrap_or_else(storage::default_media_root);
+    let root = if !path_was_provided {
+        let configured = state.worker_config.read().await.download_dir.clone();
+        if configured.trim().is_empty() {
+            root
+        } else {
+            PathBuf::from(configured)
+        }
+    } else {
+        root
+    };
     let db = state
         .db
         .lock()
@@ -901,6 +1451,18 @@ pub async fn get_job_artifacts(
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
     storage::list_artifacts(&db, job_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn get_generated_outputs(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::GeneratedOutputRecord>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_generated_outputs(&connection, job_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1214,6 +1776,17 @@ pub async fn set_processing_settings(
     .map_err(|error| error.to_string())?;
     let mut config = state.worker_config.write().await;
     config.processing = settings.clone();
+    drop(config);
+    let mut app_settings = state.app_settings.read().await.clone();
+    app_settings.processing_quality = settings.quality;
+    app_settings.processing_profile = settings.profile.clone();
+    app_settings.whisper_model = settings.whisper_model.clone();
+    app_settings.device = settings.device.clone();
+    app_settings.compute_type = settings.compute_type.clone();
+    app_settings.video_fit = settings.video_fit.clone();
+    app_settings.source = "native".into();
+    persist_app_settings(&app_settings)?;
+    *state.app_settings.write().await = app_settings;
     Ok(settings)
 }
 
@@ -1257,26 +1830,42 @@ pub async fn save_mvp_settings(
         .as_deref()
         .and_then(storage::SetupIntent::parse)
         .unwrap_or(storage::SetupIntent::Balanced);
-    let disk_status = storage::storage_status(&download_dir, 0, input.reserve_bytes);
-    let reserve_bytes = input.reserve_bytes.unwrap_or(disk_status.reserve_bytes);
+    let disk_status = storage::storage_status(&download_dir, 0, None);
+    if matches!(disk_status.state, storage::StorageState::PathError) {
+        return Err(format!(
+            "No se pudo medir el espacio libre de {}. Comprueba la unidad y los permisos.",
+            download_dir.display()
+        ));
+    }
+    let minimum_reserve = 2_u64
+        .saturating_mul(storage::GIB)
+        .max(disk_status.free_bytes / 10);
+    let reserve_bytes = input
+        .reserve_bytes
+        .unwrap_or(minimum_reserve)
+        .max(minimum_reserve);
     let quota_bytes = input.quota_bytes.unwrap_or_else(|| {
         storage::recommend_storage(intent.clone(), disk_status.free_bytes).quota_bytes
     });
-    if quota_bytes > 0 {
-        let safe_bytes = disk_status.free_bytes.saturating_sub(reserve_bytes);
-        if safe_bytes < storage::GIB {
-            return Err(
-                "El disco no tiene 1 GiB de espacio seguro. Libera espacio o cambia la carpeta."
-                    .to_string(),
-            );
-        }
-        if quota_bytes > safe_bytes {
-            return Err(format!(
-                "La cuota solicitada ({}) supera el espacio libre seguro disponible ({}).",
-                storage::format_bytes(quota_bytes),
-                storage::format_bytes(safe_bytes)
-            ));
-        }
+    let safe_bytes = disk_status.free_bytes.saturating_sub(reserve_bytes);
+    if safe_bytes < storage::GIB {
+        return Err(
+            "El disco no tiene 1 GiB de espacio seguro. Libera espacio o cambia la carpeta."
+                .to_string(),
+        );
+    }
+    if quota_bytes == 0 {
+        return Err(
+            "La cuota de medios debe ser mayor que cero. Elige una cuota válida antes de continuar."
+                .to_string(),
+        );
+    }
+    if quota_bytes > safe_bytes {
+        return Err(format!(
+            "La cuota solicitada ({}) supera el espacio libre seguro disponible ({}).",
+            storage::format_bytes(quota_bytes),
+            storage::format_bytes(safe_bytes)
+        ));
     }
     let processing = effective_processing_settings(derive_processing_settings(
         input.quality,
@@ -1362,16 +1951,48 @@ pub async fn save_mvp_settings(
         std::env::set_var("PULSAR_COOKIES_FROM_BROWSER", &input.browser);
     }
     apply_processing_environment(&processing);
-    *state.config.lock().await = search;
+    let runtime_search = crate::domain::models::SearchConfig {
+        min_score: search.min_score,
+        max_results: search.max_results,
+        similarity_metric: search.similarity_metric.clone(),
+        chunk_size: search.chunk_size,
+        chunk_overlap: search.chunk_overlap,
+    };
+    *state.config.lock().await = search.clone();
+    state.search.update_config(runtime_search)?;
     let mut worker = state.worker_config.write().await;
     worker.download_dir = download_dir.to_string_lossy().to_string();
-    worker.retention = input.retention;
-    worker.cookies_browser = input.browser;
-    worker.formats = input.formats;
+    worker.retention = input.retention.clone();
+    worker.cookies_browser = input.browser.clone();
+    worker.formats = input.formats.clone();
     worker.processing = processing.clone();
     worker.intent = intent.as_str().to_string();
     worker.quota_bytes = quota_bytes;
     worker.reserve_bytes = reserve_bytes;
+    drop(worker);
+
+    let mut app_settings = state.app_settings.read().await.clone();
+    app_settings.source = "native".into();
+    app_settings.download_dir = download_dir.to_string_lossy().to_string();
+    app_settings.retention = input.retention;
+    app_settings.cookies_browser = input.browser;
+    app_settings.formats = input.formats;
+    app_settings.min_score = search.min_score;
+    app_settings.max_results = search.max_results;
+    app_settings.similarity_metric = search.similarity_metric;
+    app_settings.chunk_size = search.chunk_size;
+    app_settings.chunk_overlap = search.chunk_overlap;
+    app_settings.processing_quality = processing.quality;
+    app_settings.processing_profile = processing.profile.clone();
+    app_settings.whisper_model = processing.whisper_model.clone();
+    app_settings.device = processing.device.clone();
+    app_settings.compute_type = processing.compute_type.clone();
+    app_settings.video_fit = processing.video_fit.clone();
+    app_settings.storage_intent = intent.as_str().to_string();
+    app_settings.quota_bytes = quota_bytes;
+    app_settings.reserve_bytes = reserve_bytes;
+    persist_app_settings(&app_settings)?;
+    *state.app_settings.write().await = app_settings;
     Ok(processing)
 }
 
@@ -1476,12 +2097,37 @@ impl crate::domain::ports::EmbeddingEngine for SharedEmbeddingEngine {
     fn generate_embedding(&self, text: &str) -> std::result::Result<Vec<f32>, String> {
         tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                let mut guard = self.0.lock().await;
-                if let Some(engine) = guard.as_mut() {
-                    engine.generate_embedding(text)
-                } else {
-                    Err("ONNX Model is currently unloaded (null state)".to_string())
+            let shared = self.0.clone();
+            let input = text.to_string();
+            let timeout_ms = std::env::var("PULSAR_ONNX_TIMEOUT_MS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(120_000);
+            rt.clone().block_on(async move {
+                let worker_runtime = rt.clone();
+                let task = tokio::task::spawn_blocking(move || {
+                    worker_runtime.block_on(async move {
+                        let mut guard = shared.lock().await;
+                        if let Some(engine) = guard.as_mut() {
+                            engine.generate_embedding(&input)
+                        } else {
+                            Err("ONNX Model is currently unloaded (null state)".to_string())
+                        }
+                    })
+                });
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(timeout_ms),
+                    task,
+                )
+                .await
+                {
+                    Ok(Ok(result)) => result,
+                    Ok(Err(error)) => Err(format!("ONNX inference task failed: {error}")),
+                    Err(_) => Err(format!(
+                        "ONNX inference timed out after {} ms; retry or switch to CPU/DirectML in Settings",
+                        timeout_ms
+                    )),
                 }
             })
         })
@@ -1502,9 +2148,7 @@ pub async fn add_job(
             state.worker_config.write().await.processing = effective.clone();
         }
     }
-    if !is_valid_sandbox_url(&url) {
-        return Err("Only supported HTTPS media URLs are accepted".to_string());
-    }
+    validate_sandbox_url(&url)?;
     let media_root = {
         let configured = state.worker_config.read().await.download_dir.clone();
         if configured.trim().is_empty() {
@@ -1796,14 +2440,248 @@ pub async fn get_runtime_health(
     })
 }
 
+async fn apply_runtime_settings(
+    settings: &AppSettingsSnapshot,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    validate_app_settings(settings)?;
+    apply_app_settings_environment(settings);
+    let search = snapshot_search_config(settings);
+    {
+        let mut config = state.config.lock().await;
+        *config = search.clone();
+    }
+    state
+        .search
+        .update_config(crate::domain::models::SearchConfig {
+            min_score: search.min_score,
+            max_results: search.max_results,
+            similarity_metric: search.similarity_metric.clone(),
+            chunk_size: search.chunk_size,
+            chunk_overlap: search.chunk_overlap,
+        })?;
+    {
+        let mut worker = state.worker_config.write().await;
+        worker.download_dir = settings.download_dir.clone();
+        worker.formats = settings.formats.clone();
+        worker.cookies_browser = settings.cookies_browser.clone();
+        worker.retention = settings.retention.clone();
+        worker.processing = snapshot_processing_settings(settings);
+        worker.intent = settings.storage_intent.clone();
+        worker.quota_bytes = settings.quota_bytes;
+        worker.reserve_bytes = settings.reserve_bytes;
+    }
+    Ok(())
+}
+
+fn default_legal_consent() -> LegalConsent {
+    LegalConsent {
+        eula_version: CURRENT_EULA_VERSION.into(),
+        terms_version: CURRENT_TERMS_VERSION.into(),
+        privacy_version: CURRENT_PRIVACY_VERSION.into(),
+        content_policy_version: CURRENT_CONTENT_POLICY_VERSION.into(),
+        accepted_at: None,
+        locale: "es-MX".into(),
+    }
+}
+
+fn legal_consent_is_current(consent: &LegalConsent) -> bool {
+    consent.accepted_at.is_some()
+        && consent.eula_version == CURRENT_EULA_VERSION
+        && consent.terms_version == CURRENT_TERMS_VERSION
+        && consent.privacy_version == CURRENT_PRIVACY_VERSION
+        && consent.content_policy_version == CURRENT_CONTENT_POLICY_VERSION
+}
+
+#[tauri::command]
+pub async fn get_legal_consent() -> Result<LegalConsent, String> {
+    let path = settings_data_dir().join("legal-consent.json");
+    let mut consent = fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<LegalConsent>(&contents).ok())
+        .unwrap_or_else(default_legal_consent);
+    if !legal_consent_is_current(&consent) {
+        consent.accepted_at = None;
+    }
+    Ok(consent)
+}
+
+#[tauri::command]
+pub async fn save_legal_consent(input: LegalConsentInput) -> Result<LegalConsent, String> {
+    if input.eula_version != CURRENT_EULA_VERSION
+        || input.terms_version != CURRENT_TERMS_VERSION
+        || input.privacy_version != CURRENT_PRIVACY_VERSION
+        || input.content_policy_version != CURRENT_CONTENT_POLICY_VERSION
+    {
+        return Err("La versión de los documentos legales no es compatible".into());
+    }
+    if !matches!(input.locale.as_str(), "es-MX" | "en-US") {
+        return Err("Idioma legal no compatible".into());
+    }
+
+    let consent = LegalConsent {
+        eula_version: input.eula_version,
+        terms_version: input.terms_version,
+        privacy_version: input.privacy_version,
+        content_policy_version: input.content_policy_version,
+        accepted_at: Some(chrono::Utc::now().to_rfc3339()),
+        locale: input.locale,
+    };
+    fs::create_dir_all(settings_data_dir()).map_err(|error| error.to_string())?;
+    let serialized = serde_json::to_vec_pretty(&consent).map_err(|error| error.to_string())?;
+    atomic_write(&settings_data_dir().join("legal-consent.json"), &serialized)?;
+    Ok(consent)
+}
+
+#[tauri::command]
+pub async fn get_app_settings(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<AppSettingsResponse, String> {
+    let mut settings = state.app_settings.read().await.clone();
+    let autostart_enabled = app_handle.autolaunch().is_enabled().unwrap_or(false);
+    settings.autostart_enabled = autostart_enabled;
+    let root = PathBuf::from(&settings.download_dir);
+    let storage =
+        storage::storage_status(&root, settings.quota_bytes, Some(settings.reserve_bytes));
+    let processing = state.worker_config.read().await.processing.clone();
+    let runtime_status = if inspect_whisper_model(&processing.whisper_model).ready {
+        "ready"
+    } else {
+        "requires-repair"
+    };
+    let (api_ready, api_error) = state.api_runtime.snapshot();
+    let mut sync_errors = Vec::new();
+    if !api_ready {
+        if let Some(error) = api_error {
+            sync_errors.push(error);
+        }
+    }
+    Ok(AppSettingsResponse {
+        source: settings.source.clone(),
+        version: settings.schema_version,
+        updater_status: "BLOCKED_EXTERNAL".into(),
+        settings,
+        autostart_enabled,
+        runtime_status: runtime_status.into(),
+        storage,
+        sync_errors,
+    })
+}
+
+#[tauri::command]
+pub async fn save_app_settings(
+    mut settings: AppSettingsSnapshot,
+    state: State<'_, AppState>,
+) -> Result<AppSettingsSnapshot, String> {
+    settings.schema_version = APP_SETTINGS_SCHEMA_VERSION;
+    settings.source = "native".into();
+    if settings.quota_bytes == 0 {
+        let root = expand_user_path(&settings.download_dir);
+        fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        let recommendation = storage::recommend_storage(
+            storage::SetupIntent::parse(&settings.storage_intent)
+                .ok_or_else(|| "La intención de almacenamiento no es válida".to_string())?,
+            storage::storage_status(&root, 0, None).free_bytes,
+        );
+        settings.quota_bytes = recommendation.quota_bytes;
+        if settings.reserve_bytes == 0 {
+            settings.reserve_bytes = recommendation.reserve_bytes;
+        }
+    }
+    settings.download_dir = expand_user_path(&settings.download_dir)
+        .to_string_lossy()
+        .to_string();
+    validate_app_settings(&settings)?;
+    fs::create_dir_all(&settings.download_dir).map_err(|error| error.to_string())?;
+    storage::ensure_media_root(PathBuf::from(&settings.download_dir).as_path())
+        .map_err(|error| format!("No se pudo preparar el almacenamiento local: {}", error))?;
+    let status = storage::storage_status(
+        PathBuf::from(&settings.download_dir).as_path(),
+        settings.quota_bytes,
+        Some(settings.reserve_bytes),
+    );
+    let safe_free = status.free_bytes.saturating_sub(settings.reserve_bytes);
+    if safe_free < storage::GIB || settings.quota_bytes > safe_free {
+        return Err("La cuota o la reserva superan el espacio seguro disponible".into());
+    }
+    settings.processing_profile = if settings.processing_quality < 35 {
+        "fast".into()
+    } else if settings.processing_quality < 72 {
+        "balanced".into()
+    } else {
+        "high".into()
+    };
+    let processing = effective_processing_settings(derive_processing_settings(
+        settings.processing_quality,
+        settings.video_fit.clone(),
+    )?)?;
+    settings.processing_profile = processing.profile.clone();
+    settings.whisper_model = processing.whisper_model.clone();
+    settings.device = processing.device.clone();
+    settings.compute_type = processing.compute_type.clone();
+    settings.video_fit = processing.video_fit.clone();
+    persist_app_settings(&settings)?;
+    apply_runtime_settings(&settings, &state).await?;
+    *state.app_settings.write().await = settings.clone();
+    Ok(settings)
+}
+
+#[tauri::command]
+pub async fn get_autostart_status(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    app_handle
+        .autolaunch()
+        .is_enabled()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn set_autostart(
+    enabled: bool,
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    if enabled {
+        app_handle
+            .autolaunch()
+            .enable()
+            .map_err(|error| error.to_string())?;
+    } else {
+        app_handle
+            .autolaunch()
+            .disable()
+            .map_err(|error| error.to_string())?;
+    }
+    let actual = app_handle
+        .autolaunch()
+        .is_enabled()
+        .map_err(|error| error.to_string())?;
+    let mut settings = state.app_settings.read().await.clone();
+    settings.autostart_enabled = actual;
+    persist_app_settings(&settings)?;
+    *state.app_settings.write().await = settings;
+    Ok(actual)
+}
+
 #[tauri::command]
 pub async fn repair_library(state: State<'_, AppState>) -> Result<db::LibraryRepairReport, String> {
+    let root = {
+        let configured = state.worker_config.read().await.download_dir.clone();
+        if configured.trim().is_empty() {
+            storage::default_media_root()
+        } else {
+            PathBuf::from(configured)
+        }
+    };
     let report = {
         let connection = state
             .db
             .lock()
             .map_err(|_| "Database mutex poisoned".to_string())?;
-        db::repair_library(&connection).map_err(|error| error.to_string())?
+        let mut report = db::repair_library(&connection).map_err(|error| error.to_string())?;
+        report.storage =
+            Some(db::reconcile_storage(&connection, &root).map_err(|error| error.to_string())?);
+        report
     };
     state.queue.resume_pending_jobs().await?;
     Ok(report)
@@ -1918,7 +2796,7 @@ pub async fn get_model_status(state: State<'_, AppState>) -> Result<ModelStatus,
 
     Ok(ModelStatus {
         loaded,
-        dimensions: if loaded { 384 } else { 0 },
+        dimensions: if loaded { EMBEDDING_DIMS } else { 0 },
         runtime: if loaded {
             "ONNX Runtime (all-MiniLM-L6-v2)".into()
         } else {
@@ -2007,6 +2885,14 @@ pub async fn update_search_config(
     .map_err(|error| error.to_string())?;
     drop(config);
     state.search.update_config(runtime_config)?;
+    let mut app_settings = state.app_settings.read().await.clone();
+    app_settings.source = "native".into();
+    app_settings.min_score = min_score;
+    app_settings.max_results = max_results;
+    app_settings.chunk_size = chunk_size;
+    app_settings.chunk_overlap = chunk_overlap;
+    persist_app_settings(&app_settings)?;
+    *state.app_settings.write().await = app_settings;
     emit_log(&app_handle, "Search configuration updated".into());
     Ok(())
 }
@@ -2120,14 +3006,34 @@ pub async fn rebuild_index(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    emit_log(&app_handle, "Rebuilding database indexes...".into());
+    emit_log(&app_handle, "Rebuilding semantic vector index...".into());
+    let count = state
+        .queue
+        .rebuild_index_from_persisted_rows(&state.search)
+        .await?
+        .ok_or_else(|| {
+            "No se puede reconstruir el índice mientras hay trabajos activos".to_string()
+        })?;
+    emit_log(
+        &app_handle,
+        format!("Semantic vector index rebuilt: {} vectors.", count),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reindex_sqlite_indexes(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    emit_log(&app_handle, "Rebuilding SQLite indexes...".into());
     let db = state
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
     db.execute_batch("REINDEX transcript_embeddings;")
         .map_err(|e| e.to_string())?;
-    emit_log(&app_handle, "Index rebuild complete.".into());
+    emit_log(&app_handle, "SQLite index rebuild complete.".into());
     Ok(())
 }
 
@@ -2151,6 +3057,7 @@ pub async fn recompute_embeddings(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    let _maintenance_guard = state.queue.begin_maintenance().await?;
     emit_log(
         &app_handle,
         "Starting full embedding recomputation (heavy background task)...".into(),
@@ -2201,7 +3108,7 @@ pub async fn recompute_embeddings(
                 engine.generate_embedding(&chunk.text)
             };
             match embed_result {
-                Ok(vector) if vector.len() == 384 => {
+                Ok(vector) if vector.len() == EMBEDDING_DIMS => {
                     indexed.push((chunk.chunk_index, chunk.text.clone(), vector));
                 }
                 Ok(vector) => {
@@ -2249,6 +3156,19 @@ pub async fn recompute_embeddings(
         }
 
         total_recomputed += 1;
+    }
+
+    // Only advance the recorded model version after every job has been
+    // recomputed successfully. A partial run must leave the index marked
+    // stale so the user can retry without losing the previous valid data.
+    if total_errors == 0 {
+        let model_dir = resolve_model_dir();
+        let model_hash = db::embedding_model_fingerprint(&model_dir)?;
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        db::record_embedding_model(&db, &model_hash).map_err(|e| e.to_string())?;
     }
 
     let msg = format!(
@@ -2479,7 +3399,7 @@ pub async fn export_semantic(job_id: i64, state: State<'_, AppState>) -> Result<
         .unwrap_or((None, None));
 
     let unib_content = format!(
-        "@unib:0.0\n@owner:pulsaria\n@mode:media\n@created:{}\n@source:{}\n@title:{}\n@author:{}\n@duration:{}\n@platform:{}\n@upload_date:{}\n@keep_status:{}\n@julia_ready:{}\n@embeddings_count:{}\n@embeddings_dim:384\n@embedding_model:all-MiniLM-L6-v2\n\n{}\n\n[V#media] @video_{}:video > downloaded_from > @source_{}:source ?1.0 !0.8 {{st:confirmed}} ^system.\n",
+        "@unib:0.0\n@owner:pulsaria\n@mode:media\n@created:{}\n@source:{}\n@title:{}\n@author:{}\n@duration:{}\n@platform:{}\n@upload_date:{}\n@keep_status:{}\n@julia_ready:{}\n@embeddings_count:{}\n@embeddings_dim:{}\n@embedding_model:all-MiniLM-L6-v2\n\n{}\n\n[V#media] @video_{}:video > downloaded_from > @source_{}:source ?1.0 !0.8 {{st:confirmed}} ^system.\n",
         chrono::Utc::now().to_rfc3339(),
         job.url,
         job.title.clone().unwrap_or_default(),
@@ -2490,6 +3410,7 @@ pub async fn export_semantic(job_id: i64, state: State<'_, AppState>) -> Result<
         keep_status.unwrap_or_default(),
         if transcript_with_timestamps.is_empty() { "false" } else { "true" },
         embedding_count,
+        EMBEDDING_DIMS,
         transcript_with_timestamps,
         job_id,
         job_id
@@ -2554,7 +3475,7 @@ pub async fn import_semantic(content: String, state: State<'_, AppState>) -> Res
         let mut indexed = Vec::with_capacity(chunks.len());
         for chunk in chunks {
             let embedding = engine.generate_embedding(&chunk.text)?;
-            if embedding.len() != 384 {
+            if embedding.len() != EMBEDDING_DIMS {
                 return Err(format!("Invalid embedding dimension: {}", embedding.len()));
             }
             indexed.push((chunk.chunk_index, chunk.text, embedding));
@@ -2638,6 +3559,11 @@ pub async fn set_download_dir(path: String, state: State<'_, AppState>) -> Resul
         path.to_string_lossy().as_bytes(),
     )
     .map_err(|error| error.to_string())?;
+    let mut app_settings = state.app_settings.read().await.clone();
+    app_settings.download_dir = path.to_string_lossy().to_string();
+    app_settings.source = "native".into();
+    persist_app_settings(&app_settings)?;
+    *state.app_settings.write().await = app_settings;
     Ok(())
 }
 
@@ -2675,11 +3601,23 @@ pub async fn set_cookie_browser(browser: String, state: State<'_, AppState>) -> 
     fs::create_dir_all(&settings_dir).map_err(|error| error.to_string())?;
     fs::write(settings_dir.join("cookie_browser.txt"), browser.as_bytes())
         .map_err(|error| error.to_string())?;
+    let mut app_settings = state.app_settings.read().await.clone();
+    app_settings.cookies_browser = browser;
+    app_settings.source = "native".into();
+    persist_app_settings(&app_settings)?;
+    *state.app_settings.write().await = app_settings;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn set_formats(formats: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let formats = formats
+        .into_iter()
+        .map(|format| format.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if !valid_formats(&formats) {
+        return Err("La selección de formatos es inválida".into());
+    }
     {
         let mut wc = state.worker_config.write().await;
         wc.formats = formats.clone();
@@ -2690,6 +3628,11 @@ pub async fn set_formats(formats: Vec<String>, state: State<'_, AppState>) -> Re
     fs::create_dir_all(&settings_dir).map_err(|error| error.to_string())?;
     fs::write(settings_dir.join("formats.json"), serialized.as_bytes())
         .map_err(|error| error.to_string())?;
+    let mut app_settings = state.app_settings.read().await.clone();
+    app_settings.formats = formats;
+    app_settings.source = "native".into();
+    persist_app_settings(&app_settings)?;
+    *state.app_settings.write().await = app_settings;
     Ok(())
 }
 
@@ -2716,6 +3659,11 @@ pub async fn set_default_retention(
     fs::create_dir_all(&settings_dir).map_err(|error| error.to_string())?;
     fs::write(settings_dir.join("retention.txt"), retention.as_bytes())
         .map_err(|error| error.to_string())?;
+    let mut app_settings = state.app_settings.read().await.clone();
+    app_settings.retention = retention;
+    app_settings.source = "native".into();
+    persist_app_settings(&app_settings)?;
+    *state.app_settings.write().await = app_settings;
     Ok(())
 }
 
@@ -2731,7 +3679,12 @@ pub async fn export_library_json(state: State<'_, AppState>) -> Result<String, S
 
 #[cfg(test)]
 mod unib_tests {
-    use super::{parse_unib_segments, parse_unib_time, unib_header_value};
+    use super::{
+        atomic_write, default_legal_consent, legal_consent_is_current, parse_unib_segments,
+        parse_unib_time, unib_header_value,
+    };
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn parses_unib_headers_and_timestamped_segments() {
@@ -2753,5 +3706,39 @@ mod unib_tests {
         let segments = parse_unib_segments(content);
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].3, "V├ílido");
+    }
+
+    #[test]
+    fn atomic_write_replaces_an_existing_settings_file() {
+        let root = std::env::temp_dir().join(format!(
+            "pulsaria-command-settings-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before unix epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("test directory should be created");
+        let path = PathBuf::from(&root).join("app-settings.json");
+
+        atomic_write(&path, br#"{"version":1}"#).expect("first write should succeed");
+        atomic_write(&path, br#"{"version":2}"#).expect("replacement should succeed");
+
+        assert_eq!(
+            fs::read_to_string(&path).expect("replacement should remain readable"),
+            r#"{"version":2}"#
+        );
+        assert!(!root.join(".app-settings.json.previous").exists());
+        fs::remove_dir_all(root).expect("test directory should be removable");
+    }
+
+    #[test]
+    fn legal_consent_is_not_current_until_accepted() {
+        let mut consent = default_legal_consent();
+        assert!(!legal_consent_is_current(&consent));
+        consent.accepted_at = Some("2026-09-13T00:00:00Z".into());
+        assert!(legal_consent_is_current(&consent));
+        consent.privacy_version = "0.2".into();
+        assert!(!legal_consent_is_current(&consent));
     }
 }

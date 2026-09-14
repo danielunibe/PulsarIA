@@ -6,6 +6,7 @@ import { VideoCard } from '@/components/VideoCard';
 import { MOCK_ACTIVE_VIDEOS } from '@/lib/mock-data';
 import type { JobRecord as SharedJobRecord } from '@/hooks/use-jobs';
 import type { CinemaVideo, VideoData } from '@/types';
+import { apiFetch } from '@/lib/api-client';
 
 const ExpandedVideoModal = dynamic(
     () => import('@/components/ExpandedVideoModal').then((mod) => mod.ExpandedVideoModal),
@@ -230,7 +231,7 @@ export function VideoGrid({
                     items = await invoke<SharedJobRecord[]>('get_playlist_items', { playlistId });
                 } catch {
                     const { REST_API_BASE } = await import('@/lib/api-config');
-                    const response = await fetch(`${REST_API_BASE}/playlists/${playlistId}/items`);
+                    const response = await apiFetch(`${REST_API_BASE}/playlists/${playlistId}/items`);
                     if (!response.ok) throw new Error(`Playlist request failed with status ${response.status}`);
                     items = await response.json() as SharedJobRecord[];
                 }
@@ -250,7 +251,7 @@ export function VideoGrid({
         } catch {
             try {
                 const { REST_API_BASE } = await import('@/lib/api-config');
-                const response = await fetch(`${REST_API_BASE}/jobs`);
+                const response = await apiFetch(`${REST_API_BASE}/jobs`);
                 if (response.ok) data = await response.json();
             } catch { /* sin conexion */ }
         }

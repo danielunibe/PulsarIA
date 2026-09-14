@@ -38,6 +38,7 @@ def emit_event(
     segments: Optional[List[Dict[str, Any]]] = None,
     visual_analysis: Optional[Dict[str, Any]] = None,
     instructional_guide: Optional[str] = None,
+    artifacts: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """
     Emite un evento estandarizado por stdout para el backend Rust.
@@ -75,6 +76,8 @@ def emit_event(
         payload["visual_analysis"] = visual_analysis
     if instructional_guide is not None:
         payload["instructional_guide"] = instructional_guide
+    if artifacts is not None:
+        payload["artifacts"] = artifacts
     
     print(json.dumps(payload), flush=True)
 

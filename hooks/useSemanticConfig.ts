@@ -3,6 +3,7 @@ import {
   ModelStatus, DbStatus, SearchConfig, 
   SystemMetrics, LogEntry, DebugSearchResult 
 } from '../types/semanticConfig';
+import { isTauriRuntime } from './use-processing-settings';
 
 /**
  * Hook para gestionar la configuración y estado del motor semántico.
@@ -96,8 +97,8 @@ export function useSemanticConfig() {
           };
           return [...prevLogs, newLog].slice(-100);
         });
-      }).then(fn => { unlistenFn = fn; }).catch(() => {});
-    }).catch(() => {});
+      }).then(fn => { unlistenFn = fn; }).catch((error) => console.warn('Could not subscribe to system logs:', error));
+    }).catch((error) => console.warn('Could not initialize system log events:', error));
 
     return () => {
       unlistenFn?.();
@@ -109,7 +110,10 @@ export function useSemanticConfig() {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('reload_model');
-    } catch {}
+    } catch (error) {
+      console.error('Model reload failed:', error);
+      throw error;
+    }
     await fetchAllStates();
   };
 
@@ -125,7 +129,11 @@ export function useSemanticConfig() {
         chunkSize: merged.chunk_size,
         chunkOverlap: merged.chunk_overlap
       });
-    } catch {
+    } catch (error) {
+      if (isTauriRuntime()) {
+        console.error('Search configuration update failed:', error);
+        throw error;
+      }
       setSearchConfig(merged);
     }
     
@@ -136,21 +144,30 @@ export function useSemanticConfig() {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('rebuild_index');
-    } catch {}
+    } catch (error) {
+      console.error('Semantic index rebuild failed:', error);
+      throw error;
+    }
   };
 
   const vacuumDb = async () => {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('vacuum_db');
-    } catch {}
+    } catch (error) {
+      console.error('SQLite vacuum failed:', error);
+      throw error;
+    }
   };
 
   const recomputeEmbeddings = async () => {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('recompute_embeddings');
-    } catch {}
+    } catch (error) {
+      console.error('Embedding recomputation failed:', error);
+      throw error;
+    }
   };
 
   const debugSearch = async (query: string): Promise<DebugSearchResult> => {

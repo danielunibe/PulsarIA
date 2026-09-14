@@ -1,0 +1,9 @@
+{
+  "name": "pulsaria-website",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static public website for Pulsaria GitHub Pages.",
+  "scripts": {
+    "build": "node -e \"const fs=require('fs'); for (const file of ['index.html','downloads.html','privacy.html','terms.html']) { if (!fs.existsSync(file)) throw new Error('Missing website file: '+file); } console.log('Pulsaria website: PASS');\""
+  }
+}

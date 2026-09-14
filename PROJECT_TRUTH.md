@@ -8,16 +8,19 @@ actual, las pruebas reproducidas y esta definición de verdad.
 
 Pulsaria es un MVP local-first para Windows que importa contenido de TikTok que
 el usuario está autorizado a procesar, genera video/audio/transcripción/análisis
-visual, indexa localmente y permite búsqueda literal y semántica. El MVP no
-incluye todavía traducción automática, OCR avanzado, Gemini/RAG conversacional,
-playlists inteligentes, expansión formal a YouTube/Instagram, updater público,
-firma Authenticode ni distribución estable a terceros.
+visual, indexa localmente y permite búsqueda literal y semántica. Incluye IA
+local opcional bajo demanda y una síntesis Gemini opcional que solo se puede
+invocar desde el shell nativo, con aviso explícito de que los fragmentos
+seleccionados pueden enviarse a Google. El MVP no incluye todavía traducción
+automática, OCR avanzado, chat RAG conversacional, playlists inteligentes,
+expansión formal a YouTube/Instagram, updater público, firma Authenticode ni
+distribución estable a terceros.
 
 ## Fuente canónica
 
-La rama activa es `main` en `origin`. El trabajo de esta consolidación parte
-del checkout de `codex/pulsaria-mvp-stabilization`; las ramas antiguas se
-conservan como referencias archivadas y no son líneas de desarrollo nuevas.
+La rama activa es `main` en `origin`. Este checkout de producto parte de la
+punta publicada `fe5fcafd`; las ramas antiguas se conservan como referencias
+archivadas y no son líneas de desarrollo nuevas.
 
 Las fuentes funcionales únicas son:
 
@@ -66,6 +69,15 @@ por plataforma, versión, procedencia, tamaño y SHA-256 en el manifiesto. Los
 instaladores, Python embebido, FFmpeg/FFprobe, ONNX y Whisper son artefactos de
 release y no blobs normales del repositorio.
 
+El bundle instalado mantiene los recursos de solo lectura bajo la carpeta
+`resources/` junto al ejecutable. El estado escribible usa
+`%APPDATA%\Pulsar Eventide` en instalaciones nuevas y reutiliza
+`%APPDATA%\Pulsaria` únicamente cuando existe ese directorio legado y aún no
+existe el canónico, para no dejar huérfanos los datos de usuarios existentes.
+Los medios se guardan en la carpeta seleccionada (por defecto
+`%USERPROFILE%\Downloads\Pulsaria`); la prueba instalada también confirma que
+no se crea estado junto al ejecutable ni dentro de `resources/`.
+
 ## Configuración e idioma
 
 La configuración local conserva `Locale = 'es-MX' | 'en-US'`, inicia en
@@ -98,21 +110,27 @@ y, cuando exista una URL autorizada, el smoke live documentado en
 
 | Gate | Estado | Evidencia o límite |
 | --- | --- | --- |
-| Lint, TypeScript, build Next | PASS | Incluidos en `npm run verify:mvp` (12/12) |
+| Lint, TypeScript, build Next | PASS | Incluidos en `npm run verify:mvp` (13/13) |
 | Locale es/en | PASS | `scripts/verify-locale.ps1`, incluido en `npm run verify:mvp` |
-| Rust fmt/check/tests | PASS | 40 tests Rust sin fallos después del cambio de rutas |
-| Python | PASS | 18 tests y un skip live intencional |
-| Runtime preparado | PASS en staging local | 50/50 recursos canónicos verificados; se eliminó la copia de compatibilidad |
-| Instalador NSIS/MSI | PARTIAL | Existe una build `0.1.0` previa a la consolidación; requiere reconstrucción y smoke limpio con el contrato canónico |
-| TikTok live | PASS parcial | Descarga/audio/análisis/indexado/reinicio/dedupe/URL inválida/search shape; la muestra no produjo texto reconocible |
+| Rust fmt/check/tests | PASS | 60 tests Rust sin fallos, incluidos persistencia atómica de ajustes, migración, reconciliación de storage, snapshots HNSW single/multi-shard, metadatos de modelo, cache local, JWT, validación TikTok, Gemini y loopback |
+| Cache semántica desktop | PASS | Cache LRU acotada en memoria con TTL, invalidación por versión y métricas hit/miss; Redis ya no es dependencia de runtime |
+| API REST local | PASS condicionado | Bind loopback y token JWT por proceso; health público y resto de rutas protegido. El frontend nativo obtiene el token por IPC |
+| Metadatos de embeddings | PASS | Migración con backup previo, hash de modelo/tokenizer, dimensión y detección de índice obsoleto; la reindexación parcial conserva los datos anteriores |
+| Python | PASS | 26 tests y un skip live intencional; incluye FFmpeg/FFprobe, duración desconocida, transcript vacío, artifacts y los 13 formatos de salida |
+| Runtime preparado | PASS en staging local | 51/51 recursos canónicos verificados; Python, workers, ONNX, Whisper tiny, FFmpeg, FFprobe y licencia presentes |
+| Auditoría de dependencias | PARTIAL | `npm audit --omit=dev` conserva 2 vulnerabilidades de producción; el fix disponible requiere la migración aislada a Next 16.3.5 |
+| Instalador NSIS/MSI | PASS build + smoke NSIS local | NSIS `Pulsaria_0.1.0_x64-setup.exe`, 580,779,620 bytes, SHA-256 `2E27F6520A41EBFA93B2F7CD54EEE7666929682F88689B365522B2F4F1459427`; MSI `Pulsaria_0.1.0_x64_en-US.msi`, 710,191,833 bytes, SHA-256 `A445463E0CB26AC3620EBFB74DC28ACD21559E9CEA2C6C97A2EE016181756176`; el smoke NSIS Release pasó instalación, health, reinicio, runtime 51/51 y desinstalación; Authenticode/updater siguen pendientes |
+| TikTok live | PASS parcial | El smoke instalado previo sobre NSIS `D69B6908…` pasó descarga/audio/análisis/reinicio/dedupe/URL inválida/search shape, exports `mp4/mp3/txt` y staging limpio; la muestra produjo transcript vacío válido, por lo que falta certificar voz reconocible |
+| Contrato Gemini | PASS local condicionado | IPC nativo, clave solo en proceso Rust, validaciones de clave/prompt/respuesta/HTTP/timeout; requiere clave real para una llamada autorizada |
 | Updater, firmas y Authenticode | BLOCKED_EXTERNAL | No se fabrican `latest.json`, `.sig`, claves ni firmas |
-| Publicación GitHub | PASS | `origin/main` publicado en `ef5a6e3fc051df4861a2eafbac4a9911d7551240` por fast-forward; clonación limpia verificada |
+| Aceptación visual nativa | BLOCKED_EXTERNAL | Este host no expone una ventana Tauri para captura asistida; el preview de navegador no sustituye esa evidencia |
+| Publicación GitHub | PARTIAL | `origin/main` apunta a `fe5fcafd`; esta preparación añade limpieza de producto, workflow, sitio y documentación, pero requiere commit/push y configuración de secretos externos para publicar una release firmada |
 
 La tabla es un estado de trabajo, no reemplaza la salida de los verificadores.
 
 ### Evidencia de publicación canónica
 
-La publicación de código y documentación se realizó el 13 de septiembre de 2026 sobre `origin/main`, sin force push ni reescritura de historia. La clonación limpia de esa rama resolvió el commit canónico `ef5a6e3fc051df4861a2eafbac4a9911d7551240`, quedó limpia y pasó `npm run verify:canonical`.
+La publicación de código y documentación de la base se realizó el 13 de septiembre de 2026 sobre `origin/main`, sin force push ni reescritura de historia. La punta publicada actual es `fe5fcafd`; la clonación limpia de esa base pasó `npm run verify:canonical`. La preparación de producto posterior queda en el commit de release que se publique desde este checkout, sin subir datos locales, runtimes ni instaladores generados.
 
 Las líneas anteriores permanecen como referencias históricas mediante tags `archive/*`; no se borraron ramas ni se presentan como líneas activas de desarrollo.
 
@@ -151,5 +169,6 @@ consideran históricos y están catalogados en `docs/archive/README.md`.
 Una fase nueva se abre solo cuando todos los gates del MVP local están en PASS
 y su evidencia distingue correctamente pruebas estáticas, bundle instalado,
 smoke nativo y procesamiento live. El orden posterior es: benchmark Whisper
-en español, OCR, Gemini opcional, chat RAG, playlists inteligentes, expansión
-multiplataforma y release pública firmada.
+en español, OCR, chat RAG, playlists inteligentes, expansión multiplataforma y
+release pública firmada. Gemini permanece disponible únicamente como síntesis
+manual opcional y no es un requisito del procesamiento local.

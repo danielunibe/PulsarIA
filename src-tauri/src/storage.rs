@@ -229,6 +229,24 @@ fn recursive_size(path: &Path) -> io::Result<u64> {
     Ok(total)
 }
 
+/// Measure only storage owned by Pulsaria. The selected directory can be an
+/// existing Downloads folder containing unrelated user media; those files
+/// must not consume the app quota or become purge candidates.
+fn managed_storage_size(root: &Path) -> io::Result<u64> {
+    let mut total = 0_u64;
+    for path in [
+        media_root(root),
+        staging_root(root),
+        trash_root(root),
+        root.join(".pulsaria").join("cache"),
+        root.join(".pulsaria").join("caches"),
+        root.join(".pulsaria").join(".cache"),
+    ] {
+        total = total.saturating_add(recursive_size(&path)?);
+    }
+    Ok(total)
+}
+
 #[cfg(windows)]
 fn disk_space(path: &Path) -> io::Result<(u64, u64)> {
     use std::os::windows::ffi::OsStrExt;
@@ -288,15 +306,17 @@ pub fn storage_status(
     let space = disk_space(root);
     let space_ok = space.is_ok();
     let (total_bytes, free_bytes) = space.unwrap_or_default();
-    let used_media_bytes = recursive_size(root).unwrap_or_default();
+    let used_media_bytes = managed_storage_size(root).unwrap_or_default();
     let staged_bytes = recursive_size(&staging_root(root)).unwrap_or_default();
     let trash_bytes = recursive_size(&trash_root(root)).unwrap_or_default();
-    let reserve_bytes =
-        reserve_override.unwrap_or_else(|| 2_u64.saturating_mul(GIB).max(free_bytes / 10));
+    let reserve_bytes = reserve_override
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| 2_u64.saturating_mul(GIB).max(free_bytes / 10));
+    let safe_free_bytes = free_bytes.saturating_sub(reserve_bytes);
 
     let state = if !root.exists() || !space_ok {
         StorageState::PathError
-    } else if free_bytes < reserve_bytes {
+    } else if safe_free_bytes < MIN_SAFE_FREE {
         StorageState::DiskLow
     } else if quota_bytes > 0 && used_media_bytes >= quota_bytes {
         StorageState::QuotaExceeded
@@ -428,9 +448,131 @@ fn move_file(source: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(source, destination)
 }
 
-fn rollback_moved_files(moved_files: &mut Vec<(PathBuf, PathBuf)>) {
+/// Moves a file without deleting a destination that appeared after the
+/// caller's preflight. This is used by undo, where replacing a user's newly
+/// created file would be data loss.
+fn move_file_exclusive(source: &Path, destination: &Path) -> io::Result<()> {
+    if !source.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("source file does not exist: {}", source.display()),
+        ));
+    }
+    if destination.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("destination file already exists: {}", destination.display()),
+        ));
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::rename(source, destination)
+}
+
+/// Replace a durable file without losing the previous copy when the platform
+/// does not allow rename-over-existing (notably Windows). The backup is kept
+/// beside the destination only for the duration of the replacement and is
+/// removed after the new file is in place.
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    if !destination.exists() {
+        return fs::rename(source, destination);
+    }
+
+    let backup = destination.with_file_name(format!(
+        ".{}.previous",
+        destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file")
+    ));
+    if backup.exists() {
+        fs::remove_file(&backup)?;
+    }
+    fs::rename(destination, &backup)?;
+    match fs::rename(source, destination) {
+        Ok(()) => {
+            let _ = fs::remove_file(&backup);
+            Ok(())
+        }
+        Err(error) => {
+            // Best effort restoration keeps the previous transcript usable if
+            // the replacement fails after the backup move.
+            if let Err(restore_error) = fs::rename(&backup, destination) {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!(
+                        "replacement failed: {}; previous file restoration failed: {}",
+                        error, restore_error
+                    ),
+                ));
+            }
+            Err(error)
+        }
+    }
+}
+
+fn rollback_purge_moves(
+    moved_files: &mut Vec<(PathBuf, PathBuf)>,
+    moved_outputs: &mut Vec<(PathBuf, PathBuf)>,
+) -> Option<String> {
+    let mut errors = Vec::new();
+    for (source, destination) in moved_outputs.drain(..).rev() {
+        if let Err(error) = move_file_exclusive(&destination, &source) {
+            errors.push(format!("{}: {}", destination.display(), error));
+        }
+    }
     for (source, destination) in moved_files.drain(..).rev() {
-        let _ = move_file(&destination, &source);
+        if let Err(error) = move_file_exclusive(&destination, &source) {
+            errors.push(format!("{}: {}", destination.display(), error));
+        }
+    }
+    (!errors.is_empty()).then(|| errors.join("; "))
+}
+
+fn purge_failure(
+    message: impl Into<String>,
+    moved_files: &mut Vec<(PathBuf, PathBuf)>,
+    moved_outputs: &mut Vec<(PathBuf, PathBuf)>,
+) -> String {
+    let message = message.into();
+    match rollback_purge_moves(moved_files, moved_outputs) {
+        Some(rollback_error) => {
+            format!("{message}; la reversión física también falló: {rollback_error}")
+        }
+        None => message,
+    }
+}
+
+fn rollback_undo_moves(
+    moved_files: &mut Vec<(PathBuf, PathBuf)>,
+    moved_outputs: &mut Vec<(PathBuf, PathBuf)>,
+) -> Option<String> {
+    let mut errors = Vec::new();
+    for (source, destination) in moved_outputs.drain(..).rev() {
+        if let Err(error) = move_file_exclusive(&destination, &source) {
+            errors.push(format!("{}: {}", destination.display(), error));
+        }
+    }
+    for (source, destination) in moved_files.drain(..).rev() {
+        if let Err(error) = move_file_exclusive(&destination, &source) {
+            errors.push(format!("{}: {}", destination.display(), error));
+        }
+    }
+    (!errors.is_empty()).then(|| errors.join("; "))
+}
+
+fn undo_failure(
+    message: impl Into<String>,
+    moved_files: &mut Vec<(PathBuf, PathBuf)>,
+    moved_outputs: &mut Vec<(PathBuf, PathBuf)>,
+) -> String {
+    let message = message.into();
+    match rollback_undo_moves(moved_files, moved_outputs) {
+        Some(rollback_error) => {
+            format!("{message}; la reversión física también falló: {rollback_error}")
+        }
+        None => message,
     }
 }
 
@@ -447,7 +589,7 @@ fn copy_transcript(source: &Path, job_id: i64, transcript: &str) -> io::Result<O
     } else {
         fs::write(&temporary, transcript.as_bytes())?;
     }
-    fs::rename(&temporary, &destination)?;
+    replace_file(&temporary, &destination)?;
     Ok(Some(destination))
 }
 
@@ -524,6 +666,59 @@ pub fn finalize_job_media(
     })
 }
 
+/// Promotes the validated user-selected exports from staging into the durable
+/// per-job media directory. Only files directly inside `exports` are allowed.
+pub fn promote_generated_exports(
+    root: &Path,
+    job_id: i64,
+) -> io::Result<Vec<(String, PathBuf, u64)>> {
+    let source_root = job_staging_dir(root, job_id).join("exports");
+    if !source_root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let destination_root = job_media_dir(root, job_id).join("exports");
+    fs::create_dir_all(&destination_root)?;
+    let mut promoted = Vec::new();
+    for entry in fs::read_dir(&source_root)? {
+        let entry = entry?;
+        let source = entry.path();
+        if !source.is_file() {
+            continue;
+        }
+        let Some(name) = source.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let Some((category, format)) = name.rsplit_once('.') else {
+            continue;
+        };
+        if !matches!(category, "video" | "audio" | "text")
+            || !matches!(
+                format,
+                "mp4"
+                    | "mkv"
+                    | "webm"
+                    | "mov"
+                    | "mp3"
+                    | "wav"
+                    | "flac"
+                    | "ogg"
+                    | "m4a"
+                    | "txt"
+                    | "srt"
+                    | "vtt"
+                    | "json"
+            )
+        {
+            continue;
+        }
+        let destination = destination_root.join(name);
+        move_file(&source, &destination)?;
+        let size = fs::metadata(&destination)?.len();
+        promoted.push((format.to_string(), destination, size));
+    }
+    Ok(promoted)
+}
+
 fn path_is_inside(path: &Path, root: &Path) -> bool {
     fn canonical_or_parent(path: &Path) -> PathBuf {
         if let Ok(canonical) = path.canonicalize() {
@@ -567,8 +762,8 @@ fn candidate_from_row(
     title: String,
     video_path: Option<String>,
     audio_path: Option<String>,
-    video_bytes: Option<i64>,
-    audio_bytes: Option<i64>,
+    _video_bytes: Option<i64>,
+    _audio_bytes: Option<i64>,
     play_count: i64,
     open_count: i64,
     search_hit_count: i64,
@@ -583,12 +778,12 @@ fn candidate_from_row(
         .as_ref()
         .and_then(|path| fs::metadata(path).ok())
         .map(|metadata| metadata.len())
-        .unwrap_or_else(|| video_bytes.unwrap_or(0).max(0) as u64);
+        .unwrap_or(0);
     let actual_audio = audio_path
         .as_ref()
         .and_then(|path| fs::metadata(path).ok())
         .map(|metadata| metadata.len())
-        .unwrap_or_else(|| audio_bytes.unwrap_or(0).max(0) as u64);
+        .unwrap_or(0);
     let mut reasons = Vec::new();
     let mut interest_score = 0_i64;
     if favorite != 0 {
@@ -620,12 +815,9 @@ fn candidate_from_row(
         reasons.push("Sin coincidencias seleccionadas desde búsqueda".to_string());
     }
     let last_accessed = last_accessed.unwrap_or_default();
-    if !last_accessed.is_empty() {
-        interest_score += 5;
-        reasons.push(format!("Último acceso: {}", last_accessed));
-    } else {
-        reasons.push("Sin acceso registrado".to_string());
-    }
+    let (recency_score, recency_reason) = access_recency(&last_accessed);
+    interest_score += recency_score;
+    reasons.push(recency_reason);
     CandidateRow {
         job_id,
         title,
@@ -636,6 +828,40 @@ fn candidate_from_row(
         reasons,
         last_accessed,
         downloaded_at: downloaded_at.unwrap_or_default(),
+    }
+}
+
+/// Returns a small, bounded and explainable recency signal for purge ranking.
+/// SQLite normally stores UTC timestamps without an offset, while imports may
+/// contain RFC3339 values, so both representations are accepted.
+fn access_recency(value: &str) -> (i64, String) {
+    if value.trim().is_empty() {
+        return (0, "Sin acceso registrado".to_string());
+    }
+
+    let parsed = chrono::DateTime::parse_from_rfc3339(value)
+        .map(|timestamp| timestamp.with_timezone(&chrono::Utc))
+        .ok()
+        .or_else(|| {
+            chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
+                .ok()
+                .map(|timestamp| {
+                    chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                        timestamp,
+                        chrono::Utc,
+                    )
+                })
+        });
+
+    let Some(timestamp) = parsed else {
+        return (0, format!("Último acceso no interpretable: {value}"));
+    };
+    let age_days = (chrono::Utc::now() - timestamp).num_seconds().max(0) / 86_400;
+    let score = (30_i64 - age_days.min(30)).max(0);
+    if score > 0 {
+        (score, format!("Acceso reciente (+{score} recencia)"))
+    } else {
+        (0, "Último acceso antiguo".to_string())
     }
 }
 
@@ -680,7 +906,23 @@ pub fn preview_purge(
     })?;
     let mut candidates = Vec::new();
     for row in rows {
-        let candidate = row?;
+        let mut candidate = row?;
+        let generated_bytes: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(size_bytes), 0) FROM generated_outputs
+                 WHERE job_id = ?1 AND category IN ('video', 'audio')",
+                params![candidate.job_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        candidate.media_bytes = candidate
+            .media_bytes
+            .saturating_add(generated_bytes.max(0) as u64);
+        if generated_bytes > 0 {
+            candidate
+                .reasons
+                .push("Incluye salidas de formatos seleccionados".into());
+        }
         let path_is_safe = candidate
             .video_path
             .as_ref()
@@ -731,122 +973,168 @@ pub fn apply_purge(
         .iter()
         .copied()
         .collect::<std::collections::HashSet<_>>();
-    let mut actions = Vec::new();
     let mut moved_files = Vec::<(PathBuf, PathBuf)>::new();
+    let mut moved_outputs = Vec::<(PathBuf, PathBuf)>::new();
     let transaction = conn
         .transaction()
         .map_err(|error| format!("No se pudo abrir la transacción de purga: {}", error))?;
     let batch = chrono::Utc::now().format("%Y%m%d-%H%M%S-%3f").to_string();
-    for candidate in candidates
-        .into_iter()
-        .filter(|candidate| requested.contains(&candidate.job_id))
-    {
-        let row: Option<(Option<String>, Option<String>, Option<String>)> = transaction
-            .query_row(
-                "SELECT video_path, audio_path, title FROM media WHERE job_id = ?1",
-                params![candidate.job_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()
-            .map_err(|error| error.to_string())?;
-        let Some((video, audio, title)) = row else {
-            continue;
-        };
-        let destination = trash_root(root)
-            .join(&batch)
-            .join(candidate.job_id.to_string());
-        if let Err(error) = fs::create_dir_all(&destination) {
-            rollback_moved_files(&mut moved_files);
-            return Err(error.to_string());
-        }
-        let video_path = video.map(PathBuf::from).filter(|path| path.is_file());
-        let audio_path = audio.map(PathBuf::from).filter(|path| path.is_file());
-        if video_path
-            .as_ref()
-            .is_some_and(|path| !path_is_inside(path, root))
-            || audio_path
+    let operation: Result<Vec<PurgeAction>, String> = (|| {
+        let mut actions = Vec::new();
+        for candidate in candidates
+            .into_iter()
+            .filter(|candidate| requested.contains(&candidate.job_id))
+        {
+            let row: Option<(Option<String>, Option<String>, Option<String>)> = transaction
+                .query_row(
+                    "SELECT video_path, audio_path, title FROM media WHERE job_id = ?1",
+                    params![candidate.job_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            let Some((video, audio, title)) = row else {
+                continue;
+            };
+            let destination = trash_root(root)
+                .join(&batch)
+                .join(candidate.job_id.to_string());
+            fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+            let video_path = video.map(PathBuf::from).filter(|path| path.is_file());
+            let audio_path = audio.map(PathBuf::from).filter(|path| path.is_file());
+            let mut candidate_outputs = Vec::<(i64, PathBuf, PathBuf)>::new();
+            if video_path
                 .as_ref()
                 .is_some_and(|path| !path_is_inside(path, root))
-        {
-            rollback_moved_files(&mut moved_files);
-            return Err(format!(
-                "El job {} contiene una ruta fuera de la carpeta de medios y no se puede purgar con seguridad",
-                candidate.job_id
-            ));
-        }
-        let trash_video = video_path.as_ref().map(|_| destination.join("video.mp4"));
-        let trash_audio = audio_path.as_ref().map(|_| destination.join("audio.mp3"));
-        if let (Some(source), Some(destination)) = (&video_path, &trash_video) {
-            if let Err(error) = move_file(source, destination) {
-                rollback_moved_files(&mut moved_files);
-                return Err(error.to_string());
+                || audio_path
+                    .as_ref()
+                    .is_some_and(|path| !path_is_inside(path, root))
+            {
+                return Err(format!(
+                    "El job {} contiene una ruta fuera de la carpeta de medios y no se puede purgar con seguridad",
+                    candidate.job_id
+                ));
             }
-            moved_files.push((source.clone(), destination.clone()));
-        }
-        if let (Some(source), Some(destination)) = (&audio_path, &trash_audio) {
-            if let Err(error) = move_file(source, destination) {
-                rollback_moved_files(&mut moved_files);
-                return Err(error.to_string());
+            let trash_video = video_path.as_ref().map(|_| destination.join("video.mp4"));
+            let trash_audio = audio_path.as_ref().map(|_| destination.join("audio.mp3"));
+            if let (Some(source), Some(destination)) = (&video_path, &trash_video) {
+                move_file_exclusive(source, destination).map_err(|error| error.to_string())?;
+                moved_files.push((source.clone(), destination.clone()));
             }
-            moved_files.push((source.clone(), destination.clone()));
-        }
-        if let Err(error) = transaction.execute(
-            "INSERT INTO purge_history (job_id, original_video_path, original_audio_path,
-                trash_video_path, trash_audio_path, reason)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
+            if let (Some(source), Some(destination)) = (&audio_path, &trash_audio) {
+                move_file_exclusive(source, destination).map_err(|error| error.to_string())?;
+                moved_files.push((source.clone(), destination.clone()));
+            }
+            let mut output_statement = transaction
+                .prepare("SELECT id, path FROM generated_outputs WHERE job_id = ?1 AND category IN ('video', 'audio')")
+                .map_err(|error| error.to_string())?;
+            let outputs = output_statement
+                .query_map(params![candidate.job_id], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|error| error.to_string())?;
+            for output in outputs {
+                let (output_id, raw_path) = output.map_err(|error| error.to_string())?;
+                let source = PathBuf::from(raw_path);
+                if !source.is_file() || !path_is_inside(&source, root) {
+                    return Err(format!(
+                        "La salida generada del job {} no es segura para purga",
+                        candidate.job_id
+                    ));
+                }
+                let name = source
+                    .file_name()
+                    .ok_or_else(|| "La salida generada no tiene nombre válido".to_string())?;
+                let destination_path = destination.join("exports").join(name);
+                if let Some(parent) = destination_path.parent() {
+                    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                move_file_exclusive(&source, &destination_path)
+                    .map_err(|error| error.to_string())?;
+                moved_outputs.push((source.clone(), destination_path.clone()));
+                candidate_outputs.push((output_id, source, destination_path));
+            }
+            transaction
+                .execute(
+                    "INSERT INTO purge_history (job_id, original_video_path, original_audio_path,
+                        trash_video_path, trash_audio_path, reason)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        candidate.job_id,
+                        video_path
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string()),
+                        audio_path
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string()),
+                        trash_video
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string()),
+                        trash_audio
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string()),
+                        if reason.trim().is_empty() {
+                            "manual purge"
+                        } else {
+                            reason
+                        },
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+            let purge_id = transaction.last_insert_rowid();
+            for (output_id, original, trash) in candidate_outputs {
+                transaction
+                    .execute(
+                        "INSERT INTO generated_output_purge (purge_id, output_id, original_path, trash_path) VALUES (?1, ?2, ?3, ?4)",
+                        params![purge_id, output_id, original.to_string_lossy().to_string(), trash.to_string_lossy().to_string()],
+                    )
+                    .map_err(|error| error.to_string())?;
+                transaction
+                    .execute(
+                        "UPDATE generated_outputs SET path = ?1 WHERE id = ?2",
+                        params![trash.to_string_lossy().to_string(), output_id],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            crate::db::set_media_storage_paths_null(
+                &transaction,
                 candidate.job_id,
-                video_path
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string()),
-                audio_path
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string()),
-                trash_video
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string()),
-                trash_audio
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string()),
-                if reason.trim().is_empty() {
-                    "manual purge"
-                } else {
-                    reason
-                },
-            ],
-        ) {
-            rollback_moved_files(&mut moved_files);
-            return Err(error.to_string());
+                "online",
+                reason,
+            )
+            .map_err(|error| error.to_string())?;
+            actions.push(PurgeAction {
+                purge_id,
+                job_id: candidate.job_id,
+                freed_bytes: candidate.media_bytes,
+                title: title.unwrap_or(candidate.title),
+            });
         }
-        let purge_id = transaction.last_insert_rowid();
-        if let Err(error) = crate::db::set_media_storage_paths_null(
-            &transaction,
-            candidate.job_id,
-            "online",
-            reason,
-        ) {
-            rollback_moved_files(&mut moved_files);
-            return Err(error.to_string());
+        if actions.is_empty() {
+            return Err(
+                "Los elementos seleccionados están protegidos, ya no tienen medios o no son elegibles para purga"
+                    .to_string(),
+            );
         }
-        actions.push(PurgeAction {
-            purge_id,
-            job_id: candidate.job_id,
-            freed_bytes: candidate.media_bytes,
-            title: title.unwrap_or(candidate.title),
-        });
-    }
-    if actions.is_empty() {
-        rollback_moved_files(&mut moved_files);
-        return Err(
-            "Los elementos seleccionados están protegidos, ya no tienen medios o no son elegibles para purga"
-                .to_string(),
-        );
-    }
+        Ok(actions)
+    })();
+
+    let actions = match operation {
+        Ok(actions) => actions,
+        Err(error) => {
+            drop(transaction);
+            return Err(purge_failure(error, &mut moved_files, &mut moved_outputs));
+        }
+    };
     if let Err(error) = transaction.commit() {
-        rollback_moved_files(&mut moved_files);
-        return Err(error.to_string());
+        return Err(purge_failure(
+            error.to_string(),
+            &mut moved_files,
+            &mut moved_outputs,
+        ));
     }
     moved_files.clear();
+    moved_outputs.clear();
     Ok(actions)
 }
 
@@ -888,6 +1176,7 @@ pub fn undo_purge(conn: &Connection, root: &Path, purge_id: i64) -> Result<Purge
     let original_audio = original_audio.map(PathBuf::from);
     let trash_video = trash_video.map(PathBuf::from);
     let trash_audio = trash_audio.map(PathBuf::from);
+    let trash_root = trash_root(root);
     if original_video
         .as_ref()
         .is_some_and(|path| !path_is_inside(path, root))
@@ -902,10 +1191,10 @@ pub fn undo_purge(conn: &Connection, root: &Path, purge_id: i64) -> Result<Purge
     }
     if trash_video
         .as_ref()
-        .is_some_and(|path| !path_is_inside(path, &trash_root(root)))
+        .is_some_and(|path| !path_is_inside(path, &trash_root))
         || trash_audio
             .as_ref()
-            .is_some_and(|path| !path_is_inside(path, &trash_root(root)))
+            .is_some_and(|path| !path_is_inside(path, &trash_root))
     {
         return Err(
             "La ruta de la papelera no pertenece al almacenamiento configurado".to_string(),
@@ -925,31 +1214,78 @@ pub fn undo_purge(conn: &Connection, root: &Path, purge_id: i64) -> Result<Purge
         return Err("No se puede deshacer porque el destino original ya existe".to_string());
     }
 
-    let mut moved = Vec::<(PathBuf, PathBuf)>::new();
+    // Read and validate all generated-output rows before moving anything. This
+    // makes a malformed row fail during preflight instead of leaving a half
+    // recovered job on disk.
+    let output_rows = {
+        let mut statement = conn
+            .prepare("SELECT output_id, original_path, trash_path FROM generated_output_purge WHERE purge_id = ?1")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![purge_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    PathBuf::from(row.get::<_, String>(1)?),
+                    PathBuf::from(row.get::<_, String>(2)?),
+                ))
+            })
+            .map_err(|error| error.to_string())?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?
+    };
+    for (_, original, trash) in &output_rows {
+        if !path_is_inside(original, root) || !path_is_inside(trash, &trash_root) {
+            return Err("La salida generada contiene una ruta insegura".into());
+        }
+        if !trash.is_file() || original.exists() {
+            return Err(
+                "La salida generada no puede recuperarse porque falta o el destino ya existe"
+                    .into(),
+            );
+        }
+    }
+
+    let mut moved_files = Vec::<(PathBuf, PathBuf)>::new();
+    let mut moved_outputs = Vec::<(PathBuf, PathBuf)>::new();
     if let (Some(source), Some(destination)) = (trash_video.clone(), original_video.clone()) {
-        if destination.exists() {
-            return Err("No se puede deshacer porque el destino original ya existe".to_string());
+        if let Err(error) = move_file_exclusive(&source, &destination) {
+            return Err(undo_failure(
+                error.to_string(),
+                &mut moved_files,
+                &mut moved_outputs,
+            ));
         }
-        if let Err(error) = move_file(&source, &destination) {
-            return Err(error.to_string());
-        }
-        moved.push((source, destination));
+        moved_files.push((source, destination));
     }
     if let (Some(source), Some(destination)) = (trash_audio.clone(), original_audio.clone()) {
-        if destination.exists() {
-            for (moved_source, moved_destination) in moved.into_iter().rev() {
-                let _ = move_file(&moved_destination, &moved_source);
-            }
-            return Err("No se puede deshacer porque el audio original ya existe".to_string());
+        if let Err(error) = move_file_exclusive(&source, &destination) {
+            return Err(undo_failure(
+                error.to_string(),
+                &mut moved_files,
+                &mut moved_outputs,
+            ));
         }
-        if let Err(error) = move_file(&source, &destination) {
-            for (moved_source, moved_destination) in moved.into_iter().rev() {
-                let _ = move_file(&moved_destination, &moved_source);
-            }
-            return Err(error.to_string());
-        }
-        moved.push((source, destination));
+        moved_files.push((source, destination));
     }
+
+    let mut moved_output_count = 0_u64;
+    let mut moved_generated = Vec::<(i64, PathBuf, PathBuf, u64)>::new();
+    for (output_id, original, trash) in output_rows {
+        let size = fs::metadata(&trash)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        if let Err(error) = move_file_exclusive(&trash, &original) {
+            return Err(undo_failure(
+                error.to_string(),
+                &mut moved_files,
+                &mut moved_outputs,
+            ));
+        }
+        moved_outputs.push((trash.clone(), original.clone()));
+        moved_generated.push((output_id, original, trash, size));
+        moved_output_count = moved_output_count.saturating_add(size);
+    }
+
     let video_bytes = original_video
         .as_ref()
         .and_then(|path| fs::metadata(path).ok())
@@ -958,7 +1294,38 @@ pub fn undo_purge(conn: &Connection, root: &Path, purge_id: i64) -> Result<Purge
         .as_ref()
         .and_then(|path| fs::metadata(path).ok())
         .map(|metadata| metadata.len());
-    if let Err(error) = conn.execute(
+
+    // Filesystem moves happen before the DB transaction, but every DB update
+    // is committed as one unit. If any statement or commit fails, the
+    // transaction rolls back and all physical moves are reversed as well.
+    let transaction = match conn.unchecked_transaction() {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            return Err(undo_failure(
+                format!("No se pudo abrir la transacción de recuperación: {error}"),
+                &mut moved_files,
+                &mut moved_outputs,
+            ));
+        }
+    };
+    for (output_id, original, _, size) in &moved_generated {
+        if let Err(error) = transaction.execute(
+            "UPDATE generated_outputs SET path = ?1, size_bytes = ?2 WHERE id = ?3",
+            params![
+                original.to_string_lossy().to_string(),
+                i64::try_from(*size).unwrap_or(i64::MAX),
+                output_id
+            ],
+        ) {
+            drop(transaction);
+            return Err(undo_failure(
+                error.to_string(),
+                &mut moved_files,
+                &mut moved_outputs,
+            ));
+        }
+    }
+    if let Err(error) = transaction.execute(
         "UPDATE media SET video_path = ?1, audio_path = ?2, video_bytes = ?3,
             audio_bytes = ?4, source_state = 'local', purged_at = NULL, purged_reason = NULL
          WHERE job_id = ?5",
@@ -974,22 +1341,41 @@ pub fn undo_purge(conn: &Connection, root: &Path, purge_id: i64) -> Result<Purge
             job_id,
         ],
     ) {
-        for (moved_source, moved_destination) in moved.into_iter().rev() {
-            let _ = move_file(&moved_destination, &moved_source);
-        }
-        return Err(error.to_string());
+        drop(transaction);
+        return Err(undo_failure(
+            error.to_string(),
+            &mut moved_files,
+            &mut moved_outputs,
+        ));
     }
-    conn.execute(
+    if let Err(error) = transaction.execute(
         "UPDATE purge_history SET undone_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![purge_id],
-    )
-    .map_err(|error| error.to_string())?;
+    ) {
+        drop(transaction);
+        return Err(undo_failure(
+            error.to_string(),
+            &mut moved_files,
+            &mut moved_outputs,
+        ));
+    }
+    if let Err(error) = transaction.commit() {
+        return Err(undo_failure(
+            error.to_string(),
+            &mut moved_files,
+            &mut moved_outputs,
+        ));
+    }
+    moved_files.clear();
+    moved_outputs.clear();
+
     Ok(PurgeAction {
         purge_id,
         job_id,
         freed_bytes: video_bytes
             .unwrap_or(0)
-            .saturating_add(audio_bytes.unwrap_or(0)),
+            .saturating_add(audio_bytes.unwrap_or(0))
+            .saturating_add(moved_output_count),
         title: title.unwrap_or_else(|| format!("Job #{job_id}")),
     })
 }
@@ -1239,6 +1625,17 @@ mod tests {
                 size_bytes INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE generated_outputs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                format TEXT NOT NULL,
+                path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                validated BOOLEAN NOT NULL DEFAULT 0,
+                label TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE purge_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id INTEGER NOT NULL,
@@ -1249,6 +1646,12 @@ mod tests {
                 reason TEXT NOT NULL,
                 undone_at TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE generated_output_purge (
+                purge_id INTEGER NOT NULL,
+                output_id INTEGER NOT NULL,
+                original_path TEXT NOT NULL,
+                trash_path TEXT NOT NULL
             );
             CREATE TABLE transcript_segments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1285,6 +1688,44 @@ mod tests {
     }
 
     #[test]
+    fn quota_counts_only_pulsaria_owned_media_and_caches() {
+        let root = test_root("managed-size");
+        ensure_media_root(&root).expect("failed to prepare test media root");
+        fs::write(root.join("unrelated-video.mp4"), b"unmanaged").unwrap();
+        fs::write(media_root(&root).join("owned.mp4"), b"owned-media").unwrap();
+        fs::write(staging_root(&root).join("download.part"), b"staged").unwrap();
+        fs::create_dir_all(root.join(".pulsaria").join("cache")).unwrap();
+        fs::write(
+            root.join(".pulsaria")
+                .join("cache")
+                .join("embeddings.cache"),
+            b"cache",
+        )
+        .unwrap();
+
+        let status = storage_status(&root, 0, None);
+
+        assert_eq!(status.used_media_bytes, 11 + 6 + 5);
+        assert_eq!(status.staged_bytes, 6);
+        fs::remove_dir_all(root).expect("failed to clean exact test root");
+    }
+
+    #[test]
+    fn purge_recency_signal_is_bounded_and_explainable() {
+        let (fresh_score, fresh_reason) = access_recency(&chrono::Utc::now().to_rfc3339());
+        assert!((29..=30).contains(&fresh_score));
+        assert!(fresh_reason.contains("Acceso reciente"));
+
+        let (old_score, old_reason) = access_recency("2000-01-01 00:00:00");
+        assert_eq!(old_score, 0);
+        assert!(old_reason.contains("antiguo"));
+
+        let (missing_score, missing_reason) = access_recency("");
+        assert_eq!(missing_score, 0);
+        assert!(missing_reason.contains("Sin acceso"));
+    }
+
+    #[test]
     fn purge_moves_only_large_media_and_undo_restores_it() {
         let root = test_root("purge");
         ensure_media_root(&root).expect("failed to prepare test media root");
@@ -1300,6 +1741,18 @@ mod tests {
             .expect("failed to write transcript fixture");
         let poster_path = root.join("poster.jpg");
         fs::write(&poster_path, b"poster-bytes").expect("failed to write poster fixture");
+        let text_output_path = job_media_dir(&root, job_id)
+            .join("exports")
+            .join("text.txt");
+        let video_output_path = job_media_dir(&root, job_id)
+            .join("exports")
+            .join("video-export.mp4");
+        fs::create_dir_all(text_output_path.parent().expect("text output parent"))
+            .expect("failed to create output directory");
+        fs::write(&text_output_path, b"knowledge export")
+            .expect("failed to write text output fixture");
+        fs::write(&video_output_path, b"encoded-video")
+            .expect("failed to write video output fixture");
 
         let mut conn = storage_test_db();
         conn.execute(
@@ -1344,16 +1797,42 @@ mod tests {
             params![job_id, poster_path.to_string_lossy().to_string()],
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO generated_outputs
+                (job_id, category, format, path, size_bytes, validated, label)
+             VALUES (?1, 'text', 'txt', ?2, 100, 1, 'TEXT TXT')",
+            params![job_id, text_output_path.to_string_lossy().to_string()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO generated_outputs
+                (job_id, category, format, path, size_bytes, validated, label)
+             VALUES (?1, 'video', 'mp4', ?2, 13, 1, 'VIDEO MP4')",
+            params![job_id, video_output_path.to_string_lossy().to_string()],
+        )
+        .unwrap();
 
         let candidates = preview_purge(&conn, &root, 0).expect("preview should succeed");
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].job_id, job_id);
+        assert_eq!(candidates[0].media_bytes, 35);
 
         let actions = apply_purge(&mut conn, &root, &[job_id], "quota test")
             .expect("purge should move eligible media");
         assert_eq!(actions.len(), 1);
         assert!(!video_path.exists());
         assert!(!audio_path.exists());
+        assert!(text_output_path.exists());
+        assert!(!video_output_path.exists());
+        assert_eq!(
+            conn.query_row(
+                "SELECT path FROM generated_outputs WHERE job_id = ?1 AND format = 'txt'",
+                params![job_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            text_output_path.to_string_lossy().to_string()
+        );
         assert!(transcript_path.exists());
         assert!(poster_path.exists());
         assert_eq!(
@@ -1380,6 +1859,16 @@ mod tests {
         assert_eq!(restored.job_id, job_id);
         assert!(video_path.exists());
         assert!(audio_path.exists());
+        assert!(video_output_path.exists());
+        assert_eq!(
+            conn.query_row(
+                "SELECT path FROM generated_outputs WHERE job_id = ?1 AND format = 'mp4'",
+                params![job_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            video_output_path.to_string_lossy().to_string()
+        );
         let source_state: String = conn
             .query_row(
                 "SELECT source_state FROM media WHERE job_id = ?1",
@@ -1447,6 +1936,18 @@ mod tests {
             [],
         )
         .unwrap();
+        conn.execute("INSERT INTO jobs (id, status) VALUES (5, 'complete')", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO media
+                (job_id, title, video_path, video_bytes, keep_status, source_state)
+             VALUES (5, 'Missing media', ?1, 999, 'online', 'local')",
+            params![job_media_dir(&root, 5)
+                .join("video.mp4")
+                .to_string_lossy()
+                .to_string()],
+        )
+        .unwrap();
 
         let candidates = preview_purge(&conn, &root, 0).expect("preview should succeed");
         assert_eq!(
@@ -1457,5 +1958,83 @@ mod tests {
             vec![1]
         );
         fs::remove_dir_all(&root).expect("failed to clean exact test root");
+    }
+
+    #[test]
+    fn purge_failure_restores_media_when_generated_output_is_unsafe() {
+        let root = test_root("purge-rollback");
+        ensure_media_root(&root).expect("failed to prepare test media root");
+        let job_id = 12_i64;
+        let media_dir = job_media_dir(&root, job_id);
+        fs::create_dir_all(&media_dir).unwrap();
+        let video_path = media_dir.join("video.mp4");
+        fs::write(&video_path, b"video").unwrap();
+        let unsafe_output = root
+            .parent()
+            .expect("test root should have a parent")
+            .join("pulsaria-unsafe-generated-output.mp4");
+
+        let mut conn = storage_test_db();
+        conn.execute(
+            "INSERT INTO jobs (id, status) VALUES (?1, 'complete')",
+            params![job_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO media
+                (job_id, title, video_path, video_bytes, keep_status, source_state)
+             VALUES (?1, 'Rollback item', ?2, 5, 'online', 'local')",
+            params![job_id, video_path.to_string_lossy().to_string()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO generated_outputs
+                (job_id, category, format, path, size_bytes, validated, label)
+             VALUES (?1, 'video', 'mp4', ?2, 99, 1, 'UNSAFE VIDEO')",
+            params![job_id, unsafe_output.to_string_lossy().to_string()],
+        )
+        .unwrap();
+
+        let error = apply_purge(&mut conn, &root, &[job_id], "rollback test")
+            .expect_err("unsafe generated output must abort purge");
+
+        assert!(error.contains("salida generada"));
+        assert!(video_path.exists());
+        let stored_path: String = conn
+            .query_row(
+                "SELECT video_path FROM media WHERE job_id = ?1",
+                params![job_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_path, video_path.to_string_lossy().to_string());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM purge_history", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+        fs::remove_dir_all(root).expect("failed to clean exact test root");
+    }
+
+    #[test]
+    fn replacing_a_durable_file_keeps_the_new_transcript_on_windows() {
+        let root = test_root("replace-file");
+        fs::create_dir_all(&root).expect("test root should be created");
+        let source = root.join("transcript.txt.part");
+        let destination = root.join("transcript.txt");
+        fs::write(&source, "transcript nuevo").expect("new transcript should be written");
+        fs::write(&destination, "transcript anterior").expect("old transcript should be written");
+
+        replace_file(&source, &destination).expect("durable file should be replaced");
+
+        assert!(!source.exists());
+        assert_eq!(
+            fs::read_to_string(&destination).expect("new transcript should remain"),
+            "transcript nuevo"
+        );
+        assert!(!root.join(".transcript.txt.previous").exists());
+        fs::remove_dir_all(root).expect("test root should be removable");
     }
 }

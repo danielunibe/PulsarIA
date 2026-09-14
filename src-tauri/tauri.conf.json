@@ -11,6 +11,10 @@
     },
     "bundle": {
         "active": true,
+        "shortDescription": "Biblioteca audiovisual local-first para Windows",
+        "longDescription": "Pulsaria procesa contenido audiovisual autorizado, genera transcripciones y análisis locales, y permite búsqueda literal y semántica.",
+        "homepage": "https://danielunibe.github.io/PulsarIA/",
+        "licenseFile": "../LICENSE",
         "targets": [
             "nsis",
             "msi"
@@ -27,6 +31,7 @@
             "../python-workers/transcriber.py": "resources/python-workers/transcriber.py",
             "../python-workers/visual_analyzer.py": "resources/python-workers/visual_analyzer.py",
             "../python-workers/audio_extractor.py": "resources/python-workers/audio_extractor.py",
+            "../python-workers/output_generator.py": "resources/python-workers/output_generator.py",
             "../python-workers/daemon.py": "resources/python-workers/daemon.py",
             "../python-workers/embed_query.py": "resources/python-workers/embed_query.py",
             "../python-workers/export_onnx.py": "resources/python-workers/export_onnx.py",
@@ -38,6 +43,10 @@
             "resources/local-llm-manifest.json": "resources/local-llm-manifest.json"
         },
         "windows": {
+            "webviewInstallMode": {
+                "type": "offlineInstaller",
+                "silent": true
+            },
             "nsis": {
                 "installMode": "currentUser"
             }

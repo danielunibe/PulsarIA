@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { motion } from 'motion/react';
+import Image from 'next/image';
 import FocusTrap from 'focus-trap-react';
 import type { VideoData } from '@/types';
 import {
@@ -16,6 +17,7 @@ import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useSemanticIO } from '@/hooks/useSemanticIO';
 import { useSettings } from '@/lib/settings-context';
+import { apiFetch } from '@/lib/api-client';
 
 // ============================================================
 // ExpandedVideoModal — AAA Multimodal Knowledge Hub
@@ -64,6 +66,17 @@ interface MediaArtifact {
     protected: boolean;
     size_bytes: number;
     created_at: string;
+}
+
+interface GeneratedOutput {
+    id: number;
+    jobId: number;
+    category: string;
+    format: string;
+    path: string;
+    sizeBytes: number;
+    validated: boolean;
+    label: string;
 }
 
 function isNativeShell(): boolean {
@@ -120,6 +133,8 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
     const [pinned, setPinned] = useState(Boolean(video.pinned));
     const [artifacts, setArtifacts] = useState<MediaArtifact[]>([]);
     const [artifactUrls, setArtifactUrls] = useState<Record<number, string>>({});
+    const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutput[]>([]);
+    const [generatedOutputUrls, setGeneratedOutputUrls] = useState<Record<number, string>>({});
     const [savingFrame, setSavingFrame] = useState(false);
 
     const { exportSemantic, importSemantic, downloadUnib, exporting, importing, error: semanticError, exportedContent } = useSemanticIO();
@@ -169,18 +184,26 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
         if (!isNativeShell()) return;
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            const next = await invoke<MediaArtifact[]>('get_job_artifacts', { jobId: video.id });
+            const [next, nextOutputs] = await Promise.all([
+                invoke<MediaArtifact[]>('get_job_artifacts', { jobId: video.id }),
+                invoke<GeneratedOutput[]>('get_generated_outputs', { jobId: video.id }),
+            ]);
             const urls = await Promise.all(next.map(async (artifact) => {
                 const url = await resolveArtifactUrl(artifact.path);
                 return [artifact.id, url] as const;
             }));
             setArtifacts(next);
             setArtifactUrls(Object.fromEntries(urls.filter(([, url]) => Boolean(url)) as Array<[string | number, string]>));
+            const outputUrls = await Promise.all(nextOutputs.map(async (output) => [output.id, await resolveArtifactUrl(output.path)] as const));
+            setGeneratedOutputs(nextOutputs);
+            setGeneratedOutputUrls(Object.fromEntries(outputUrls.filter(([, url]) => Boolean(url)) as Array<[string | number, string]>));
         } catch {
             // Artifact rendering is additive; transcript and metadata remain usable
             // when an older native shell does not expose this command yet.
             setArtifacts([]);
             setArtifactUrls({});
+            setGeneratedOutputs([]);
+            setGeneratedOutputUrls({});
         }
     }, [video.id]);
 
@@ -207,7 +230,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                         segments = await invoke('get_transcript', { jobId: video.id });
                     } catch {
                         const { REST_API_BASE } = await import('@/lib/api-config');
-                        const response = await fetch(`${REST_API_BASE}/jobs/${video.id}/transcript`);
+                        const response = await apiFetch(`${REST_API_BASE}/jobs/${video.id}/transcript`);
                         if (!response.ok) throw new Error(`Transcript request failed with status ${response.status}`);
                         segments = await response.json() as Array<{ chunk_index: number; chunk_text: string; start: number; end: number }>;
                     }
@@ -440,7 +463,10 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
         if (!videoRef.current) return;
         videoRef.current.currentTime = sec;
         if (!isPlaying) {
-            videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+            videoRef.current.play().then(() => setIsPlaying(true)).catch((error) => {
+                console.warn('Video autoplay was blocked:', error);
+                setIsPlaying(false);
+            });
         }
     };
 
@@ -537,7 +563,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                 jobs = await invoke<Array<{ id: number }>>('get_jobs');
             } catch {
                 const { REST_API_BASE } = await import('@/lib/api-config');
-                const response = await fetch(`${REST_API_BASE}/jobs`);
+                const response = await apiFetch(`${REST_API_BASE}/jobs`);
                 if (!response.ok) throw new Error(`Jobs request failed with status ${response.status}`);
                 jobs = await response.json() as Array<{ id: number }>;
             }
@@ -975,11 +1001,16 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                                         {artifacts.map((artifact) => (
                                             <figure key={artifact.id} className="overflow-hidden rounded-xl border border-white/10 bg-black/30">
                                                 {artifactUrls[artifact.id] ? (
-                                                    <img
-                                                        src={artifactUrls[artifact.id]}
-                                                        alt={artifact.label || `${artifact.kind} del job ${video.id}`}
-                                                        className="aspect-video w-full object-cover"
-                                                    />
+                                                    <div className="relative aspect-video w-full">
+                                                        <Image
+                                                            src={artifactUrls[artifact.id]}
+                                                            alt={artifact.label || `${artifact.kind} del job ${video.id}`}
+                                                            fill
+                                                            unoptimized
+                                                            sizes="(max-width: 640px) 50vw, 33vw"
+                                                            className="object-cover"
+                                                        />
+                                                    </div>
                                                 ) : (
                                                     <div className="flex aspect-video items-center justify-center text-[9px] text-white/35">Sin vista previa</div>
                                                 )}
@@ -988,6 +1019,32 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                                                     {artifact.protected && <span className="shrink-0 text-emerald-300">Protegida</span>}
                                                 </figcaption>
                                             </figure>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {generatedOutputs.length > 0 && (
+                                <div className="p-4 rounded-2xl bg-black/40 border border-[#25f4ee]/20 flex flex-col gap-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-[10px] font-bold text-[#25f4ee] uppercase tracking-widest">Salidas seleccionadas</span>
+                                        <span className="text-[9px] text-white/35">{generatedOutputs.length} validadas</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {generatedOutputs.map((output) => (
+                                            <a
+                                                key={output.id}
+                                                href={generatedOutputUrls[output.id] || '#'}
+                                                download
+                                                aria-disabled={!generatedOutputUrls[output.id]}
+                                                className={`rounded-xl border px-3 py-2 text-[9px] transition ${generatedOutputUrls[output.id] ? 'border-[#25f4ee]/25 bg-[#25f4ee]/5 text-white/80 hover:bg-[#25f4ee]/10' : 'pointer-events-none border-white/5 text-white/30'}`}
+                                            >
+                                                <span className="flex items-center justify-between gap-2">
+                                                    <span className="font-black uppercase tracking-wider">{output.format}</span>
+                                                    <span className={output.validated ? 'text-emerald-300' : 'text-amber-300'}>{output.validated ? 'OK' : 'Revisar'}</span>
+                                                </span>
+                                                <span className="mt-1 block truncate text-white/45">{output.label}</span>
+                                            </a>
                                         ))}
                                     </div>
                                 </div>

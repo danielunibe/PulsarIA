@@ -1,10 +1,10 @@
 ﻿# Pulsaria — Auditoría AAA Completa
-> Revisado: **2026-09-12** | Estabilización y certificación local ejecutadas ✅  
+> Revisado: **2026-09-13** | Estabilización y certificación local ejecutadas ✅
 > Esta auditoría conserva los hallazgos históricos de 2026-09-06, pero el estado vigente es el cierre de estabilización documentado en la sección siguiente.
 
 ---
 
-## Cierre de estabilización — 2026-09-12
+## Cierre de estabilización — 2026-09-13
 
 ### Resultado ejecutivo
 
@@ -13,15 +13,17 @@
 
 | Gate | Estado | Evidencia actual |
 |---|---|---|
-| Frontend | **PASS** | `npm run lint`, `npm run typecheck` y `npm run build` sin errores; export estático Next 15.5.25: 129 kB / 241 kB first load |
-| Python portable y contratos | **PASS** | `npm run test:python`: 18 pruebas, 0 fallos, 1 skip live intencional sin URL |
-| Rust | **PASS** | `cargo check`, `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test`: 34/34 pruebas (LLM local, storage, migración y loopback incluidos) |
-| Bundle de recursos | **PASS** | Manifiesto reproducible 56/56; Python, workers canónicos, ONNX, Whisper tiny, FFmpeg, FFprobe y licencia presentes y hasheados |
+| Frontend | **PASS** | `npm run lint`, `npm run typecheck` y `npm run build` sin errores; export estático Next 15.5.25: 133 kB / 245 kB first load |
+| Python portable y contratos | **PASS** | `npm run test:python`: 26 pruebas, 0 fallos, 1 skip live intencional sin URL; incluye transcript vacío, duración desconocida, FFmpeg/FFprobe y formatos de salida |
+| Rust | **PASS** | `cargo check`, `cargo fmt -- --check`, `cargo clippy --all-targets -- -D warnings` y `cargo test`: 48/48 pruebas (LLM local, Gemini nativo, reconciliación de storage, undo seguro, migración, cuota y loopback incluidos) |
+| Bundle de recursos | **PASS** | Manifiesto reproducible 51/51; Python, workers canónicos, ONNX, Whisper tiny, FFmpeg, FFprobe y licencia presentes y hasheados |
 | Auditoría de dependencias | **PARTIAL** | `npm audit --omit=dev`: 2 hallazgos de producción (1 moderado en Next y 1 alto en PostCSS anidado); `fixAvailable` requiere Next 16.3.5 |
-| Instaladores | **PASS QA** | NSIS `pulsaria_0.1.0_x64-setup.exe` y MSI `pulsaria_0.1.0_x64_en-US.msi` reconstruidos por `tauri build --debug`; hashes vigentes abajo |
-| Instalación NSIS aislada | **PASS** | NSIS vigente instalado silenciosamente en temporal: recursos 8/8, manifest 56/56, `/health` antes/después del reinicio y desinstalación con código 0 |
-| Pipeline live | **PASS** | `verify-installed-bundle.ps1 -Configuration debug -RunLive` contra NSIS `B19946…`: ingest `job_id=1`, estado `complete`, progreso 100, MP4 2,953,029 bytes, MP3 60,936 bytes, análisis visual e instructivo presentes y job visible tras reinicio |
-| API empaquetada | **PASS parcial** | `/health` 200 antes/después del reinicio y `/api/v1/ingest` completó un job live en NSIS `B19946…`; deduplicación negativa/positiva y búsqueda posterior requieren escenarios adicionales |
+| Instaladores | **PASS QA / MSI bloqueado externamente** | NSIS `Pulsaria_0.1.0_x64-setup.exe` (583,391,425 bytes, SHA-256 `D69B690811B71579018FDCE980379E2707397DF6BBB688C25288017A8D0AE44E`) y MSI `Pulsaria_0.1.0_x64_en-US.msi` (710,634,201 bytes, SHA-256 `CFB8C59909B6EF8D0A012492109D1FD38A7C75CD3AFF0599348887909297F956`) reconstruidos por `tauri build --debug` con WebView2 offline; NSIS smoke PASS y MSI requiere host elevado por `perMachine` |
+| Instalación NSIS aislada | **PASS** | NSIS actual instalado silenciosamente en temporal: recursos 8/8, manifest 51/51, `/health` antes/después del reinicio, `%APPDATA%` canónico con `library.db`, `PATH` vacío, overrides externos vacíos, staging sin residuos, desinstalación 0 y limpieza temporal correcta |
+| Instalación MSI aislada | **BLOCKED_EXTERNAL** | `verify-installed-bundle.ps1 -Bundle msi -Configuration debug` llega a `msiexec`, pero Windows devuelve 1603/Error 1925 porque el paquete es `perMachine` y este host no tiene elevación administrativa; no se oculta como PASS |
+| Pipeline live | **PASS** | `verify-installed-bundle.ps1 -Configuration debug -RunLive` contra NSIS `D69B6908…`: ingest `job_id=1`, estado `complete`, progreso 100, MP4 2,953,029 bytes, MP3 60,936 bytes, `text.txt` vacío válido, análisis visual e instructivo presentes, staging limpio y job visible tras reinicio |
+| API empaquetada | **PASS parcial** | `/health` 200 antes/después del reinicio y `/api/v1/ingest` completó un job live en NSIS `D69B6908…`; deduplicación, URL inválida y shapes de búsqueda pasaron; la muestra no produjo texto reconocible |
+| Contrato Gemini | **PASS local condicionado** | `generate_gemini_response` por IPC nativo; tests de clave ausente, header, prompt vacío/excesivo, respuesta vacía, HTTP, timeout y redacción de clave; llamada real requiere clave autorizada |
 | UI manual | **PASS parcial** | Onboarding revisado en 1280×800, 860×640, 520×720 y 360×720; composición abierta a pantalla completa de una columna sin caja, aurora compartida desenfocada, slider, cambio de modelo, foco por teclado y estado de éxito comprobados en el preview |
 | Firma / updater público | **BLOCKED_EXTERNAL** | updater desactivado de forma segura hasta contar con endpoint publicado, clave pública Tauri y secretos de firma externos |
 | Aceptación visual nativa instalada | **BLOCKED_EXTERNAL** | El host de automatización no expuso la ventana nativa (`apps: []`); sí se verificó el proceso y su API desde el bundle, pero falta la captura asistida en el equipo objetivo |
@@ -45,21 +47,25 @@
 - La migración de SQLite quedó en esquema v6 con backup previo, rutas durable para transcripts, artifacts, métricas de interés y estado `local|online|unavailable`. La cuota mide video/audio/staging/cachés reales; la purga solo considera medios online no protegidos, exige selección y confirmación, mueve a papelera interna y deja transcript, segmentos, embeddings, metadata y artifacts intactos.
 - El pipeline usa `.pulsaria/staging` para trabajos incompletos y `media/<job_id>` para medios finalizados. Conserva un poster y hasta cinco keyframes deterministas; las capturas manuales se guardan como JPEG protegido, con límite de 10 por job y 2 MiB por captura.
 - La persistencia de resultados de workers ahora es atómica; el scheduler excluye jobs con claim activo; las sincronizaciones de colecciones vacías/parciales registran fallo y backoff; el estado de readiness del gateway se expone en Salud; los embeddings requieren 384 dimensiones finitas; y el pool de workers tiene límites configurables.
-- La integración de IA generativa usa `generate_local_response` por Tauri IPC y un modelo GGUF verificado; no lee claves cloud ni envía fragmentos a un proveedor remoto. El cliente aplica límites de contexto/tokens, timeout y errores accionables sin registrar el contenido.
+- La integración de IA local usa `generate_local_response` por Tauri IPC y un modelo GGUF verificado. La síntesis Gemini es un contrato separado, opcional y manual mediante `generate_gemini_response`; la UI advierte que los fragmentos seleccionados pueden enviarse a Google. Rust lee la clave únicamente desde `PULSAR_GOOGLE_API_KEY`/`GOOGLE_API_KEY`, no la persiste ni la registra, y el navegador sin shell nativo queda rechazado.
 - El contrato del LLM local cubre preparación bajo demanda, descarga reanudable, verificación SHA-256, sidecar loopback y rechazo desde navegador sin shell nativo.
 - `npm run verify:frontend-secrets` inspecciona `app`, `components`, `hooks`, `lib`, `out` y `.next` y bloquea credenciales cloud, endpoints remotos y patrones `AIza...`.
 - El updater ahora tiene un contrato único en `hooks/use-updater.ts` con comprobación manual, confirmación antes de instalar, progreso y estados tipados; `@tauri-apps/plugin-updater` quedó fijado a 2.11.0 y el capability expone solo check/download-and-install. La configuración base permanece inactiva hasta inyectar una clave pública válida y secretos externos.
+- La configuración nativa ahora usa argumentos IPC nombrados para `save_app_settings`, y la escritura canónica de ajustes reemplaza archivos existentes de forma compatible con Windows conservando un backup temporal si la sustitución falla. El autostart es opt-in para instalaciones nuevas.
+- Los exports de texto vacíos se consideran válidos cuando una fuente no contiene voz; video/audio siguen fallando cerrado si FFmpeg produce un archivo vacío. El purge de medios cuenta y mueve solo video/audio, preservando outputs de conocimiento como `txt/srt/vtt/json`.
+- El arranque y `repair_library` reconcilian tamaños y referencias de artifacts/exports sin borrar archivos válidos ni conocimiento; las referencias obsoletas se retiran de SQLite y el undo de purga mueve archivos de forma exclusiva con reversión física si falla la transacción.
 - Se retiró el comando IPC antiguo `check_for_updates`, se añadió `scripts/verify-release-artifacts.ps1`, se generó el runbook `docs/RELEASE_PUBLICA.md` y el workflow `.github/workflows/release.yml` queda preparado para Environment `release`, firma Tauri, Authenticode, `latest.json`, publicación y limpieza efímera.
 - El gateway valida `PULSAR_API_HOST` antes de enlazar y rechaza cualquier valor que no sea `127.0.0.1`; `scripts/verify-api-loopback.ps1` convierte esa política en un gate ejecutable. No se habilita exposición LAN ni IPv6 externo.
 
-### Evidencia adicional de instalación limpia — 2026-09-12
+### Evidencia adicional de instalación limpia — 2026-09-13
 
-- Los artefactos vigentes quedaron identificados por hash SHA-256: NSIS `440,556,589` bytes (`B19946BC6ED263610B562A9C1E506AF06EE209F59E97AAC872225FFAC9AE68BF`) y MSI `563,684,455` bytes (`B0895F597D6C7F16899DF6354D46CE832DD0277C026750A77E00F64F82F4E47D`).
-- El NSIS vigente se ejecutó silenciosamente en un directorio temporal aislado y produjo `pulsaria.exe`, desinstalador, runtime Python, workers y modelos ONNX/Whisper en sus rutas canónicas. El manifest instalado validó 56/56 archivos, incluidos FFmpeg, FFprobe y licencia.
-- El ejecutable instalado arrancó con `PULSAR_DATA_DIR` y `PULSAR_DOWNLOAD_DIR` temporales. `/health` respondió `ok` antes y después de reiniciar; la instalación y desinstalación devolvieron código 0 y la limpieza temporal terminó en `true`.
-- El smoke live vigente sí se repitió contra NSIS `B19946…` usando la URL pública de prueba configurada en el script. El job `1` terminó `complete` al 100%, generó MP4 de 2,953,029 bytes y MP3 de 60,936 bytes, conservó análisis visual/instructivo y siguió visible tras reiniciar la aplicación. La prueba no equivale a una release firmada.
+- Los artefactos actuales de esta ronda quedaron identificados por hash SHA-256: NSIS `583,391,425` bytes (`D69B690811B71579018FDCE980379E2707397DF6BBB688C25288017A8D0AE44E`) y MSI `710,634,201` bytes (`CFB8C59909B6EF8D0A012492109D1FD38A7C75CD3AFF0599348887909297F956`). El NSIS incluye el instalador offline de WebView2.
+- El NSIS actual se ejecutó silenciosamente en un directorio temporal aislado y produjo `Pulsaria.exe`, desinstalador, runtime Python, workers y modelos ONNX/Whisper en sus rutas canónicas. El manifest instalado validó 51/51 registros y la comprobación individual de recursos pasó 8/8, incluidos FFmpeg, FFprobe y licencia.
+- El ejecutable instalado arrancó sin `PULSAR_DATA_DIR`, con `%APPDATA%` temporal, `PULSAR_DOWNLOAD_DIR` temporal, `PATH` vacío y sin overrides de runtime. `/health` respondió `ok` antes y después de reiniciar; `library.db` apareció bajo `%APPDATA%\Pulsar Eventide`, la instalación y desinstalación devolvieron código 0 y la limpieza temporal terminó en `true`.
+- El smoke live vigente se repitió contra NSIS `D69B6908…` usando la URL pública de prueba configurada en el script. El job `1` terminó `complete` al 100%, generó MP4 de 2,953,029 bytes, MP3 de 60,936 bytes y `text.txt` de 0 bytes como exportación válida, conservó análisis visual/instructivo, dejó el staging limpio y siguió visible tras reiniciar la aplicación. La prueba no equivale a una release firmada.
 - `npm audit --omit=dev` sigue devolviendo 2 vulnerabilidades de producción: una moderada en Next y una alta en PostCSS anidado; el fix disponible exige Next 16.3.5 y se mantiene reservado para una migración aislada.
-- El smoke final del bundle vigente con hash NSIS `B19946BC6ED263610B562A9C1E506AF06EE209F59E97AAC872225FFAC9AE68BF` terminó con instalación 0, manifest/recursos 56/56, health/restart `ok`, ingest live `job_id=1` en estado `complete`, MP4 de 2,953,029 bytes, MP3 de 60,936 bytes, análisis visual/instructivo presentes, desinstalación 0 y limpieza temporal correcta.
+- El smoke final del bundle vigente con hash NSIS `D69B690811B71579018FDCE980379E2707397DF6BBB688C25288017A8D0AE44E` terminó con instalación 0, WebView2 offline disponible en el instalador, manifest 51/51, recursos 8/8, health/restart `ok`, ingest live `job_id=1` en estado `complete`, MP4 de 2,953,029 bytes, MP3 de 60,936 bytes, `text.txt` vacío válido, análisis visual/instructivo presentes, staging limpio, dedupe `existing`, URL inválida HTTP 400, búsqueda con shape válido, desinstalación 0 y limpieza temporal correcta.
+- La prueba adicional de aislamiento del instalador confirmó `usesAppDataFallback=true`, `pathCleared=true` y `externalRuntimeOverridesCleared=true`; no se usó una dependencia global de PATH para aparentar un bundle sano.
 - La aceptación visual nativa no pudo ejecutarse en este host porque el automatizador no expone aplicaciones Windows Tauri (`apps: []`); el proceso y la API instalada sí fueron verificados.
 - La prueba es reproducible con `npm run verify:installed`; para repetir también el flujo live se usa `pwsh -File scripts/verify-installed-bundle.ps1 -RunLive` con una URL autorizada/accesible.
 
@@ -83,7 +89,7 @@ Cada hallazgo incluye:
 
 ## Estado histórico de la auditoría inicial — no sustituye el cierre vigente
 
-La tabla siguiente conserva la fotografía de la auditoría original para trazabilidad de los hallazgos H-01 a H-18. El resultado vigente está únicamente en **Cierre de estabilización — 2026-09-12** al inicio de este documento; no interpretar esta tabla histórica como un backlog sin verificar.
+La tabla siguiente conserva la fotografía de la auditoría original para trazabilidad de los hallazgos H-01 a H-18. El resultado vigente está únicamente en **Cierre de estabilización — 2026-09-13** al inicio de este documento; no interpretar esta tabla histórica como un backlog sin verificar.
 
 | Capa | Estado | Evidencia |
 |---|---|---|

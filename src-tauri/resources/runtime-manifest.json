@@ -268,8 +268,8 @@
                                              "sourcePath":  "python-workers/events.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  3306,
-                                             "sha256":  "5D59708F3F44EB68F1B7426A5649FB382EA03B2CF5DD2975C375FB459AD1D185"
+                                             "sizeBytes":  3427,
+                                             "sha256":  "507EEF9AF8E10A6BC7DC11A67CE8900A353FFB0C31195C39FD2005C78CFD4101"
                                          },
                                          {
                                              "path":  "python-workers/export_onnx.py",
@@ -292,8 +292,8 @@
                                              "sourcePath":  "python-workers/main.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  12332,
-                                             "sha256":  "02ABD858B934E520D9C92ED9C1C1AB5253DF3001071FC2390581A9D57DEC158B"
+                                             "sizeBytes":  13157,
+                                             "sha256":  "751BBC7CFCEB2D23154CC8CBC65A5BDCF2ED8F2871241DF0A75880C54170F2C9"
                                          },
                                          {
                                              "path":  "python-workers/models.py",
@@ -302,6 +302,14 @@
                                              "status":  "present",
                                              "sizeBytes":  1639,
                                              "sha256":  "6A50E442993203D2E42FB085A6E426B3088171979600B52BAD15C5BCB35EEF6D"
+                                         },
+                                         {
+                                             "path":  "python-workers/output_generator.py",
+                                             "sourcePath":  "python-workers/output_generator.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  8087,
+                                             "sha256":  "F30C1548042FC0271A68D47C48687D1225E3F3B4A0193074C3FA38CC95264049"
                                          },
                                          {
                                              "path":  "python-workers/prepare_whisper_model.py",
@@ -316,8 +324,8 @@
                                              "sourcePath":  "python-workers/transcriber.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  15669,
-                                             "sha256":  "A9CFAC75210F77CCC37171DA92085F410FF9AE2F380E79661462E5E30B213658"
+                                             "sizeBytes":  15962,
+                                             "sha256":  "CDF030E44C2918C1C431B595681ED96F4F6BE8CE4DC6FCF181DE75A9533269E0"
                                          },
                                          {
                                              "path":  "python-workers/visual_analyzer.py",

@@ -79,6 +79,42 @@ class MultimediaDependencyTests(unittest.TestCase):
             emit_error.assert_called_once()
             self.assertIn("FFmpeg no está disponible", emit_error.call_args.args[0])
 
+    def test_main_probes_duration_when_provider_returns_zero(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pulsaria-main-duration-") as directory:
+            root = Path(directory)
+            video = root / "video.mp4"
+            audio = root / "audio.mp3"
+            video.write_bytes(b"video")
+            audio.write_bytes(b"audio")
+            observed: list[object] = []
+
+            def fake_analyze(**kwargs):
+                observed.append(kwargs["duration_seconds"])
+                return {"instructional_guide": "", "frames": []}
+
+            with patch.object(main, "processing_base_dir", return_value=root):
+                with patch.object(main, "multimedia_preflight", return_value={"ffmpeg": "ffmpeg", "ffprobe": "ffprobe"}):
+                    with patch.object(main, "emit_event"):
+                        with patch.object(
+                            main,
+                            "extract_metadata",
+                            return_value={"title": "Sin duración", "duration": 0},
+                        ):
+                            with patch.object(main, "download_video", return_value=str(video)):
+                                with patch.object(main, "extract_audio", return_value=str(audio)):
+                                    with patch.object(
+                                        main,
+                                        "transcribe_audio",
+                                        return_value={"text": "", "segments": []},
+                                    ):
+                                        with patch.object(main, "generate_outputs", return_value=[]):
+                                            with patch.object(main, "analyze_video", side_effect=fake_analyze):
+                                                with patch.object(main, "emit_error") as emit_error:
+                                                    main.process_single_job(18, "https://example.invalid/video")
+
+            self.assertEqual(observed, [None])
+            emit_error.assert_not_called()
+
 
 class DurableVisualArtifactTests(unittest.TestCase):
     def test_visual_analysis_preserves_deterministic_poster_and_at_most_five_keyframes(self) -> None:
@@ -244,6 +280,26 @@ class DurableTranscriptTests(unittest.TestCase):
             self.assertTrue(Path(result["transcript_path"]).is_file())
             self.assertTrue(Path(result["legacy_transcript_path"]).is_file())
             self.assertEqual(Path(result["transcript_path"]).read_text(encoding="utf-8"), "")
+
+    def test_standalone_worker_uses_canonical_app_data_and_honors_legacy_root(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pulsaria-app-data-contract-") as directory:
+            base = Path(directory)
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(base)}, clear=True):
+                self.assertEqual(
+                    transcriber._default_transcripts_root(base / "project"),
+                    base / "Pulsar Eventide" / "transcripts",
+                )
+                self.assertEqual(
+                    transcriber._writable_model_cache(base / "project"),
+                    base / "Pulsar Eventide" / "whisper-models",
+                )
+
+            (base / "Pulsaria").mkdir()
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(base)}, clear=True):
+                self.assertEqual(
+                    transcriber._default_transcripts_root(base / "project"),
+                    base / "Pulsaria" / "transcripts",
+                )
 
 
 if __name__ == "__main__":

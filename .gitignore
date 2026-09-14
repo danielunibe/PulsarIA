@@ -57,6 +57,11 @@ yt_err.txt
 interactive-inventory-cycle1.txt
 .native-smoke*/
 
+# Windows/editor artifacts that must never enter the product source tree.
+desktop.ini
+folder.ico
+Imagen de Codex 6 sept 2026, 08_35_13 p.m..png
+
 # Generated runtime staging. The approved runtime is prepared externally and
 # verified by scripts/prepare-runtime.ps1; it is never committed as source.
 src-tauri/resources/*

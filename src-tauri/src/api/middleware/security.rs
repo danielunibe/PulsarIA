@@ -4,7 +4,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use metrics::counter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -26,6 +26,7 @@ pub struct Claims {
 /// Maximum number of IP buckets retained in memory.
 /// Acts as a safety cap against memory exhaustion from IP spoofing.
 const MAX_BUCKETS: usize = 10_000;
+pub const MAX_URL_LENGTH: usize = 2_048;
 
 /// Buckets older than this are lazily evicted on the next check_ip call.
 const BUCKET_TTL: Duration = Duration::from_secs(300); // 5 minutes
@@ -88,6 +89,42 @@ pub struct SecurityConfig {
     pub rate_limiter: Arc<RateLimiter>,
 }
 
+pub fn create_session_token(secret: &str) -> Result<String, String> {
+    let exp = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| format!("system clock before unix epoch: {error}"))?
+        + Duration::from_secs(24 * 60 * 60))
+    .as_secs() as usize;
+    encode(
+        &Header::new(Algorithm::HS256),
+        &Claims {
+            sub: "pulsaria-desktop".into(),
+            exp,
+            role: "desktop".into(),
+        },
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(|error| format!("could not issue API session token: {error}"))
+}
+
+pub fn validate_session_token(token: &str, secret: &str) -> Result<Claims, String> {
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::new(Algorithm::HS256),
+    )
+    .map(|token| token.claims)
+    .map_err(|error| format!("JWT Authentication failed: {error}"))
+}
+
+fn bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
+    headers
+        .get("Authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|value| !value.trim().is_empty())
+}
+
 pub async fn jwt_rate_limit_middleware(
     State(security_state): State<Arc<SecurityConfig>>,
     req: Request<axum::body::Body>,
@@ -122,41 +159,21 @@ pub async fn jwt_rate_limit_middleware(
     let is_public = path == "/health" || path == "/api/v1/health";
 
     // 3. JWT auth for protected endpoints.
-    // SECURITY NOTE: This server binds to 127.0.0.1 only (loopback).
-    // The desktop frontend doesn't carry JWT tokens, so all API endpoints
-    // are effectively loopback-only. If this server is ever exposed beyond
-    // loopback, JWT enforcement MUST be enabled here.
     if is_public {
         return Ok(next.run(req).await);
     }
 
-    // For loopback desktop app: allow all requests from localhost.
-    // If we wanted to enforce JWT on a network-exposed server:
-    let auth_header = req
-        .headers()
-        .get("Authorization")
-        .and_then(|h| h.to_str().ok());
-    if let Some(auth_header) = auth_header {
-        if let Some(token) = auth_header.strip_prefix("Bearer ") {
-            let validation = Validation::new(Algorithm::HS256);
-            if let Err(e) = decode::<Claims>(
-                token,
-                &DecodingKey::from_secret(security_state.jwt_secret.as_bytes()),
-                &validation,
-            ) {
-                tracing::warn!("JWT Authentication failed: {}", e);
-                counter!("auth_failures_total", "reason" => "invalid_token").increment(1);
-                return Err(StatusCode::UNAUTHORIZED);
-            }
-            return Ok(next.run(req).await);
+    if let Some(token) = bearer_token(req.headers()) {
+        if let Err(error) = validate_session_token(token, &security_state.jwt_secret) {
+            tracing::warn!("{}", error);
+            counter!("auth_failures_total", "reason" => "invalid_token").increment(1);
+            return Err(StatusCode::UNAUTHORIZED);
         }
+        return Ok(next.run(req).await);
     }
 
-    // No JWT token — for loopback desktop app, this is acceptable.
-    // The rate limiter provides the primary protection layer.
     counter!("auth_failures_total", "reason" => "missing_token").increment(1);
-    // Accept request on loopback (desktop app has no JWT infrastructure)
-    Ok(next.run(req).await)
+    Err(StatusCode::UNAUTHORIZED)
 }
 
 pub async fn jwt_auth_middleware(
@@ -164,24 +181,13 @@ pub async fn jwt_auth_middleware(
     req: Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let auth_header = req
-        .headers()
-        .get("Authorization")
-        .and_then(|h| h.to_str().ok());
-    if let Some(auth_header) = auth_header {
-        if let Some(token) = auth_header.strip_prefix("Bearer ") {
-            let validation = Validation::new(Algorithm::HS256);
-            if let Err(e) = decode::<Claims>(
-                token,
-                &DecodingKey::from_secret(security_state.jwt_secret.as_bytes()),
-                &validation,
-            ) {
-                tracing::warn!("JWT Authentication failed: {}", e);
-                counter!("auth_failures_total", "reason" => "invalid_token").increment(1);
-                return Err(StatusCode::UNAUTHORIZED);
-            }
-            return Ok(next.run(req).await);
+    if let Some(token) = bearer_token(req.headers()) {
+        if let Err(error) = validate_session_token(token, &security_state.jwt_secret) {
+            tracing::warn!("{}", error);
+            counter!("auth_failures_total", "reason" => "invalid_token").increment(1);
+            return Err(StatusCode::UNAUTHORIZED);
         }
+        return Ok(next.run(req).await);
     }
     counter!("auth_failures_total", "reason" => "missing_token").increment(1);
     Err(StatusCode::UNAUTHORIZED)
@@ -189,11 +195,27 @@ pub async fn jwt_auth_middleware(
 
 // 3. Simple URL Sandbox Validator
 pub fn is_valid_sandbox_url(url: &str) -> bool {
+    validate_sandbox_url(url).is_ok()
+}
+
+/// Canonical URL contract shared by the REST gateway, Tauri IPC and worker
+/// collection expansion. Keeping the error categories here prevents the
+/// native and browser paths from accepting different inputs.
+pub fn validate_sandbox_url(url: &str) -> Result<(), String> {
+    if url.trim().is_empty() {
+        return Err("La URL está vacía".to_string());
+    }
+    if url.len() > MAX_URL_LENGTH {
+        return Err(format!(
+            "La URL supera el límite de {} caracteres",
+            MAX_URL_LENGTH
+        ));
+    }
     let Some((scheme, authority_and_path)) = url.split_once("://") else {
-        return false;
+        return Err("La URL está malformada; usa una URL HTTPS de TikTok".to_string());
     };
     if !scheme.eq_ignore_ascii_case("https") {
-        return false;
+        return Err("La URL debe usar HTTPS".to_string());
     }
 
     let authority = authority_and_path
@@ -203,7 +225,7 @@ pub fn is_valid_sandbox_url(url: &str) -> bool {
     // Userinfo is not needed for TikTok and can cause credentials to be
     // forwarded to the extractor. Reject it before host classification.
     if authority.contains('@') {
-        return false;
+        return Err("La URL no puede contener credenciales embebidas".to_string());
     }
     let host = authority
         .rsplit('@')
@@ -214,12 +236,67 @@ pub fn is_valid_sandbox_url(url: &str) -> bool {
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    matches!(host.as_str(), "tiktok.com" | "www.tiktok.com") || host.ends_with(".tiktok.com")
+    if matches!(host.as_str(), "tiktok.com" | "www.tiktok.com") || host.ends_with(".tiktok.com") {
+        Ok(())
+    } else {
+        Err("Plataforma no soportada; el MVP acepta únicamente TikTok".to_string())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_valid_sandbox_url;
+    use super::{
+        bearer_token, create_session_token, is_valid_sandbox_url, validate_session_token, Claims,
+        MAX_URL_LENGTH,
+    };
+    use axum::http::{HeaderMap, HeaderValue};
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn issues_a_process_scoped_token_with_expiration() {
+        let token = create_session_token("test-secret").unwrap();
+        let claims = validate_session_token(&token, "test-secret").unwrap();
+        assert_eq!(claims.sub, "pulsaria-desktop");
+        assert_eq!(claims.role, "desktop");
+        assert!(claims.exp > 0);
+    }
+
+    #[test]
+    fn rejects_invalid_and_expired_session_tokens() {
+        assert!(validate_session_token("not-a-jwt", "test-secret").is_err());
+
+        let expired = (SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_sub(120)) as usize;
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &Claims {
+                sub: "pulsaria-desktop".into(),
+                exp: expired,
+                role: "desktop".into(),
+            },
+            &EncodingKey::from_secret(b"test-secret"),
+        )
+        .unwrap();
+        assert!(validate_session_token(&token, "test-secret").is_err());
+    }
+
+    #[test]
+    fn authorization_contract_distinguishes_missing_valid_and_malformed_tokens() {
+        let empty = HeaderMap::new();
+        assert!(bearer_token(&empty).is_none());
+
+        let mut valid = HeaderMap::new();
+        valid.insert("Authorization", HeaderValue::from_static("Bearer session"));
+        assert_eq!(bearer_token(&valid), Some("session"));
+
+        let mut malformed = HeaderMap::new();
+        malformed.insert("Authorization", HeaderValue::from_static("Basic session"));
+        assert!(bearer_token(&malformed).is_none());
+    }
 
     #[test]
     fn accepts_supported_https_hosts() {
@@ -245,5 +322,23 @@ mod tests {
         assert!(!is_valid_sandbox_url(
             "https://user:password@www.tiktok.com/@creator/video/1"
         ));
+    }
+
+    #[test]
+    fn reports_url_contract_categories() {
+        assert!(super::validate_sandbox_url("http://www.tiktok.com/video")
+            .unwrap_err()
+            .contains("HTTPS"));
+        assert!(
+            super::validate_sandbox_url("https://www.youtube.com/watch?v=1")
+                .unwrap_err()
+                .contains("no soportada")
+        );
+        assert!(super::validate_sandbox_url(&format!(
+            "https://www.tiktok.com/{}",
+            "x".repeat(MAX_URL_LENGTH)
+        ))
+        .unwrap_err()
+        .contains("2048"));
     }
 }

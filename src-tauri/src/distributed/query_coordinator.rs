@@ -220,4 +220,58 @@ impl QueryCoordinator {
     pub fn load_index(&self, path: &str) -> Result<(), String> {
         self.local_executor.load_index(path)
     }
+
+    pub fn rebuild_local_index(
+        &self,
+        rows: &[(i64, i64, Vec<f32>)],
+        temporary_base: &str,
+        canonical_base: &str,
+    ) -> Result<usize, String> {
+        let replacement = crate::infrastructure::vector_shards::VectorShardManager::new_empty(
+            self.local_executor.shard_count(),
+        );
+        for (internal_id, (job_id, chunk_index, embedding)) in rows.iter().enumerate() {
+            replacement.insert(internal_id, *job_id, *chunk_index, embedding)?;
+        }
+
+        replacement.snapshot_index(temporary_base)?;
+        let validated = crate::infrastructure::vector_shards::VectorShardManager::new_empty(
+            self.local_executor.shard_count(),
+        );
+        validated.load_index(temporary_base)?;
+        let count = validated.vector_count()?;
+        if count != rows.len() {
+            return Err(format!(
+                "HNSW rebuild count mismatch: database has {}, replacement has {}",
+                rows.len(),
+                count
+            ));
+        }
+
+        let mut expected_pairs = rows
+            .iter()
+            .map(|(job_id, chunk_index, _)| (*job_id, *chunk_index))
+            .collect::<Vec<_>>();
+        expected_pairs.sort_unstable();
+        let mut actual_pairs = validated.metadata_entries()?;
+        actual_pairs.sort_unstable();
+        if actual_pairs != expected_pairs {
+            return Err(format!(
+                "HNSW rebuild metadata mismatch: database has {} pairs, replacement has {}",
+                expected_pairs.len(),
+                actual_pairs.len()
+            ));
+        }
+
+        self.local_executor.replace_from(&validated)?;
+        // Move the complete staged set with rollback protection. A partially
+        // committed shard set is never left as the canonical snapshot.
+        self.local_executor
+            .commit_staged_snapshot(temporary_base, canonical_base)?;
+        Ok(count)
+    }
+
+    pub fn shard_count(&self) -> usize {
+        self.local_executor.shard_count()
+    }
 }

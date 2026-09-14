@@ -64,6 +64,39 @@ $signatures = @(Get-ChildItem -LiteralPath $resolvedArtifactRoot -Filter '*.sig'
 if ($signatures.Count -eq 0) { throw 'No updater signature (*.sig) artifacts were generated.' }
 if ($signatures | Where-Object { $_.Length -eq 0 }) { throw 'An updater signature file is empty.' }
 
+$checksumManifest = Get-ChildItem -LiteralPath $resolvedArtifactRoot -Filter 'SHA256SUMS.txt' -File -Recurse -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTimeUtc -Descending |
+    Select-Object -First 1
+if ($null -eq $checksumManifest) { throw 'SHA256SUMS.txt was not generated.' }
+
+$checksumEntries = @{}
+$checksumLines = Get-Content -LiteralPath $checksumManifest.FullName
+foreach ($line in $checksumLines) {
+    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    if ($line -notmatch '^([A-Fa-f0-9]{64})\s{2}(.+?)\s*$') {
+        throw "Invalid SHA256SUMS.txt entry: $line"
+    }
+    $checksumHash = $Matches[1].ToUpperInvariant()
+    $checksumName = $Matches[2].Trim()
+    if ($checksumEntries.ContainsKey($checksumName)) {
+        throw "SHA256SUMS.txt contains a duplicate entry for $checksumName."
+    }
+    $checksumEntries[$checksumName] = $checksumHash
+}
+if ($checksumEntries.Count -lt 5) {
+    throw 'SHA256SUMS.txt does not cover the complete public release asset set.'
+}
+foreach ($checksumName in $checksumEntries.Keys) {
+    $checksumCandidates = @(Get-ChildItem -LiteralPath $resolvedArtifactRoot -Filter $checksumName -File -Recurse -ErrorAction SilentlyContinue)
+    if ($checksumCandidates.Count -ne 1) {
+        throw "SHA256SUMS.txt entry does not resolve to exactly one artifact: $checksumName"
+    }
+    $actualHash = Get-Sha256Hex $checksumCandidates[0].FullName
+    if ($actualHash -ne $checksumEntries[$checksumName]) {
+        throw "SHA-256 mismatch for $checksumName."
+    }
+}
+
 try {
     $manifest = Get-Content -LiteralPath $latest.FullName -Raw | ConvertFrom-Json
 } catch {
@@ -123,6 +156,7 @@ foreach ($scanFile in $scanFiles) {
     nsis = @{ path = $nsis.FullName; sha256 = Get-Sha256Hex $nsis.FullName; bytes = $nsis.Length }
     msi = @{ path = $msi.FullName; sha256 = Get-Sha256Hex $msi.FullName; bytes = $msi.Length }
     latestJson = @{ path = $latest.FullName; version = [string]$manifest.version }
+    sha256Sums = @{ path = $checksumManifest.FullName; entries = $checksumEntries.Count }
     signatureCount = $signatures.Count
     authenticode = $authenticode
 } | ConvertTo-Json -Depth 6

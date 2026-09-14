@@ -3,7 +3,7 @@ use crate::application::search_service::SearchService;
 use crate::domain::ports::JobRepository;
 use axum::{
     extract::{Json, Path, State},
-    http::{HeaderValue, Method, StatusCode},
+    http::{HeaderName, HeaderValue, Method, StatusCode},
     middleware::{self},
     routing::{delete, get, post},
     Router,
@@ -185,18 +185,7 @@ async fn ingest_handler(
     State(state): State<ApiState>,
     Json(payload): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>, (StatusCode, String)> {
-    if payload.url.trim().is_empty() || payload.url.len() > 2_048 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Media URL must contain between 1 and 2048 characters".to_string(),
-        ));
-    }
-    if !crate::api::middleware::security::is_valid_sandbox_url(&payload.url) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Invalid Media URL in Sandbox".to_string(),
-        ));
-    }
+    validate_ingest_url(&payload.url).map_err(|error| (StatusCode::BAD_REQUEST, error))?;
 
     if is_collection_source(&payload.url) {
         let source_id = register_collection_source_for_api(&state.job_repo, &payload.url)?;
@@ -277,6 +266,10 @@ async fn ingest_handler(
         job_id,
         status: if is_new { "queued" } else { "existing" }.to_string(),
     }))
+}
+
+fn validate_ingest_url(url: &str) -> Result<(), String> {
+    crate::api::middleware::security::validate_sandbox_url(url)
 }
 
 async fn literal_search_handler(
@@ -628,15 +621,15 @@ pub async fn start_api_server(port: u16, state: ApiState) {
     // Configurar CORS para desarrollo Next.js y el servidor estático de producción.
     let cors = CorsLayer::new()
         .allow_origin([
-            "http://localhost:3000".parse::<HeaderValue>().unwrap(),
-            "http://127.0.0.1:3000".parse::<HeaderValue>().unwrap(),
-            "http://localhost:3344".parse::<HeaderValue>().unwrap(),
-            "http://127.0.0.1:3344".parse::<HeaderValue>().unwrap(),
+            HeaderValue::from_static("http://localhost:3000"),
+            HeaderValue::from_static("http://127.0.0.1:3000"),
+            HeaderValue::from_static("http://localhost:3344"),
+            HeaderValue::from_static("http://127.0.0.1:3344"),
         ])
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS, Method::DELETE])
         .allow_headers([
-            "content-type".parse().unwrap(),
-            "authorization".parse().unwrap(),
+            HeaderName::from_static("content-type"),
+            HeaderName::from_static("authorization"),
         ]);
 
     let write_routes = Router::new()
@@ -656,9 +649,8 @@ pub async fn start_api_server(port: u16, state: ApiState) {
         )
         .route("/api/v1/transcribe", post(transcribe_handler))
         .route("/api/v1/jobs/:job_id/retry", post(retry_job_handler))
-        // The desktop/browser UI has no login token. The API is bound to
-        // loopback, so use the same rate-limited optional-JWT policy as reads;
-        // a supplied token is still validated by the middleware.
+        // Every non-health route requires the process-scoped bearer token.
+        // Loopback limits exposure but is not an authentication substitute.
         .layer(middleware::from_fn_with_state(
             state.security.clone(),
             crate::api::middleware::security::jwt_rate_limit_middleware,
@@ -719,7 +711,8 @@ pub async fn start_api_server(port: u16, state: ApiState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_collection_source, validate_api_bind_host, API_BIND_HOST};
+    use super::{is_collection_source, validate_api_bind_host, validate_ingest_url, API_BIND_HOST};
+    use crate::api::middleware::security::MAX_URL_LENGTH;
 
     #[test]
     fn api_bind_contract_accepts_only_desktop_loopback() {
@@ -751,5 +744,26 @@ mod tests {
             "https://www.tiktok.com/@creator/video/123"
         ));
         assert!(!is_collection_source("https://www.youtube.com/watch?v=abc"));
+    }
+
+    #[test]
+    fn reports_distinct_tiktok_url_validation_failures() {
+        assert!(
+            validate_ingest_url("http://www.tiktok.com/@creator/video/1")
+                .unwrap_err()
+                .contains("HTTPS")
+        );
+        assert!(validate_ingest_url("not-a-url")
+            .unwrap_err()
+            .contains("malformada"));
+        assert!(validate_ingest_url("https://www.youtube.com/watch?v=abc")
+            .unwrap_err()
+            .contains("no soportada"));
+        assert!(validate_ingest_url(&format!(
+            "https://www.tiktok.com/@creator/{}",
+            "x".repeat(MAX_URL_LENGTH)
+        ))
+        .unwrap_err()
+        .contains("2048"));
     }
 }

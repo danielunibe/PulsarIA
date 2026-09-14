@@ -8,7 +8,7 @@ El contrato reproducible de recursos está en [`src-tauri/resources/runtime-mani
 
 Estado actual del checkout: **PASS** para el contrato fuente de recursos: `ffmpeg.exe`, `ffprobe.exe` y `FFMPEG-LICENSE.txt` están presentes y sus hashes se registran en el manifest. El gate no acepta como sustituto un ejecutable instalado en `PATH`, no descarga binarios y no copia ejecutables sin evidencia de redistribución/licencia. El instalador debe reconstruirse después de cualquier cambio en estos recursos; un bundle anterior al manifest se marca como bloqueado por el smoke instalado.
 
-El instalador se configuró para el usuario actual, por lo que la instalación estándar no requiere elevar privilegios. Un bundle válido contiene el frontend, el ejecutable Tauri, Python embebible 3.11.9, workers, Faster-Whisper, CTranslate2, yt-dlp, Pillow, los modelos ONNX/MiniLM, FFmpeg, FFprobe y la evidencia de licencia distribuida junto a ellos.
+El instalador se configuró para el usuario actual, por lo que la instalación estándar no requiere elevar privilegios. WebView2 se incluye mediante el instalador offline de Tauri: la instalación del bundle no necesita una descarga de Internet ni una dependencia global de Node.js, Rust, Python, FFmpeg o FFprobe. Un bundle válido contiene el frontend, el ejecutable Tauri, Python embebible 3.11.9, workers, Faster-Whisper, CTranslate2, yt-dlp, Pillow, los modelos ONNX/MiniLM, FFmpeg, FFprobe y la evidencia de licencia distribuida junto a ellos.
 
 ## Instalación
 
@@ -41,13 +41,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-installed-bun
 
 Ese smoke se detiene antes de iniciar la aplicación si los recursos no se pueden verificar. La prueba release equivalente debe ejecutarse en un host controlado y no debe reutilizar un perfil productivo.
 
+El MSI se conserva como artefacto secundario y requiere un host con privilegios
+de administrador porque su alcance es `perMachine`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-installed-bundle.ps1 -Bundle msi -Configuration debug
+```
+
+Si Windows devuelve `1603`/`Error 1925`, el resultado es un bloqueo del host
+por elevación, no una instalación validada. El smoke debe repetirse en un
+Windows x64 elevado antes de declarar el MSI aprobado.
+
 ## Primer uso
 
 En **Add Links**, pega un enlace de video TikTok autorizado o la fuente de una colección que el usuario pueda consultar. Pulsaria registra el job, expande colecciones cuando la fuente pública lo permite, descarga el material mediante yt-dlp, extrae audio, transcribe con Faster-Whisper, analiza keyframes, genera el instructivo audiovisual, crea embeddings locales y actualiza la biblioteca.
 
 En la cabecera se puede elegir explícitamente **Literal** para buscar palabras presentes en transcript, título o autor, o **Semántica** para buscar conceptos mediante embeddings ONNX/HNSW. Los resultados abren la ficha correcta y permiten consultar transcript, timestamps, instructivo, fuente original y exportación UNIB.
 
-La carpeta de Descargas del usuario es el destino inicial de los medios procesados y puede cambiarse desde **Settings**. La base SQLite, configuración y snapshots se guardan en `%APPDATA%\\Pulsaria`; los recursos de instalación son de solo lectura y no se usan como directorio de datos. Los jobs configurados como online-only pueden conservar el conocimiento y abrir la fuente original sin mantener el archivo local.
+La carpeta de Descargas del usuario es el destino inicial de los medios procesados y puede cambiarse desde **Settings**. En instalaciones nuevas, la base SQLite, configuración, transcripts durables y snapshots se guardan en `%APPDATA%\\Pulsar Eventide`; los recursos de instalación viven bajo la instalación y son de solo lectura. Las instalaciones anteriores que ya tengan `%APPDATA%\\Pulsaria` siguen usando esa carpeta para no ocultar la biblioteca existente. Los jobs configurados como online-only pueden conservar el conocimiento y abrir la fuente original sin mantener el archivo local.
 
 ## Cookies y fuentes restringidas
 
@@ -55,7 +66,7 @@ El uso de cookies del navegador es opcional y se selecciona por nombre de navega
 
 ## Diagnóstico local
 
-La aplicación inicia su gateway local en `127.0.0.1:8080`. Si la biblioteca no carga, revisa primero que el proceso de Pulsar esté activo y que `%APPDATA%\\Pulsaria` sea escribible. Si un job falla, la sección **Queue** conserva el mensaje de error y permite distinguir una falta de acceso remoto, una URL inválida o una dependencia del worker.
+La aplicación inicia su gateway local en `127.0.0.1:8080`. Si la biblioteca no carga, revisa primero que el proceso de Pulsar esté activo y que `%APPDATA%\\Pulsar Eventide` (o la carpeta legacy `%APPDATA%\\Pulsaria`) sea escribible. Si un job falla, la sección **Queue** conserva el mensaje de error y permite distinguir una falta de acceso remoto, una URL inválida o una dependencia del worker.
 
 El análisis visual base funciona con keyframes y estadísticas Pillow. OCR se marca como opcional cuando Tesseract no está presente; el paquete no presenta esa función como detección general de objetos.
 

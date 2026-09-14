@@ -36,6 +36,7 @@ from models import JobInput
 from events import emit_event, emit_error
 from downloader import download_video, extract_metadata, extract_playlist_videos
 from audio_extractor import extract_audio, resolve_ffmpeg_path, resolve_ffprobe_path
+from output_generator import generate_outputs
 from transcriber import transcribe_audio
 from visual_analyzer import analyze_video
 
@@ -153,6 +154,15 @@ def process_single_job(job_id: int, url: str) -> None:
             for key in ("transcript_path", "legacy_transcript_path")
             if isinstance(transcript_result, dict) and transcript_result.get(key)
         }
+        generated_artifacts = generate_outputs(
+            video_path=video_path,
+            audio_path=audio_path,
+            transcript=transcript_text,
+            segments=segments,
+            metadata=media_metadata,
+            formats=os.environ.get("PULSAR_FORMATS", '["mp4", "mp3", "txt"]'),
+            output_dir=Path(video_path).parent / "exports",
+        )
 
         emit_event(
             name="transcription_complete",
@@ -162,7 +172,8 @@ def process_single_job(job_id: int, url: str) -> None:
             metadata=media_metadata,
             message=json.dumps(transcript_paths),
             text=transcript_text,
-            segments=segments
+            segments=segments,
+            artifacts=generated_artifacts,
         )
 
         # ------------------- 4. VISUAL ANALYSIS PHASE -------------------
@@ -178,7 +189,10 @@ def process_single_job(job_id: int, url: str) -> None:
         try:
             visual_result = analyze_video(
                 video_path=video_path,
-                duration_seconds=media_metadata.get("duration"),
+                # Metadata providers may omit duration or return zero. Treat
+                # that as unknown so visual_analyzer can use the bundled
+                # ffprobe instead of silently sampling only timestamp 0.
+                duration_seconds=media_metadata.get("duration") or None,
                 transcript=transcript_text,
                 artifacts_dir=os.environ.get("PULSAR_ARTIFACTS_DIR") or str(base_dir),
                 job_id=job_id,
@@ -197,6 +211,7 @@ def process_single_job(job_id: int, url: str) -> None:
                 segments=segments,
                 visual_analysis=visual_analysis,
                 instructional_guide=instructional_guide,
+                artifacts=generated_artifacts,
             )
         except Exception as error:
             # La transcripción sigue siendo utilizable si OCR/Pillow/FFmpeg no
@@ -221,6 +236,7 @@ def process_single_job(job_id: int, url: str) -> None:
                 segments=segments,
                 visual_analysis=visual_analysis,
                 instructional_guide=instructional_guide,
+                artifacts=generated_artifacts,
             )
 
         # ------------------- 5. COMPLETION PHASE -------------------
@@ -234,6 +250,7 @@ def process_single_job(job_id: int, url: str) -> None:
             segments=segments,
             visual_analysis=visual_analysis,
             instructional_guide=instructional_guide,
+            artifacts=generated_artifacts,
         )
 
     except ValueError as e:

@@ -57,6 +57,10 @@ pub struct QueueService {
     circuit_breaker: Arc<CircuitBreaker>,
     worker_capacity: usize,
     idle_workers: Arc<tokio::sync::Mutex<Vec<PythonWorker>>>,
+    /// Serializes maintenance rebuilds with the moment a job is admitted.
+    /// The guard is intentionally held only while claiming a job or while
+    /// performing the complete rebuild, never while downloading media.
+    maintenance_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Clone)]
@@ -263,11 +267,17 @@ fn persist_worker_result(
         })
         .collect::<Result<Vec<_>, String>>()?;
 
-    let media_root = std::env::var_os("PULSAR_DOWNLOAD_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(storage::default_media_root);
+    let media_root = if job.download_dir.trim().is_empty() {
+        std::env::var_os("PULSAR_DOWNLOAD_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(storage::default_media_root)
+    } else {
+        PathBuf::from(&job.download_dir)
+    };
     let finalized = storage::finalize_job_media(&media_root, job.job_id, &result.transcript)
         .map_err(|error| format!("durable media finalization failed: {}", error))?;
+    let generated_exports = storage::promote_generated_exports(&media_root, job.job_id)
+        .map_err(|error| format!("generated output promotion failed: {}", error))?;
     // The Python worker writes automatic artifacts into the per-job staging
     // directory. Persist the result only after promotion so the database
     // never points at files that the next reconciliation is allowed to
@@ -420,7 +430,45 @@ fn persist_worker_result(
         Ok(())
     };
 
-    persist.map_err(|error| format!("worker result persistence failed: {}", error))
+    for artifact in &result.generated_artifacts {
+        let Some((_, path, size)) = generated_exports
+            .iter()
+            .find(|(format, _, _)| format == &artifact.format)
+        else {
+            return Err(format!(
+                "worker reported output {} but Rust could not promote it",
+                artifact.format
+            ));
+        };
+        if !artifact.validated || !path.is_file() {
+            return Err(format!(
+                "worker output {} did not pass validation",
+                artifact.format
+            ));
+        }
+        crate::db::register_generated_output(
+            &connection,
+            crate::db::GeneratedOutputInput {
+                job_id: job.job_id,
+                category: &artifact.category,
+                format: &artifact.format,
+                path: &path.to_string_lossy(),
+                size_bytes: *size,
+                validated: artifact.validated,
+                label: &artifact.label,
+            },
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    persist.map_err(|error| format!("worker result persistence failed: {}", error))?;
+    // A successful job has already promoted the video/audio and copied every
+    // durable knowledge artifact. Remove only its staging directory so audio
+    // intermediates and the adjacent compatibility transcript cannot consume
+    // quota or be mistaken for an incomplete job after restart.
+    crate::db::clear_staging_job(&connection, job.job_id, &storage::staging_root(&media_root))
+        .map_err(|error| format!("successful staging cleanup failed: {}", error))?;
+    Ok(())
 }
 
 fn persist_progress_metadata(
@@ -455,6 +503,18 @@ fn persist_progress_metadata(
 
 impl QueueService {
     pub fn new(job_repo: Arc<dyn JobRepository>, search_service: Arc<SearchService>) -> Self {
+        Self::new_with_maintenance_lock(
+            job_repo,
+            search_service,
+            Arc::new(tokio::sync::Mutex::new(())),
+        )
+    }
+
+    pub fn new_with_maintenance_lock(
+        job_repo: Arc<dyn JobRepository>,
+        search_service: Arc<SearchService>,
+        maintenance_lock: Arc<tokio::sync::Mutex<()>>,
+    ) -> Self {
         let (sender, mut receiver) = mpsc::channel::<JobMessage>(QUEUE_CAPACITY);
         let configured_worker_count = std::env::var("PULSAR_WORKER_COUNT")
             .ok()
@@ -515,6 +575,7 @@ impl QueueService {
             circuit_breaker,
             worker_capacity: worker_count,
             idle_workers: idle_workers_for_health,
+            maintenance_lock,
         }
     }
 
@@ -569,6 +630,7 @@ impl QueueService {
             // with a manual retry arriving between the active check and the
             // cleanup below.
             let claimed = {
+                let _maintenance_guard = self.maintenance_lock.lock().await;
                 let mut active_jobs = self.active_jobs.lock().await;
                 active_jobs.insert(job.id)
             };
@@ -702,6 +764,7 @@ impl QueueService {
         // decision and send complete so a concurrent retry cannot observe a
         // half-admitted job.
         let claimed = {
+            let _maintenance_guard = self.maintenance_lock.lock().await;
             let mut active_jobs = self.active_jobs.lock().await;
             active_jobs.insert(job_id)
         };
@@ -718,6 +781,43 @@ impl QueueService {
             persist_and_log_job_error(&self.job_repo, job_id, "error", error);
         }
         result
+    }
+
+    /// Rebuilds the vector index only while the queue admission gate is held.
+    /// This closes the race where a worker could be claimed after an external
+    /// active-job check but before the rebuild starts.
+    pub async fn begin_maintenance(&self) -> Result<tokio::sync::MutexGuard<'_, ()>, String> {
+        let guard = self.maintenance_lock.lock().await;
+        if !self.active_jobs.lock().await.is_empty() {
+            return Err(
+                "No se puede iniciar mantenimiento mientras hay trabajos activos".to_string(),
+            );
+        }
+        Ok(guard)
+    }
+
+    pub async fn rebuild_index_from_persisted_rows(
+        &self,
+        search_service: &SearchService,
+    ) -> Result<Option<usize>, String> {
+        let _maintenance_guard = self.maintenance_lock.lock().await;
+        if !self.active_jobs.lock().await.is_empty() {
+            return Ok(None);
+        }
+
+        let connection = self
+            .job_repo
+            .get_connection()
+            .map_err(|error| format!("Could not open database for index rebuild: {error}"))?;
+        let rows = {
+            let connection = connection
+                .lock()
+                .map_err(|_| "Database mutex poisoned".to_string())?;
+            crate::db::get_all_embedding_rows(&connection)
+                .map_err(|error| format!("Could not read embeddings for index rebuild: {error}"))?
+        };
+
+        search_service.rebuild_index(&rows).map(Some)
     }
 
     async fn enqueue_claimed(
@@ -740,6 +840,16 @@ impl QueueService {
         storage::ensure_capacity(&media_root)?;
 
         self.reserve_depth()?;
+        let formats =
+            std::env::var("PULSAR_FORMATS").unwrap_or_else(|_| "[\"mp4\",\"mp3\",\"txt\"]".into());
+        let download_dir = std::env::var("PULSAR_DOWNLOAD_DIR").unwrap_or_default();
+        let retention = std::env::var("PULSAR_DEFAULT_RETENTION").unwrap_or_else(|_| "keep".into());
+        let processing_quality =
+            std::env::var("PULSAR_PROCESSING_QUALITY").unwrap_or_else(|_| "78".into());
+        let whisper_model = std::env::var("WHISPER_MODEL").unwrap_or_else(|_| "tiny".into());
+        let whisper_device = std::env::var("WHISPER_DEVICE").unwrap_or_else(|_| "cpu".into());
+        let whisper_compute_type =
+            std::env::var("WHISPER_COMPUTE_TYPE").unwrap_or_else(|_| "int8".into());
         if let Err(error) = self
             .sender
             .send(JobMessage {
@@ -747,6 +857,13 @@ impl QueueService {
                 url,
                 attempt,
                 cookies_browser,
+                formats,
+                download_dir,
+                retention,
+                processing_quality,
+                whisper_model,
+                whisper_device,
+                whisper_compute_type,
             })
             .await
         {

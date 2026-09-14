@@ -74,12 +74,9 @@ use tokio::sync::Mutex;
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
-    commands::load_persisted_download_dir();
-    commands::load_persisted_cookie_browser();
-    commands::load_persisted_retention();
-    commands::load_persisted_formats();
-    commands::load_persisted_storage_settings();
-    let processing_settings = commands::load_persisted_processing_settings();
+    let initial_app_settings = commands::load_persisted_app_settings();
+    commands::apply_app_settings_environment(&initial_app_settings);
+    let processing_settings = commands::snapshot_processing_settings(&initial_app_settings);
     let prometheus_handle = crate::infrastructure::observability::init_observability();
 
     tokio::spawn(async move {
@@ -92,10 +89,55 @@ async fn main() {
     if let Err(error) = db::repair_library(&conn) {
         tracing::error!("Automatic library reconciliation failed: {}", error);
     }
-    let std_db = Arc::new(std::sync::Mutex::new(conn));
-    let job_repo = Arc::new(sqlite_repo::SqliteRepo::new(std_db.clone()));
-
+    let media_root = if initial_app_settings.download_dir.trim().is_empty() {
+        storage::default_media_root()
+    } else {
+        std::path::PathBuf::from(&initial_app_settings.download_dir)
+    };
+    if let Err(error) = db::reconcile_storage(&conn, &media_root) {
+        tracing::error!("Automatic storage reconciliation failed: {}", error);
+    }
     let model_dir = commands::resolve_model_dir();
+    match db::get_embedding_index_status(&conn, &model_dir) {
+        Ok(status) if status.stored_hash.is_none() => {
+            if let Err(error) = db::record_embedding_model(&conn, &status.current_hash) {
+                tracing::warn!("Could not record embedding model metadata: {}", error);
+            }
+        }
+        Ok(status) if status.stale => {
+            tracing::warn!(
+                "Embedding index is stale for model {}. Recompute embeddings before semantic search.",
+                status.model_id
+            );
+            let _ = db::insert_health_event(
+                &conn,
+                "embedding_index",
+                "warning",
+                "El modelo de embeddings cambió y el índice puede estar obsoleto",
+                Some("recompute_embeddings"),
+                Some("model_hash_mismatch"),
+            );
+        }
+        Ok(_) => {}
+        Err(error) => tracing::warn!("Could not inspect embedding model metadata: {}", error),
+    }
+    let std_db = Arc::new(std::sync::Mutex::new(conn));
+    let preflight = commands::get_runtime_preflight();
+    if !preflight.ready {
+        if let Ok(connection) = std_db.lock() {
+            if let Err(error) = db::insert_health_event(
+                &connection,
+                "runtime_preflight",
+                "error",
+                &preflight.message,
+                Some("repair_runtime_bundle"),
+                Some("missing_or_unusable_resource"),
+            ) {
+                tracing::error!("Could not persist runtime preflight failure: {}", error);
+            }
+        }
+    }
+    let job_repo = Arc::new(sqlite_repo::SqliteRepo::new(std_db.clone()));
 
     let start_load = std::time::Instant::now();
     let mut onnx_load_error = None;
@@ -137,14 +179,25 @@ async fn main() {
         std::env::var("RERANKER_ENABLED").unwrap_or_else(|_| "false".to_string()) == "true";
     let reranker = Arc::new(reranker::CrossEncoderReranker::new(reranker_enabled));
 
-    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1/".to_string());
-    let semantic_cache = Arc::new(semantic_cache::SemanticCache::new(&redis_url, 86400));
+    let semantic_cache = Arc::new(semantic_cache::SemanticCache::default_for_desktop(86400));
 
-    let search_config = commands::load_persisted_search_config();
+    let search_config = commands::SearchConfig {
+        min_score: initial_app_settings.min_score,
+        max_results: initial_app_settings.max_results,
+        similarity_metric: initial_app_settings.similarity_metric.clone(),
+        chunk_size: initial_app_settings.chunk_size,
+        chunk_overlap: initial_app_settings.chunk_overlap,
+    };
 
-    let is_distributed =
-        std::env::var("DISTRIBUTED_MODE").unwrap_or_else(|_| "false".to_string()) == "true";
-    let cluster_nodes = std::env::var("CLUSTER_NODES").unwrap_or_else(|_| "".to_string());
+    // The desktop MVP is always local-first. Remote scatter/gather is only
+    // available to an explicitly feature-gated distributed build.
+    let is_distributed = cfg!(feature = "distributed")
+        && std::env::var("DISTRIBUTED_MODE").unwrap_or_else(|_| "false".to_string()) == "true";
+    let cluster_nodes = if is_distributed {
+        std::env::var("CLUSTER_NODES").unwrap_or_else(|_| "".to_string())
+    } else {
+        String::new()
+    };
     let query_coordinator = Arc::new(query_coordinator::QueryCoordinator::new(
         cluster_nodes,
         vector_index.clone(),
@@ -166,9 +219,11 @@ async fn main() {
         semantic_cache.clone(),
     ));
 
-    let queue_service = Arc::new(queue_service::QueueService::new(
+    let maintenance_lock = Arc::new(tokio::sync::Mutex::new(()));
+    let queue_service = Arc::new(queue_service::QueueService::new_with_maintenance_lock(
         job_repo.clone(),
         search_service.clone(),
+        maintenance_lock,
     ));
     match queue_service.resume_pending_jobs().await {
         Ok(resumed) if resumed > 0 => {
@@ -184,6 +239,7 @@ async fn main() {
     }
     let reindex_pipeline = Arc::new(reindex_pipeline::ReindexPipeline::new(
         search_service.clone(),
+        queue_service.clone(),
     ));
     let reindex_clone = reindex_pipeline.clone();
     tokio::spawn(async move {
@@ -221,6 +277,8 @@ async fn main() {
         jwt_secret,
         rate_limiter,
     });
+    let api_session_token = security::create_session_token(&security_config.jwt_secret)
+        .expect("API session token must be issuable from the generated process secret");
     let api_runtime = api::ApiRuntimeState::default();
 
     let api_state = gateway::ApiState {
@@ -248,6 +306,7 @@ async fn main() {
 
     let collection_db = std_db.clone();
     let collection_queue = queue_service.clone();
+    let startup_app_settings = initial_app_settings.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -300,8 +359,12 @@ async fn main() {
                     }
                 })
                 .build(app)?;
-            if let Err(error) = app.autolaunch().enable() {
-                tracing::warn!("Could not enable Windows autostart: {}", error);
+            if startup_app_settings.autostart_enabled {
+                if let Err(error) = app.autolaunch().enable() {
+                    tracing::warn!("Could not enable Windows autostart: {}", error);
+                }
+            } else if let Err(error) = app.autolaunch().disable() {
+                tracing::warn!("Could not disable Windows autostart: {}", error);
             }
             if std::env::args().any(|argument| argument == "--background") {
                 if let Some(window) = app.get_webview_window("main") {
@@ -335,10 +398,12 @@ async fn main() {
             db: std_db.clone(),
             queue: queue_service.clone(),
             api_runtime: api_runtime.clone(),
+            api_session_token,
             onnx: onnx_arc,
             search: search_service.clone(),
             config: arc_config,
             metrics: arc_metrics,
+            app_settings: Arc::new(tokio::sync::RwLock::new(initial_app_settings.clone())),
             worker_config: Arc::new(tokio::sync::RwLock::new(WorkerConfig {
                 download_dir: std::env::var("PULSAR_DOWNLOAD_DIR").unwrap_or_default(),
                 cookies_browser: std::env::var("PULSAR_COOKIES_FROM_BROWSER").unwrap_or_default(),
@@ -378,8 +443,16 @@ async fn main() {
             commands::delete_collection_source,
             commands::sync_collection_source_now,
             commands::get_health_events,
+            commands::get_api_session_token,
             commands::get_runtime_health,
+            commands::get_legal_consent,
+            commands::save_legal_consent,
+            commands::get_app_settings,
+            commands::save_app_settings,
+            commands::get_autostart_status,
+            commands::set_autostart,
             commands::repair_library,
+            commands::reconcile_storage,
             commands::get_base_path,
             commands::search_literal_transcripts,
             commands::search_transcripts,
@@ -392,6 +465,7 @@ async fn main() {
             commands::get_system_metrics,
             commands::get_hardware_profile,
             commands::get_runtime_preflight,
+            commands::get_embedding_index_status,
             commands::get_storage_status,
             commands::recommend_storage_setup,
             commands::preview_media_purge,
@@ -401,6 +475,7 @@ async fn main() {
             commands::set_media_protection,
             commands::record_media_access,
             commands::get_job_artifacts,
+            commands::get_generated_outputs,
             commands::save_video_frame,
             commands::get_processing_settings,
             commands::set_processing_settings,
@@ -409,6 +484,7 @@ async fn main() {
             commands::prepare_whisper_model,
             commands::cancel_whisper_model_preparation,
             commands::rebuild_index,
+            commands::reindex_sqlite_indexes,
             commands::vacuum_db,
             commands::recompute_embeddings,
             commands::get_playlists,
