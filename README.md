@@ -12,8 +12,8 @@ palabras o por significado desde una biblioteca local.
 ## Descargar e instalar
 
 Puedes descargar directamente
-[`Pulsaria_0.1.0_x64-setup.exe`](https://github.com/danielunibe/PulsarIA/releases/download/v0.1.0-eval.2/Pulsaria_0.1.0_x64-setup.exe)
-o consultar la [release de evaluación completa](https://github.com/danielunibe/PulsarIA/releases/tag/v0.1.0-eval.2).
+[`Pulsaria_0.1.0_x64-setup.exe`](https://github.com/danielunibe/PulsarIA/releases/download/v0.1.0-eval.3/Pulsaria_0.1.0_x64-setup.exe)
+o consultar la [release de evaluación completa](https://github.com/danielunibe/PulsarIA/releases/tag/v0.1.0-eval.3).
 El instalador es para Windows x64 y no requiere instalar Node.js, Rust,
 Python, FFmpeg ni FFprobe por separado.
 

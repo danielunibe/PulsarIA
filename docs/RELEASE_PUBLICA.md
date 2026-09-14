@@ -9,7 +9,7 @@ privacidad y política de contenido antes de mostrar el dashboard.
 
 ## Estado de esta fase
 
-La release de evaluación `v0.1.0-eval.2` contiene los instaladores reconstruidos
+La release de evaluación `v0.1.0-eval.3` contiene los instaladores reconstruidos
 localmente después de corregir el arranque con bases SQLite existentes. Está
 marcada como pre-release y no activa el updater: el instalador aún no tiene
 firma Authenticode. La release estable no debe publicarse hasta completar los
@@ -18,7 +18,7 @@ gates externos descritos abajo.
 | Gate | Estado actual | Qué falta para marcarlo PASS |
 |---|---|---|
 | Frontend, Rust, Python y recursos fuente | PASS local | Manifest de 51 registros canónicos, FFmpeg/FFprobe y `FFMPEG-LICENSE.txt` verificados; el bundle debug final ya fue reconstruido |
-| Smoke del bundle instalado | PASS build + arranque Release / PARTIAL MSI | NSIS Release `Pulsaria_0.1.0_x64-setup.exe` (`C1B8683BA5D5137DB319B68D2F849FCF629EB9F6F19D1607D80D30FE0F7D90B8`, 580,906,561 bytes) arranca con la base existente y la regresión de migración pasa 61/61 tests. MSI Release `Pulsaria_0.1.0_x64_en-US.msi` (`183626C56615DC3845D80C1692E819DD911A1CC15CC11DF609C03CDB70089828`, 707,754,713 bytes) queda para smoke elevado |
+| Smoke del bundle instalado | PASS build + arranque Release / PARTIAL MSI | NSIS Release `Pulsaria_0.1.0_x64-setup.exe` (`1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF`, 580,919,309 bytes) arranca con la base existente y la regresión de migración pasa 61/61 tests. MSI Release `Pulsaria_0.1.0_x64_en-US.msi` (`F092CDFA6DC736F13FEF8B17302B81E1BB181796639D68676F7244154DDCB2F4`, 707,746,521 bytes) queda para smoke elevado |
 | Contrato LLM local | PASS local | Repetir descarga, integridad y sidecar en el candidato de release |
 | Contrato Gemini opcional | PASS local condicionado | IPC nativo y tests de seguridad pasan; requiere clave autorizada para probar una llamada real y no forma parte del modo offline |
 | Updater JavaScript | Implementado, inactivo | Clave pública Tauri, clave privada en GitHub Environment y `latest.json` publicado |
