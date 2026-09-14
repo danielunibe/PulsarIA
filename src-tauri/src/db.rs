@@ -562,6 +562,28 @@ pub fn init_db() -> Result<Connection> {
     };
     for (job_id, url) in legacy_urls {
         let canonical_url = crate::url_utils::canonicalize_tiktok_url(&url);
+        // A database can already contain a unique canonical-url index when a
+        // previous migration stopped after adding it. Choose the oldest job
+        // as the owner of a canonical URL and clear newer duplicates before
+        // filling legacy NULL values, so startup remains recoverable without
+        // deleting the historical jobs or their media metadata.
+        let has_older_owner: bool = transaction.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM jobs
+                WHERE canonical_url = ?1 AND id < ?2
+            )",
+            params![canonical_url, job_id],
+            |row| row.get(0),
+        )?;
+        if has_older_owner {
+            continue;
+        }
+        transaction.execute(
+            "UPDATE jobs
+             SET canonical_url = NULL
+             WHERE canonical_url = ?1 AND id <> ?2",
+            params![canonical_url, job_id],
+        )?;
         transaction.execute(
             "UPDATE jobs SET canonical_url = ?1 WHERE id = ?2",
             params![canonical_url, job_id],
@@ -3141,6 +3163,69 @@ mod tests {
         assert_eq!(migrated_source.url, "https://www.tiktok.com/@creator");
         assert_eq!(migrated_source.source_type, "profile");
         assert!(!migrated_source.active);
+    }
+
+    #[test]
+    fn recovers_legacy_duplicate_canonical_urls_without_blocking_startup() {
+        let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
+        let original = std::env::var_os("PULSAR_DATA_DIR");
+        let test_dir = std::env::temp_dir().join(format!(
+            "pulsaria-duplicate-url-migration-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&test_dir).unwrap();
+        let legacy_path = test_dir.join("library.db");
+        let legacy = Connection::open(&legacy_path).unwrap();
+        legacy
+            .execute_batch(
+                "PRAGMA user_version = 1;
+                 CREATE TABLE jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL,
+                    canonical_url TEXT,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    progress INTEGER NOT NULL DEFAULT 0,
+                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    error_message TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                 );
+                 CREATE UNIQUE INDEX ux_jobs_canonical_url
+                    ON jobs(canonical_url)
+                    WHERE canonical_url IS NOT NULL AND canonical_url <> '';
+                 INSERT INTO jobs (url) VALUES
+                    ('https://www.tiktok.com/@creator/video/123?utm_source=one'),
+                    ('https://www.tiktok.com/@creator/video/123?utm_source=two');",
+            )
+            .unwrap();
+        drop(legacy);
+
+        std::env::set_var("PULSAR_DATA_DIR", &test_dir);
+        let migrated = init_db().unwrap();
+        let canonical_urls = migrated
+            .prepare("SELECT id, canonical_url FROM jobs ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        drop(migrated);
+
+        if let Some(value) = original {
+            std::env::set_var("PULSAR_DATA_DIR", value);
+        } else {
+            std::env::remove_var("PULSAR_DATA_DIR");
+        }
+        fs::remove_dir_all(&test_dir).unwrap();
+
+        assert_eq!(canonical_urls.len(), 2);
+        assert_eq!(
+            canonical_urls[0].1.as_deref(),
+            Some("https://www.tiktok.com/@creator/video/123")
+        );
+        assert!(canonical_urls[1].1.is_none());
     }
 
     #[test]
