@@ -42,6 +42,14 @@ jobs:
 
       - name: Verify Rust contracts
         run: |
+          # A clean source checkout intentionally has no external runtime
+          # (Python, models, or FFmpeg). Keep source validation independent of
+          # that release-only bundle while preserving the full config for the
+          # signed Tauri build in release.yml.
+          $config = Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
+          $config.bundle.resources = @{}
+          $config.bundle.targets = @()
+          $env:TAURI_CONFIG = $config | ConvertTo-Json -Depth 20 -Compress
           cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
           if ($LASTEXITCODE -ne 0) { throw 'Rust formatting failed.' }
           cargo check --manifest-path src-tauri/Cargo.toml
