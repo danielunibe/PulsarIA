@@ -9,8 +9,8 @@ privacidad y política de contenido antes de mostrar el dashboard.
 
 ## Estado de esta fase
 
-La release de evaluación `v0.1.0-eval.1` contiene el instalador NSIS probado
-localmente para que los usuarios puedan descargarlo e instalarlo. Está
+La release de evaluación `v0.1.0-eval.2` contiene los instaladores reconstruidos
+localmente después de corregir el arranque con bases SQLite existentes. Está
 marcada como pre-release y no activa el updater: el instalador aún no tiene
 firma Authenticode. La release estable no debe publicarse hasta completar los
 gates externos descritos abajo.
@@ -18,7 +18,7 @@ gates externos descritos abajo.
 | Gate | Estado actual | Qué falta para marcarlo PASS |
 |---|---|---|
 | Frontend, Rust, Python y recursos fuente | PASS local | Manifest de 51 registros canónicos, FFmpeg/FFprobe y `FFMPEG-LICENSE.txt` verificados; el bundle debug final ya fue reconstruido |
-| Smoke del bundle instalado | PASS NSIS / PARTIAL MSI | NSIS Release `Pulsaria_0.1.0_x64-setup.exe` (`2E27F6520A41EBFA93B2F7CD54EEE7666929682F88689B365522B2F4F1459427`, 580,779,620 bytes) pasó instalación, health, reinicio, runtime 51/51 y desinstalación. MSI Release `Pulsaria_0.1.0_x64_en-US.msi` (`A445463E0CB26AC3620EBFB74DC28ACD21559E9CEA2C6C97A2EE016181756176`, 710,191,833 bytes) queda para smoke elevado |
+| Smoke del bundle instalado | PASS build + arranque Release / PARTIAL MSI | NSIS Release `Pulsaria_0.1.0_x64-setup.exe` (`C1B8683BA5D5137DB319B68D2F849FCF629EB9F6F19D1607D80D30FE0F7D90B8`, 580,906,561 bytes) arranca con la base existente y la regresión de migración pasa 61/61 tests. MSI Release `Pulsaria_0.1.0_x64_en-US.msi` (`183626C56615DC3845D80C1692E819DD911A1CC15CC11DF609C03CDB70089828`, 707,754,713 bytes) queda para smoke elevado |
 | Contrato LLM local | PASS local | Repetir descarga, integridad y sidecar en el candidato de release |
 | Contrato Gemini opcional | PASS local condicionado | IPC nativo y tests de seguridad pasan; requiere clave autorizada para probar una llamada real y no forma parte del modo offline |
 | Updater JavaScript | Implementado, inactivo | Clave pública Tauri, clave privada en GitHub Environment y `latest.json` publicado |

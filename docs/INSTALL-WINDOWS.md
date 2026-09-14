@@ -23,7 +23,7 @@ Get-FileHash .\Pulsaria_0.1.0_x64-setup.exe -Algorithm SHA256
 Para el instalador de evaluación `Pulsaria_0.1.0_x64-setup.exe`, el valor esperado es:
 
 ```text
-2E27F6520A41EBFA93B2F7CD54EEE7666929682F88689B365522B2F4F1459427
+C1B8683BA5D5137DB319B68D2F849FCF629EB9F6F19D1607D80D30FE0F7D90B8
 ```
 
 El instalador puede mostrar una advertencia de SmartScreen porque el candidato
