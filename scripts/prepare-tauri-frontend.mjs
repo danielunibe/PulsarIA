@@ -30,13 +30,21 @@ for (const filePath of files) {
     const before = await readFile(filePath, 'utf8');
     const extension = path.extname(filePath).toLowerCase();
     const after = extension === '.css'
-        ? before.replace(/\/_next\/static\/media\//g, '../media/')
-        : before.replace(/\/_next\//g, './_next/');
+        ? before
+            .replace(/\.\.\/_next\/static\/media\//g, '../media/')
+            .replace(/\/_next\/static\/media\//g, '../media/')
+        : before
+            .replaceAll('../_next/', './_next/')
+            .replace(/(?<!\.)\/_next\//g, './_next/');
 
     if (after !== before) {
         await writeFile(filePath, after, 'utf8');
         rewrittenFiles += 1;
         rewrittenReferences += (before.match(/\/_next\//g) ?? []).length;
+    }
+
+    if (after.includes('../_next/')) {
+        throw new Error(`Referencia _next no relativa al documento en ${filePath}`);
     }
 }
 

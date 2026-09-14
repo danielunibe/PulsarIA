@@ -66,14 +66,14 @@ impl ONNXModelManager {
     pub fn new(model_path: &PathBuf, tokenizer_path: &PathBuf) -> Result<Self, String> {
         let _ = ort::init().with_name("tiktok-processor").commit();
 
+        // Keep the desktop runtime CPU-first. The bundled DirectML artifact
+        // is optional and has historically been generated as a zero-byte DLL
+        // on some machines; forcing that provider makes startup fragile.
+        // ORT will use its CPU execution provider when no provider is added.
         let session = Session::builder()
             .map_err(|e| format!("Failed to create ORT session builder: {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("Failed to set optimization level: {}", e))?
-            .with_execution_providers([
-                ort::execution_providers::DirectMLExecutionProvider::default().build(),
-            ])
-            .map_err(|e| format!("Failed to register DirectML execution provider: {}", e))?
             .with_intra_threads(4)
             .map_err(|e| format!("Failed to set intra threads: {}", e))?
             .commit_from_file(model_path)
@@ -89,7 +89,7 @@ impl ONNXModelManager {
     ///
     /// El proceso consta de:
     /// 1. Tokenización con el tokenizer del modelo (truncado automático)
-    /// 2. Inferencia ONNX con DirectML (fallback a CPU)
+    /// 2. Inferencia ONNX con el proveedor CPU estable del runtime
     /// 3. Mean pooling sobre los tokens de salida
     /// 4. Normalización L2 del vector resultante
     ///

@@ -71,6 +71,21 @@ use tauri::Manager;
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tokio::sync::Mutex;
 
+fn write_startup_log(data_dir: &std::path::Path, stage: &str, detail: &str) {
+    use std::io::Write;
+
+    let _ = std::fs::create_dir_all(data_dir);
+    let path = data_dir.join("startup.log");
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let _ = writeln!(file, "{timestamp} stage={stage} {detail}");
+    }
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -85,7 +100,20 @@ async fn main() {
     });
     let data_dir = db::data_dir_path();
     std::env::set_var("PULSAR_DATA_DIR", &data_dir);
-    let conn = db::init_db().expect("Failed to initialize SQLite library.db");
+    write_startup_log(&data_dir, "bootstrap", "Pulsaria startup initiated");
+    write_startup_log(&data_dir, "sqlite", "initializing library.db");
+    let conn = match db::init_db() {
+        Ok(connection) => {
+            write_startup_log(&data_dir, "sqlite", "library.db initialized");
+            connection
+        }
+        Err(error) => {
+            let detail = format!("library.db initialization failed: {error}");
+            write_startup_log(&data_dir, "sqlite_error", &detail);
+            tracing::error!("{detail}");
+            return;
+        }
+    };
     if let Err(error) = db::repair_library(&conn) {
         tracing::error!("Automatic library reconciliation failed: {}", error);
     }
