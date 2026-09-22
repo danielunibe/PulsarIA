@@ -15,6 +15,8 @@ export interface PlaylistRecord {
   item_count: number;
 }
 
+export type PlaylistLoadState = 'loading' | 'ready' | 'error';
+
 import { REST_API_BASE } from '@/lib/api-config';
 import { apiFetch } from '@/lib/api-client';
 
@@ -53,7 +55,8 @@ async function tauriInvoke<T>(command: string, args?: Record<string, unknown>): 
  */
 export function usePlaylists() {
   const [playlists, setPlaylists] = useState<PlaylistRecord[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<PlaylistLoadState>('loading');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
   const [playlistItems, setPlaylistItems] = useState<JobRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +65,7 @@ export function usePlaylists() {
 
   const fetchPlaylists = useCallback(async () => {
     setLoading(true);
+    setStatus('loading');
     try {
       let data: PlaylistRecord[];
       try {
@@ -71,9 +75,11 @@ export function usePlaylists() {
       }
       setPlaylists(data);
       setError(null);
+      setStatus('ready');
     } catch (fetchError) {
       console.error('fetchPlaylists failed:', fetchError);
       setError(errorMessage(fetchError));
+      setStatus('error');
     } finally {
       setLoading(false);
     }
@@ -210,6 +216,8 @@ export function usePlaylists() {
     selectedPlaylistId,
     playlistItems,
     error,
+    status,
+    ready: status === 'ready',
     fetchPlaylists,
     createPlaylist,
     addToPlaylist,

@@ -1,7 +1,7 @@
-﻿'use client';
+'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { FaBrain, FaVideo, FaPlay } from 'react-icons/fa6';
+import { FaBrain, FaVideo, FaPlay } from '@/components/icon-library';
 import type { JobRecord } from '@/hooks/use-jobs';
 import { apiFetch } from '@/lib/api-client';
 

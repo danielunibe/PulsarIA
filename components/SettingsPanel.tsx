@@ -2,15 +2,21 @@ import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 
 import { cn } from '@/lib/utils';
 import { SHADOW, SURFACE, ACCENT } from '@/lib/design-tokens';
-import { useSettings, AppTheme, RetentionPolicy, StorageIntent } from '@/lib/settings-context';
+import { useSettings, AppTheme, RetentionPolicy, StorageIntent, PerformanceMode, AnalysisDepth } from '@/lib/settings-context';
 import { useI18n } from '@/lib/i18n';
 import { isTauriRuntime, useProcessingSettings } from '@/hooks/use-processing-settings';
 import { useUpdater } from '@/hooks/use-updater';
 import { isCompletedJob, isFailedJob, type JobRecord } from '@/hooks/use-jobs';
 import { cancelLocalLlmDownload, ensureLocalLlm, getLocalLlmStatus, type LocalLlmStatus } from '@/lib/local-llm';
+import { GeneralTab } from './settings/GeneralTab';
+import { EngineTab } from './settings/EngineTab';
+import { AiTab } from './settings/AiTab';
+import { StatsTab } from './settings/StatsTab';
+import { PerformanceTab, type AccelerationStatusUi, type PerformancePolicyUi } from './settings/PerformanceTab';
+import type { PageConfig } from './PagePanel';
+import type { SearchMode } from './Header';
 
 import { 
-    FaXmark, 
     FaDownload, 
     FaFolder, 
     FaCheck, 
@@ -20,6 +26,7 @@ import {
     FaPalette,
     FaChartSimple,
     FaMicrochip,
+    FaBolt,
     FaBrain,
     FaRotate,
     FaPlay,
@@ -32,10 +39,9 @@ import {
     FaStar,
     FaThumbtack,
     FaLanguage,
-} from 'react-icons/fa6';
+} from '@/components/icon-library';
 
 // ── Solid Icons (Filled) ──
-const SolidXIcon = () => <FaXmark size={18} />;
 const SolidDownloadIcon = () => <FaDownload size={18} />;
 const SolidFolderIcon = () => <FaFolder size={11} />;
 const SolidPaletteIcon = () => <FaPalette size={13} />;
@@ -100,6 +106,15 @@ const THEME_OPTIONS: Array<{
         borderColor: 'rgba(168,85,247,0.4)',
         accentColor: '#c084fc',
     },
+    {
+        id: 'solar',
+        name: 'Atardecer Ámbar',
+        badge: 'Cálido Solar',
+        desc: 'Gradiente solar profundo y discreto',
+        gradient: 'linear-gradient(135deg, #450a0a 0%, #ea580c 100%)',
+        borderColor: 'rgba(245,158,11,0.4)',
+        accentColor: '#f59e0b',
+    },
 ];
 
 const FORMAT_CATEGORIES = [
@@ -139,12 +154,12 @@ const FORMAT_CATEGORIES = [
 export function SectionCard({ children, className }: { children: React.ReactNode; className?: string }) {
     return (
         <div
-            className={cn('rounded-[20px] p-4 border transition-all', className)}
+            className={cn('rounded-[20px] p-4 border-0 transition-all', className)}
             style={{
-                border: '1px solid rgba(255,255,255,0.08)',
+                border: 'none',
                 background: 'rgba(18, 20, 26, 0.75)',
                 backdropFilter: 'blur(20px)',
-                boxShadow: '0 10px 30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)'
+                boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
             }}
         >
             {children}
@@ -168,20 +183,32 @@ export function SectionTitle({ icon: Icon, label }: { icon: React.ElementType; l
     );
 }
 
-type SettingsTab = 'general' | 'stats' | 'engine' | 'ai';
+type SettingsTab = 'general' | 'stats' | 'engine' | 'ai' | 'performance';
 
-interface SettingsPanelProps {
+export interface SettingsPanelProps {
     onClose: () => void;
     jobs?: JobRecord[];
     onPlaylistSelect?: (id: number | null) => void;
+    embedded?: boolean;
+    onReviewConsent?: () => void;
+    pageConfig?: PageConfig;
+    onPageConfigChange?: (config: PageConfig) => void;
+    searchMode?: SearchMode;
+    onSearchModeChange?: (mode: SearchMode) => void;
 }
 
 interface CollectionSource {
     id: number;
     url: string;
+    profile_url?: string;
+    platform?: string;
     source_type: string;
+    username?: string | null;
+    display_name?: string | null;
+    status?: string;
     active: boolean;
     last_success_at?: string | null;
+    last_sync_at?: string | null;
     next_sync_at?: string | null;
     discovered_count: number;
     consecutive_failures: number;
@@ -204,6 +231,8 @@ interface RuntimeHealth {
     backpressure_active: boolean;
     worker_capacity: number;
     idle_workers: number;
+    processing_paused?: boolean;
+    background_admission_paused?: boolean;
     autostart_enabled: boolean;
     api_ready: boolean;
     api_error?: string | null;
@@ -402,7 +431,17 @@ async function invokeOptionalCommand<T>(command: string, args?: Record<string, u
     }
 }
 
-export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: SettingsPanelProps) {
+export function SettingsPanel({
+    onClose,
+    jobs = [],
+    onPlaylistSelect,
+    embedded = false,
+    onReviewConsent,
+    pageConfig,
+    onPageConfigChange,
+    searchMode,
+    onSearchModeChange,
+}: SettingsPanelProps) {
     const { settings, updateSettings } = useSettings();
     const { locale, setLocale, t } = useI18n();
     const processingSetup = useProcessingSettings();
@@ -414,7 +453,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [formats, setFormats] = useState<string[]>(settings.formats);
     const [folder, setFolder] = useState(settings.folder);
-    const [selectedTheme, setSelectedTheme] = useState<AppTheme>(settings.theme || 'carbon');
+    const [selectedTheme, setSelectedTheme] = useState<AppTheme>(settings.theme || 'chromatic');
     const [retention, setRetention] = useState<RetentionPolicy>(settings.retention || 'keep');
     const [cookiesBrowser, setCookiesBrowser] = useState<typeof settings.cookiesBrowser>(settings.cookiesBrowser || '');
     const [processingQuality, setProcessingQuality] = useState(settings.processingQuality);
@@ -422,7 +461,26 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
     const [storageIntent, setStorageIntent] = useState(settings.storageIntent);
     const [quotaBytes, setQuotaBytes] = useState(settings.quotaBytes);
     const [reserveBytes, setReserveBytes] = useState(settings.reserveBytes);
+    const [showTikTokPill, setShowTikTokPill] = useState(settings.showTikTokPill);
+    const [hoverAutoplay, setHoverAutoplay] = useState(settings.hoverAutoplay);
+    const [showDemoVideos, setShowDemoVideos] = useState(settings.showDemoVideos);
     const [autostartEnabled, setAutostartEnabled] = useState(false);
+    const [keepInTrayOnClose, setKeepInTrayOnClose] = useState(settings.keepInTrayOnClose);
+    const [subtitleEnabled, setSubtitleEnabled] = useState(settings.subtitleEnabled);
+    const [subtitleStyle, setSubtitleStyle] = useState(settings.subtitleStyle);
+    const [playbackProfile, setPlaybackProfile] = useState(settings.playbackProfile);
+    const [gpuEnhancementEnabled, setGpuEnhancementEnabled] = useState(settings.gpuEnhancementEnabled);
+    const [performanceMode, setPerformanceMode] = useState<PerformanceMode>(settings.performanceMode);
+    const [backgroundProcessing, setBackgroundProcessing] = useState(settings.backgroundProcessing);
+    const [startInBackground, setStartInBackground] = useState(settings.startInBackground);
+    const [idleThresholdSeconds, setIdleThresholdSeconds] = useState(settings.idleThresholdSeconds);
+    const [acOnlyForMaximum, setAcOnlyForMaximum] = useState(settings.acOnlyForMaximum);
+    const [preferredAdapterId, setPreferredAdapterId] = useState<string | null>(settings.preferredAdapterId);
+    const [analysisDepth, setAnalysisDepth] = useState<AnalysisDepth>(settings.analysisDepth);
+    const [lastVerifiedAccelerators, setLastVerifiedAccelerators] = useState<string | null>(settings.lastVerifiedAccelerators);
+    const [accelerationStatus, setAccelerationStatus] = useState<AccelerationStatusUi | null>(null);
+    const [performancePolicy, setPerformancePolicy] = useState<PerformancePolicyUi | null>(null);
+    const [benchmarkBusy, setBenchmarkBusy] = useState(false);
     const initialSettingsRef = useRef(settings);
     const selectedWhisperModel = processingQuality < 35
         ? 'tiny'
@@ -500,6 +558,96 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
         return () => window.clearInterval(timer);
     }, [localLlmStatus?.state, refreshLocalLlm]);
 
+    const refreshAcceleration = useCallback(async () => {
+        if (!isTauriRuntime()) return;
+        try {
+            const [status, policy] = await Promise.all([
+                invokeOptionalCommand<AccelerationStatusUi>('get_acceleration_status'),
+                invokeOptionalCommand<PerformancePolicyUi>('get_performance_policy'),
+            ]);
+            if (status) setAccelerationStatus(status);
+            if (policy) setPerformancePolicy(policy);
+        } catch (error) {
+            setSettingsError(error instanceof Error ? error.message : String(error));
+        }
+    }, []);
+
+    useEffect(() => {
+        if (activeTab !== 'performance') return;
+        void refreshAcceleration();
+    }, [activeTab, refreshAcceleration]);
+
+    useEffect(() => {
+        let mounted = true;
+        let unlisten: (() => void) | undefined;
+        void (async () => {
+            if (!isTauriRuntime()) return;
+            const { listen } = await import('@tauri-apps/api/event');
+            if (!mounted) return;
+            unlisten = await listen<AccelerationStatusUi>('acceleration-status-changed', (event) => {
+                if (mounted) setAccelerationStatus(event.payload);
+            });
+        })();
+        return () => {
+            mounted = false;
+            unlisten?.();
+        };
+    }, []);
+
+    const runAccelerationBenchmark = async () => {
+        if (!isTauriRuntime() || benchmarkBusy) return;
+        setBenchmarkBusy(true);
+        setSettingsError(null);
+        try {
+            const report = await invokeOptionalCommand<{ status: AccelerationStatusUi }>(
+                'run_acceleration_benchmark',
+                { samplePath: null },
+            );
+            if (report?.status) {
+                setAccelerationStatus(report.status);
+                setLastVerifiedAccelerators(JSON.stringify(report));
+                const policy = await invokeOptionalCommand<PerformancePolicyUi>('get_performance_policy');
+                if (policy) setPerformancePolicy(policy);
+            }
+        } catch (error) {
+            setSettingsError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setBenchmarkBusy(false);
+        }
+    };
+
+    const resetPerformanceProfile = async () => {
+        if (!isTauriRuntime()) return;
+        try {
+            await invokeOptionalCommand('reset_performance_profile');
+            setLastVerifiedAccelerators(null);
+            await refreshAcceleration();
+        } catch (error) {
+            setSettingsError(error instanceof Error ? error.message : String(error));
+        }
+    };
+
+    const changePerformanceMode = (mode: PerformanceMode) => {
+        setPerformanceMode(mode);
+        setPlaybackProfile(mode);
+        if (!isTauriRuntime()) return;
+        void invokeOptionalCommand<PerformancePolicyUi>('set_performance_policy', {
+            input: {
+                mode,
+                backgroundProcessing,
+                startInBackground: autostartEnabled,
+                idleThresholdSeconds,
+                acOnlyForMaximum,
+                preferredAdapterId,
+                analysisDepth,
+            },
+        }).then((policy) => {
+            if (policy) setPerformancePolicy(policy);
+        }).catch((error) => {
+            setSettingsError(error instanceof Error ? error.message : String(error));
+        });
+    };
+
     const prepareLocalLlm = async () => {
         if (!isTauriRuntime() || localLlmBusy) return;
         setLocalLlmBusy(true);
@@ -529,7 +677,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
             if (!active) return;
             setFormats(settings.formats);
             setFolder(settings.folder);
-            setSelectedTheme(settings.theme || 'carbon');
+            setSelectedTheme(settings.theme || 'chromatic');
             setRetention(settings.retention || 'keep');
             setRetentionPreviewPending(false);
             setCookiesBrowser(settings.cookiesBrowser || '');
@@ -538,6 +686,22 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
             setStorageIntent(settings.storageIntent);
             setQuotaBytes(settings.quotaBytes);
             setReserveBytes(settings.reserveBytes);
+            setShowTikTokPill(settings.showTikTokPill);
+            setHoverAutoplay(settings.hoverAutoplay);
+            setShowDemoVideos(settings.showDemoVideos);
+            setKeepInTrayOnClose(settings.keepInTrayOnClose);
+            setSubtitleEnabled(settings.subtitleEnabled);
+            setSubtitleStyle(settings.subtitleStyle);
+            setPlaybackProfile(settings.playbackProfile);
+            setGpuEnhancementEnabled(settings.gpuEnhancementEnabled);
+            setPerformanceMode(settings.performanceMode);
+            setBackgroundProcessing(settings.backgroundProcessing);
+            setStartInBackground(settings.startInBackground);
+            setIdleThresholdSeconds(settings.idleThresholdSeconds);
+            setAcOnlyForMaximum(settings.acOnlyForMaximum);
+            setPreferredAdapterId(settings.preferredAdapterId);
+            setAnalysisDepth(settings.analysisDepth);
+            setLastVerifiedAccelerators(settings.lastVerifiedAccelerators);
         });
         return () => {
             active = false;
@@ -553,6 +717,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                 const response = await invoke<{ autostartEnabled: boolean; settings: { minScore: number; storageIntent: StorageIntent; quotaBytes: number; reserveBytes: number } }>('get_app_settings');
                 if (!active) return;
                 setAutostartEnabled(response.autostartEnabled);
+                setStartInBackground(response.autostartEnabled);
                 setSimilarityThreshold(response.settings.minScore);
                 setStorageIntent(response.settings.storageIntent);
                 setQuotaBytes(response.settings.quotaBytes);
@@ -818,6 +983,9 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
 
     const handleCancel = () => {
         updateSettings(initialSettingsRef.current);
+        setShowTikTokPill(initialSettingsRef.current.showTikTokPill);
+        setHoverAutoplay(initialSettingsRef.current.hoverAutoplay);
+        setShowDemoVideos(initialSettingsRef.current.showDemoVideos);
         onClose();
     };
 
@@ -931,7 +1099,21 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                         chunkSize: 150,
                         chunkOverlap: 50,
                         autostartEnabled,
+                        keepInTrayOnClose,
                         updaterStatus: 'BLOCKED_EXTERNAL',
+                        subtitleEnabled,
+                        subtitleStyle,
+                        playbackProfile,
+                        gpuEnhancementEnabled,
+                        performanceMode,
+                        backgroundProcessing,
+                        startInBackground: autostartEnabled,
+                        idleThresholdSeconds,
+                        acOnlyForMaximum,
+                        preferredAdapterId,
+                        analysisDepth,
+                        performanceProfileVersion: settings.performanceProfileVersion,
+                        lastVerifiedAccelerators,
                     },
                 });
                 await invoke<boolean>('set_autostart', { enabled: autostartEnabled });
@@ -955,6 +1137,23 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                 storageIntent,
                 quotaBytes,
                 reserveBytes,
+                showTikTokPill,
+                hoverAutoplay,
+                showDemoVideos,
+                keepInTrayOnClose,
+                subtitleEnabled,
+                subtitleStyle,
+                playbackProfile,
+                gpuEnhancementEnabled,
+                performanceMode,
+                backgroundProcessing,
+                startInBackground: autostartEnabled,
+                idleThresholdSeconds,
+                acOnlyForMaximum,
+                preferredAdapterId,
+                analysisDepth,
+                performanceProfileVersion: settings.performanceProfileVersion,
+                lastVerifiedAccelerators,
             });
             onClose();
         } catch (error) {
@@ -987,1084 +1186,257 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
 
     return (
         <div
-            className="absolute inset-0 z-50 flex flex-col font-sans"
-            style={{ background: '#0e1017' }}
+            className={embedded ? "pulsaria-settings-shell flex-1 flex flex-col font-sans min-h-0 relative overflow-hidden" : "pulsaria-settings-shell absolute inset-0 z-50 flex flex-col font-sans"}
+            style={{ background: embedded ? 'transparent' : '#0e1017' }}
         >
             {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-4 pb-3">
-                <div className="flex flex-col">
-                    <div className="flex items-center gap-1.5 font-bold uppercase tracking-widest text-[9px] text-white/40">
-                        <span>{t('panelControl')}</span>
-                    </div>
-                    <h2 className="text-base font-black tracking-tight leading-tight text-white">
-                        {t('globalConfig')}
-                    </h2>
-                </div>
-                                <button
-                    type="button"
-                    aria-label={t('closeSettings')}
-                    onClick={handleCancel}
-
-                    className="w-9 h-9 rounded-[12px] flex items-center justify-center transition-all border border-white/10 bg-white/[0.04] hover:bg-[#fe2c55]/20 hover:border-[#fe2c55]/40 text-white/60 hover:text-white cursor-pointer"
-                >
-                    <SolidXIcon />
-                </button>
+            <div className={`pulsaria-settings-header flex items-center justify-between ${embedded ? 'px-4 pt-3 pb-2' : 'px-5 pt-4 pb-3'}`}>
+                <h2 className="text-base font-black tracking-tight leading-tight text-white">
+                    {t('settings')}
+                </h2>
             </div>
 
             {/* Sub-Navigation Tabs */}
-            <div className="px-5 pb-3">
-                <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-black/50 border border-white/10">
-                                        <button
+            <div className={`pulsaria-settings-nav ${embedded ? "px-4 pb-2" : "px-5 pb-3"}`}>
+                <div role="tablist" aria-label="Secciones de ajustes" className="pulsaria-settings-seg grid grid-cols-5 gap-1 p-1 rounded-xl bg-black/40 border border-white/[0.04]" data-active={activeTab}>
+                    <button
                         type="button"
-                        aria-pressed={activeTab === 'general'}
+                        role="tab"
+                        aria-selected={activeTab === 'general'}
                         onClick={() => setActiveTab('general')}
-
-                        className={`py-2 px-1 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'general'
-                                ? 'bg-white/10 text-white border border-white/20 shadow-sm'
-                                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
                         <FaSliders size={11} />
                         <span className="truncate">{t('general')}</span>
                     </button>
-                                        <button
+                    <button
                         type="button"
-                        aria-pressed={activeTab === 'stats'}
-                        onClick={() => setActiveTab('stats')}
-
-                        className={`py-2 px-1 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
-                            activeTab === 'stats'
-                                ? 'bg-[#3b82f6]/20 text-[#3b82f6] border border-[#3b82f6]/40 shadow-sm'
-                                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-                        }`}
-                    >
-                        <FaChartSimple size={11} />
-                        <span className="truncate">{t('stats')}</span>
-                    </button>
-                                        <button
-                        type="button"
-                        aria-pressed={activeTab === 'engine'}
+                        role="tab"
+                        aria-selected={activeTab === 'engine'}
                         onClick={() => setActiveTab('engine')}
-
-                        className={`py-2 px-1 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'engine'
-                                ? 'bg-[#25f4ee]/20 text-[#25f4ee] border border-[#25f4ee]/40 shadow-sm'
-                                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
                         <FaMicrochip size={11} />
                         <span className="truncate">{t('engine')}</span>
                     </button>
-                                        <button
+                    <button
                         type="button"
-                        aria-pressed={activeTab === 'ai'}
+                        role="tab"
+                        aria-selected={activeTab === 'ai'}
                         onClick={() => setActiveTab('ai')}
-
-                        className={`py-2 px-1 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'ai'
-                                ? 'bg-[#8a5cff]/20 text-[#8a5cff] border border-[#8a5cff]/40 shadow-sm'
-                                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
                         <FaBrain size={11} />
                         <span className="truncate">{t('ai')}</span>
                     </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'performance'}
+                        onClick={() => setActiveTab('performance')}
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                            activeTab === 'performance'
+                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
+                        }`}
+                    >
+                        <FaBolt size={11} />
+                        <span className="truncate">Rendimiento</span>
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'stats'}
+                        onClick={() => setActiveTab('stats')}
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                            activeTab === 'stats'
+                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
+                        }`}
+                    >
+                        <FaHardDrive size={11} />
+                        <span className="truncate">{t('stats')}</span>
+                    </button>
                 </div>
             </div>
 
             {/* Divider */}
-            <div className="mx-5 h-px bg-white/5" />
+            <div className={`pulsaria-settings-divider ${embedded ? 'mx-4' : 'mx-5'} h-px bg-white/[0.04]`} />
 
             {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4 custom-scrollbar">
+            <div className={`pulsaria-settings-content flex-1 overflow-y-auto ${embedded ? 'px-4 py-3' : 'px-5 py-4'} flex flex-col gap-4 custom-scrollbar`}>
 
-                {/* TAB: GENERAL (Temas, Formatos, Carpeta) */}
                 {activeTab === 'general' && (
-                    <>
-                        <SectionCard>
-                            <SectionTitle icon={SolidLanguageIcon} label={t('language')} />
-                            <div className="grid grid-cols-2 gap-2">
-                                {([
-                                    ['es-MX', t('spanish')],
-                                    ['en-US', t('english')],
-                                ] as const).map(([value, label]) => (
-                                    <button
-                                        key={value}
-                                        type="button"
-                                        aria-pressed={locale === value}
-                                        onClick={() => setLocale(value)}
-                                        className="rounded-[12px] border px-3 py-2 text-left text-[10px] font-bold transition"
-                                        style={{
-                                            borderColor: locale === value ? '#25f4ee' : 'rgba(255,255,255,0.1)',
-                                            background: locale === value ? 'rgba(37,244,238,0.12)' : 'rgba(255,255,255,0.03)',
-                                            color: locale === value ? '#25f4ee' : 'rgba(255,255,255,0.7)',
-                                        }}
-                                    >
-                                        {label}
-                                    </button>
-                                ))}
-                            </div>
-                            <p className="mt-2 text-[10px] leading-relaxed text-white/40">{t('chooseLanguageDescription')}</p>
-                        </SectionCard>
-
-                        {/* Visual Themes Selection */}
-                        <SectionCard className="flex flex-col gap-3">
-                            <div className="flex items-center justify-between">
-                                <SectionTitle icon={SolidPaletteIcon} label="Tema de Fondo" />
-                                <span className="text-[9px] font-bold text-white/30 uppercase tracking-widest">
-                                    {THEME_OPTIONS.length} opciones
-                                </span>
-                            </div>
-
-                            <div className="flex flex-col gap-2">
-                                {THEME_OPTIONS.map(theme => {
-                                    const isSelected = selectedTheme === theme.id;
-                                    return (
-                                        <button
-                                            key={theme.id}
-                                            type="button"
-                                            onClick={() => handleSelectTheme(theme.id)}
-                                            className="group relative flex items-center justify-between p-3 rounded-[16px] transition-all duration-300 border text-left overflow-hidden cursor-pointer"
-                                            style={{
-                                                background: isSelected
-                                                    ? 'rgba(255,255,255,0.06)'
-                                                    : 'rgba(255,255,255,0.02)',
-                                                borderColor: isSelected
-                                                    ? theme.borderColor
-                                                    : 'rgba(255,255,255,0.06)',
-                                                boxShadow: isSelected
-                                                    ? `0 0 20px -5px ${theme.accentColor}40, inset 0 1px 1px rgba(255,255,255,0.15)`
-                                                    : 'none',
-                                            }}
-                                        >
-                                            <div className="flex items-center gap-3 min-w-0">
-                                                <div
-                                                    className="w-10 h-10 rounded-[10px] shrink-0 border relative overflow-hidden flex items-center justify-center transition-transform group-hover:scale-105"
-                                                    style={{
-                                                        background: theme.gradient,
-                                                        borderColor: isSelected ? theme.borderColor : 'rgba(255,255,255,0.1)',
-                                                        boxShadow: isSelected ? `0 0 12px ${theme.accentColor}50` : '0 2px 8px rgba(0,0,0,0.5)',
-                                                    }}
-                                                >
-                                                    <div
-                                                        className="w-2.5 h-2.5 rounded-full"
-                                                        style={{
-                                                            background: theme.accentColor,
-                                                            boxShadow: `0 0 8px ${theme.accentColor}`,
-                                                        }}
-                                                    />
-                                                </div>
-
-                                                <div className="flex flex-col min-w-0">
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        <span
-                                                            className="font-bold text-xs leading-tight"
-                                                            style={{
-                                                                color: isSelected ? '#ffffff' : 'rgba(255,255,255,0.7)',
-                                                            }}
-                                                        >
-                                                            {theme.name}
-                                                        </span>
-                                                        {theme.badge && (
-                                                            <span
-                                                                className="px-1.5 py-0.5 rounded-[4px] text-[8px] font-black tracking-wider uppercase"
-                                                                style={{
-                                                                    background: isSelected
-                                                                        ? `${theme.accentColor}25`
-                                                                        : 'rgba(255,255,255,0.05)',
-                                                                    color: isSelected
-                                                                        ? theme.accentColor
-                                                                        : 'rgba(255,255,255,0.4)',
-                                                                    border: `1px solid ${isSelected ? theme.accentColor + '50' : 'rgba(255,255,255,0.08)'}`,
-                                                                }}
-                                                            >
-                                                                {theme.badge}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <span className="text-[10px] text-white/40 leading-snug mt-0.5 truncate max-w-[200px]">
-                                                        {theme.desc}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            <div
-                                                className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 ml-2 transition-all duration-300"
-                                                style={{
-                                                    background: isSelected ? theme.accentColor : 'rgba(255,255,255,0.04)',
-                                                    border: `1px solid ${isSelected ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.1)'}`,
-                                                    boxShadow: isSelected ? `0 0 10px ${theme.accentColor}80` : 'inset 0 1px 2px rgba(0,0,0,0.5)',
-                                                }}
-                                            >
-                                                {isSelected && <FaCheck size={10} color="#000000" className="font-bold" />}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </SectionCard>
-
-                        {/* Formatos de Descarga */}
-                        <SectionCard className="flex flex-col gap-6">
-                            <SectionTitle icon={SolidDownloadIcon} label="Formatos de Descarga" />
-
-                            {FORMAT_CATEGORIES.map(category => {
-                                const CategoryIcon = category.icon;
-                                return (
-                                    <div key={category.title} className="flex flex-col gap-3">
-                                        <div className="flex items-center justify-between px-1">
-                                            <div className="flex items-center gap-2">
-                                                <div
-                                                    className="w-5 h-5 rounded-[6px] flex items-center justify-center"
-                                                    style={{
-                                                        background: `${category.options[0].color}18`,
-                                                        boxShadow: `0 0 8px ${category.options[0].color}25`,
-                                                        color: category.options[0].color,
-                                                    }}
-                                                >
-                                                    <CategoryIcon size={11} />
-                                                </div>
-                                                <span className="font-black tracking-[0.2em] uppercase text-[10px] text-white/50">
-                                                    {category.title}
-                                                </span>
-                                            </div>
-                                            <span className="text-[9px] font-bold opacity-30 tracking-widest uppercase">{category.options.length} opciones</span>
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {category.options.map(fmt => {
-                                                const on = formats.includes(fmt.id);
-                                                return (
-                                                                                                        <button
-                                                        type="button"
-                                                        key={fmt.id}
-                                                        aria-pressed={on}
-                                                        onClick={() => toggleFormat(fmt.id)}
-
-                                                        className="group relative flex flex-col items-start p-3 rounded-[16px] transition-all duration-300 border overflow-hidden cursor-pointer"
-                                                        style={{
-                                                            background: on
-                                                                ? `linear-gradient(135deg, ${fmt.color}15, ${fmt.color}05)`
-                                                                : 'rgba(255,255,255,0.02)',
-                                                            borderColor: on ? `${fmt.color}40` : 'rgba(255,255,255,0.05)',
-                                                            boxShadow: on ? `0 8px 20px -8px ${fmt.color}40` : 'none',
-                                                        }}
-                                                    >
-                                                        <div className="flex items-center justify-between w-full mb-2">
-                                                            <div
-                                                                className="px-2 py-0.5 rounded-[6px] font-black text-[9px] tracking-wider"
-                                                                style={{
-                                                                    background: on ? fmt.color : 'rgba(255,255,255,0.05)',
-                                                                    color: on ? '#fff' : 'rgba(255,255,255,0.4)',
-                                                                }}
-                                                            >
-                                                                {fmt.label}
-                                                            </div>
-                                                            <div
-                                                                className="w-4 h-4 rounded-full flex items-center justify-center"
-                                                                style={{
-                                                                    background: on ? fmt.color : 'rgba(255,255,255,0.05)',
-                                                                    border: `1px solid ${on ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)'}`,
-                                                                }}
-                                                            >
-                                                                {on && <FaCheck size={10} color="#fff" />}
-                                                            </div>
-                                                        </div>
-                                                        <span className="block font-bold text-[11px] text-left text-white/80">
-                                                            {fmt.desc}
-                                                        </span>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </SectionCard>
-
-                        <SectionCard>
-                            <SectionTitle icon={SolidDownloadIcon} label="Retención de Archivos" />
-                            <div className="grid grid-cols-2 gap-2">
-                                {([
-                                    { id: 'keep' as const, label: 'Conservar local', description: 'Reproduce desde este equipo', color: '#10b981' },
-                                    { id: 'online' as const, label: 'Solo online', description: 'Conserva conocimiento; limita medios grandes', color: '#25f4ee' },
-                                ]).map((option) => {
-                                    const selected = retention === option.id;
-                                    return (
-                                        <button
-                                            key={option.id}
-                                            type="button"
-                                            onClick={() => handleRetentionChange(option.id)}
-                                            className="p-3 rounded-[14px] border text-left transition-all"
-                                            style={{
-                                                background: selected ? `${option.color}12` : 'rgba(255,255,255,0.02)',
-                                                borderColor: selected ? `${option.color}55` : 'rgba(255,255,255,0.08)',
-                                            }}
-                                        >
-                                            <div className="flex items-center justify-between gap-2">
-                                                <span className="text-[11px] font-bold text-white/90">{option.label}</span>
-                                                <span className={`w-2 h-2 rounded-full ${selected ? 'opacity-100' : 'opacity-25'}`} style={{ background: option.color }} />
-                                            </div>
-                                            <span className="block mt-1 text-[9px] leading-relaxed text-white/45">{option.description}</span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            <p className="mt-2 px-1 text-[10px] text-white/40 leading-relaxed">
-                                La opción «Solo online» mantiene metadata, transcript, segmentos, embeddings y artifacts. Cualquier retiro de video/audio debe aparecer en una previsualización y pedir confirmación; nunca se purga conocimiento en silencio.
-                            </p>
-                            {retentionPreviewPending && (
-                                <div className="rounded-[14px] border border-cyan-300/20 bg-cyan-300/[.04] p-3" role="alert">
-                                    <p className="text-[10px] font-bold text-cyan-100">Revisión necesaria antes de cambiar a «Solo online»</p>
-                                    <p className="mt-1 text-[10px] leading-relaxed text-white/55">
-                                        La vista previa identifica los medios grandes que podrían retirarse más adelante. Confirmar aquí solo guarda la política; no borra videos, audio, transcripts, embeddings ni artifacts.
-                                    </p>
-                                    <p className="mt-2 text-[10px] text-white/65">
-                                        {storageBusy
-                                            ? 'Calculando candidatos…'
-                                            : purgePreview
-                                                ? `${storageCandidates.length} candidato(s) elegible(s) · ${formatStorageBytes(storageCandidates.reduce((total, candidate) => total + candidate.mediaBytes, 0))}`
-                                                : 'Aún no se pudo obtener la vista previa.'}
-                                    </p>
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        <button
-                                            type="button"
-                                            disabled={storageBusy}
-                                            onClick={() => {
-                                                setRetention(settings.retention || 'keep');
-                                                setRetentionPreviewPending(false);
-                                                setPurgePreview(null);
-                                                setPurgeSelection([]);
-                                            }}
-                                            className="rounded-[10px] border border-white/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-white/60 transition hover:bg-white/5 hover:text-white disabled:opacity-35"
-                                        >
-                                            Mantener local
-                                        </button>
-                                        <button
-                                            type="button"
-                                            disabled={storageBusy || !purgePreview}
-                                            onClick={() => {
-                                                setRetentionPreviewPending(false);
-                                                setStorageError(null);
-                                                setStorageMessage('Política «Solo online» confirmada. La purga de medios continúa siendo manual y reversible.');
-                                            }}
-                                            className="rounded-[10px] border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-cyan-100 transition hover:bg-cyan-300/15 disabled:cursor-not-allowed disabled:opacity-35"
-                                        >
-                                            Confirmar política
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </SectionCard>
-
-                        <SectionCard className="flex flex-col gap-3">
-                            <div className="flex items-start justify-between gap-3">
-                                <SectionTitle icon={FaHardDrive} label="Cuota y medios grandes" />
-                                <span className={`shrink-0 text-[9px] font-black uppercase tracking-wider ${storageStateClass}`}>
-                                    {storageStateLabel}
-                                </span>
-                            </div>
-                            <p className="text-[10px] leading-relaxed text-white/45">
-                                La cuota solo cuenta video, audio, staging, archivos .part y cachés grandes. SQLite, backups, transcript, embeddings, metadata, poster, keyframes y capturas protegidas quedan fuera.
-                            </p>
-
-                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                <div className="rounded-[12px] border border-white/5 bg-black/30 p-2.5">
-                                    <span className="block text-[8px] font-black uppercase tracking-wider text-white/35">Espacio libre</span>
-                                    <span className="mt-1 block text-xs font-bold text-white/80">{formatStorageBytes(storageStatus?.freeBytes)}</span>
-                                </div>
-                                <div className="rounded-[12px] border border-white/5 bg-black/30 p-2.5">
-                                    <span className="block text-[8px] font-black uppercase tracking-wider text-white/35">Uso de medios</span>
-                                    <span className="mt-1 block text-xs font-bold text-white/80">{formatStorageBytes(storageStatus?.usedMediaBytes)}</span>
-                                </div>
-                                <div className="rounded-[12px] border border-white/5 bg-black/30 p-2.5">
-                                    <span className="block text-[8px] font-black uppercase tracking-wider text-white/35">Reserva</span>
-                                    <span className="mt-1 block text-xs font-bold text-white/80">{formatStorageBytes(storageStatus?.reserveBytes)}</span>
-                                </div>
-                                <div className="rounded-[12px] border border-amber-400/10 bg-amber-400/[.03] p-2.5">
-                                    <span className="block text-[8px] font-black uppercase tracking-wider text-amber-200/45">Papelera reversible</span>
-                                    <span className="mt-1 block text-xs font-bold text-amber-100/80">{formatStorageBytes(storageStatus?.trashBytes)}</span>
-                                </div>
-                            </div>
-
-                            <div className="rounded-[12px] border border-white/5 bg-black/20 px-3 py-2">
-                                <span className="block text-[8px] font-black uppercase tracking-wider text-white/35">Ruta de medios</span>
-                                <span className="mt-1 block break-all font-mono text-[10px] text-white/65">{storageStatus?.rootPath || folder}</span>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2">
-                                <button
-                                    type="button"
-                                    disabled={storageBusy || !isTauriRuntime()}
-                                    onClick={() => { void refreshStorageStatus(); }}
-                                    className="rounded-[10px] border border-white/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-white/65 transition hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                                >
-                                    {storageBusy ? 'Consultando…' : 'Actualizar uso'}
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={storageBusy}
-                                    onClick={() => { void handlePreviewPurge(); }}
-                                    className="rounded-[10px] border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-amber-200 transition hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-35"
-                                >
-                                    <FaTrashCan className="mr-1 inline" size={10} />
-                                    Previsualizar purga
-                                </button>
-                                {lastPurgeId && (
-                                    <button
-                                        type="button"
-                                        disabled={storageBusy}
-                                        onClick={() => { void handleUndoPurge(); }}
-                                        className="rounded-[10px] border border-[#25f4ee]/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[#25f4ee] transition hover:bg-[#25f4ee]/10 disabled:opacity-35"
-                                    >
-                                        <FaArrowRotateLeft className="mr-1 inline" size={10} />
-                                        Deshacer última purga
-                                    </button>
-                                )}
-                                <button
-                                    type="button"
-                                    disabled={!isTauriRuntime() || storageBusy || !(storageStatus?.trashBytes && storageStatus.trashBytes > 0)}
-                                    onClick={() => setTrashConfirming(true)}
-                                    className="rounded-[10px] border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-amber-200 transition hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-35"
-                                >
-                                    <FaTrashCan className="mr-1 inline" size={10} />
-                                    Vaciar papelera
-                                </button>
-                            </div>
-
-                            {trashConfirming && (
-                                <div className="rounded-[11px] border border-amber-400/25 bg-amber-400/5 p-2.5">
-                                    <p className="text-[9px] leading-relaxed text-amber-100/80">
-                                        Esta acción eliminará definitivamente los medios que ya están en la papelera y hará que sus purgas dejen de ser recuperables. No tocará transcript, segmentos, embeddings, metadata ni artifacts. ¿Confirmas?
-                                    </p>
-                                    <div className="mt-2 flex gap-2">
-                                        <button type="button" onClick={() => setTrashConfirming(false)} className="rounded-[8px] border border-white/10 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-white/55 hover:text-white">Ahora no</button>
-                                        <button type="button" disabled={storageBusy} onClick={() => { void handleEmptyTrash(); }} className="rounded-[8px] bg-amber-400/20 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-amber-100 hover:bg-amber-400/30 disabled:opacity-35">Eliminar definitivamente</button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {!isTauriRuntime() && (
-                                <p className="rounded-[10px] border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-[9px] leading-relaxed text-amber-200/75">
-                                    La medición y la purga requieren el shell nativo. En navegador no se borrará ningún archivo.
-                                </p>
-                            )}
-                            {storageMessage && <p role="status" className="rounded-[10px] border border-[#25f4ee]/15 bg-[#25f4ee]/5 px-3 py-2 text-[9px] leading-relaxed text-[#25f4ee]/80">{storageMessage}</p>}
-                            {storageError && <p role="alert" className="rounded-[10px] border border-[#fe2c55]/25 bg-[#fe2c55]/10 px-3 py-2 text-[9px] leading-relaxed text-[#fe2c55]">{storageError}</p>}
-
-                            {purgePreview && (
-                                <div className="rounded-[14px] border border-amber-400/20 bg-black/25 p-3">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <div>
-                                            <p className="text-[10px] font-black uppercase tracking-wider text-amber-200">Vista previa de candidatos</p>
-                                            <p className="mt-1 text-[9px] leading-relaxed text-white/45">{purgePreview.message || 'Revisa los elementos concretos antes de continuar.'}</p>
-                                        </div>
-                                        <span className="shrink-0 font-mono text-[9px] text-amber-200/80">{formatStorageBytes(selectedPurgeBytes)}</span>
-                                    </div>
-                                    <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
-                                        {storageCandidates.length > 0 ? storageCandidates.map((candidate) => {
-                                            const selected = purgeSelection.includes(candidate.jobId);
-                                            return (
-                                                <label key={candidate.jobId} className={`flex gap-2 rounded-[11px] border p-2.5 ${candidate.protected ? 'border-emerald-400/20 bg-emerald-400/5 opacity-70' : selected ? 'border-amber-400/30 bg-amber-400/5' : 'border-white/5 bg-black/20'}`}>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={selected}
-                                                        disabled={candidate.protected}
-                                                        onChange={() => setPurgeSelection((current) => selected ? current.filter((id) => id !== candidate.jobId) : [...current, candidate.jobId])}
-                                                        className="mt-0.5 accent-amber-400"
-                                                    />
-                                                    <span className="min-w-0 flex-1">
-                                                        <span className="flex items-center justify-between gap-2">
-                                                            <span className="truncate text-[10px] font-bold text-white/80">{candidate.title}</span>
-                                                            <span className="shrink-0 font-mono text-[9px] text-amber-200/80">{formatStorageBytes(candidate.mediaBytes)}</span>
-                                                        </span>
-                                                        <span className="mt-1 block text-[8px] leading-relaxed text-white/40">Job #{candidate.jobId} · interés explicable {candidate.interestScore}</span>
-                                                        <span className="mt-1 block text-[8px] leading-relaxed text-white/45">{candidate.reasons.join(' · ')}</span>
-                                                        <span className="mt-1 flex flex-wrap gap-1.5 text-[8px] font-bold uppercase tracking-wider">
-                                                            {candidate.favorite && <span className="text-amber-300"><FaStar className="mr-0.5 inline" size={8} />Favorito</span>}
-                                                            {candidate.pinned && <span className="text-[#25f4ee]"><FaThumbtack className="mr-0.5 inline" size={8} />Fijado</span>}
-                                                            {candidate.protected && <span className="text-emerald-300"><FaShieldHalved className="mr-0.5 inline" size={8} />Protegido</span>}
-                                                            <span className="text-white/35">{candidate.transcriptAvailable ? 'Ficha + transcript' : 'Ficha disponible'}</span>
-                                                        </span>
-                                                    </span>
-                                                </label>
-                                            );
-                                        }) : (
-                                            <p className="rounded-[10px] border border-white/5 bg-black/20 p-3 text-center text-[9px] text-white/40">No hay candidatos visibles. La aplicación conservará la ficha y el conocimiento local.</p>
-                                        )}
-                                    </div>
-                                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                                        <span className="text-[9px] text-white/45">{purgeSelection.length} seleccionado(s) · {purgePreview.native ? 'motor nativo' : 'modo informativo'}</span>
-                                        <div className="flex gap-2">
-                                            <button type="button" onClick={() => { setPurgePreview(null); setPurgeSelection([]); setPurgeConfirming(false); }} className="rounded-[9px] border border-white/10 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-white/55 hover:text-white">Cerrar</button>
-                                            <button type="button" disabled={!purgePreview.native || purgeSelection.length === 0 || storageBusy} onClick={() => setPurgeConfirming(true)} className="rounded-[9px] bg-amber-400/15 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-amber-200 hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-35">Revisar y confirmar</button>
-                                        </div>
-                                    </div>
-                                    {purgeConfirming && (
-                                        <div className="mt-3 rounded-[10px] border border-amber-400/25 bg-amber-400/5 p-2.5">
-                                            <p className="text-[9px] leading-relaxed text-amber-100/80">Se moverán únicamente los {purgeSelection.length} medios seleccionados a la papelera interna. No se tocarán transcript, segmentos, embeddings, metadata ni artifacts. ¿Confirmas?</p>
-                                            <div className="mt-2 flex gap-2">
-                                                <button type="button" onClick={() => setPurgeConfirming(false)} className="rounded-[8px] border border-white/10 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-white/55 hover:text-white">Ahora no</button>
-                                                <button type="button" disabled={storageBusy} onClick={() => { void handleApplyPurge(); }} className="rounded-[8px] bg-amber-400/20 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-amber-100 hover:bg-amber-400/30 disabled:opacity-35">Confirmar purga reversible</button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </SectionCard>
-
-                        <SectionCard className="flex flex-col gap-3">
-                            <div className="flex items-start justify-between gap-3">
-                                <SectionTitle icon={FaBrain} label="IA local" />
-                                <span className="rounded-full border border-[#8a5cff]/25 bg-[#8a5cff]/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-[#c4b5fd]">Sin nube</span>
-                            </div>
-                            <p className="text-[10px] leading-relaxed text-white/50">
-                                La síntesis y el chat usan un sidecar local de llama.cpp. El modelo se descarga sólo después de una acción explícita; tus transcripciones y fragmentos no se envían a un LLM remoto.
-                            </p>
-                            <div className="flex items-center justify-between gap-3 rounded-[11px] border border-white/5 bg-black/25 px-3 py-2 text-[9px]">
-                                <span className="text-white/40">Estado</span>
-                                <span className="font-mono font-bold text-[#c4b5fd]">{localLlmStatus?.state || 'comprobando…'}</span>
-                            </div>
-                            {localLlmStatus && localLlmStatus.totalBytes > 0 && localLlmStatus.state === 'downloading' && (
-                                <div className="rounded-[11px] border border-[#8a5cff]/20 bg-black/25 px-3 py-2 text-[9px] text-white/60">
-                                    Descargando {formatStorageBytes(localLlmStatus.bytesDownloaded)} de {formatStorageBytes(localLlmStatus.totalBytes)}
-                                    <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-[#8a5cff] transition-all" style={{ width: `${Math.min(100, (localLlmStatus.bytesDownloaded / localLlmStatus.totalBytes) * 100)}%` }} /></div>
-                                </div>
-                            )}
-                            {localLlmMessage && <p role="status" className="text-[9px] leading-relaxed text-[#25f4ee]/80">{localLlmMessage}</p>}
-                            {localLlmStatus?.errorCode && <p role="alert" className="text-[9px] leading-relaxed text-amber-200/80">Código de estado: {localLlmStatus.errorCode}</p>}
-                            <div className="flex flex-wrap gap-2">
-                                <button type="button" disabled={!isTauriRuntime() || localLlmBusy || localLlmStatus?.state === 'ready'} onClick={() => void prepareLocalLlm()} className="rounded-[9px] border border-[#8a5cff]/35 bg-[#8a5cff]/10 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-[#c4b5fd] hover:bg-[#8a5cff]/20 disabled:cursor-not-allowed disabled:opacity-35">
-                                    {localLlmBusy ? 'Preparando…' : localLlmStatus?.state === 'ready' ? 'Modelo listo' : 'Preparar modelo local'}
-                                </button>
-                                {localLlmStatus?.state === 'downloading' && <button type="button" onClick={() => void cancelLocalLlm()} className="rounded-[9px] border border-amber-300/25 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-amber-200 hover:bg-amber-300/10">Cancelar descarga</button>}
-                            </div>
-                        </SectionCard>
-
-                        <SectionCard className="flex flex-col gap-4">
-                            <SectionTitle icon={FaShieldHalved} label="Documentos legales" />
-                            <p className="text-[10px] leading-relaxed text-white/45">Consulta las condiciones del beta, privacidad, contenido autorizado, seguridad y avisos de terceros antes de distribuir o utilizar Pulsaria.</p>
-                            <div className="flex flex-wrap gap-x-3 gap-y-2 text-[9px] font-bold text-[#25f4ee]">
-                                <a href="https://github.com/danielunibe/PulsarIA/blob/main/EULA.es.md" target="_blank" rel="noreferrer" className="underline decoration-[#25f4ee]/40 underline-offset-2">EULA</a>
-                                <a href="https://github.com/danielunibe/PulsarIA/blob/main/PRIVACY.es.md" target="_blank" rel="noreferrer" className="underline decoration-[#25f4ee]/40 underline-offset-2">Privacidad</a>
-                                <a href="https://github.com/danielunibe/PulsarIA/blob/main/CONTENT_POLICY.es.md" target="_blank" rel="noreferrer" className="underline decoration-[#25f4ee]/40 underline-offset-2">Contenido</a>
-                                <a href="https://github.com/danielunibe/PulsarIA/blob/main/SECURITY.md" target="_blank" rel="noreferrer" className="underline decoration-[#25f4ee]/40 underline-offset-2">Seguridad</a>
-                            </div>
-                        </SectionCard>
-
-                        <SectionCard className="flex flex-col gap-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <SectionTitle icon={FaMicrochip} label="Análisis Local" />
-                                <span className="text-[9px] font-bold uppercase tracking-wider text-[#25f4ee]/70">
-                                    {selectedWhisperModel}
-                                </span>
-                            </div>
-                            <div className="flex items-center justify-between text-[10px] text-white/55">
-                                <span>Rapidez</span>
-                                <span className="font-bold text-white/80">{processingQuality < 35 ? 'Rápido' : processingQuality < 72 ? 'Equilibrado' : 'Alta calidad'}</span>
-                                <span>Precisión</span>
-                            </div>
-                            <input
-                                aria-label="Rapidez y calidad del procesamiento"
-                                type="range"
-                                min="0"
-                                max="100"
-                                step="1"
-                                value={processingQuality}
-                                onChange={(event) => setProcessingQuality(Number(event.target.value))}
-                                className="w-full accent-[#25f4ee] cursor-pointer"
-                            />
-                            <div className="grid grid-cols-2 gap-2">
-                                <button
-                                    type="button"
-                                    aria-pressed={videoFit === 'cover'}
-                                    onClick={() => setVideoFit('cover')}
-                                    className={`rounded-[12px] px-3 py-2 text-[10px] font-bold transition-colors ${videoFit === 'cover' ? 'bg-[#25f4ee]/15 text-[#25f4ee]' : 'bg-white/[.03] text-white/45 hover:text-white/75'}`}
-                                >
-                                    Rellenar video
-                                </button>
-                                <button
-                                    type="button"
-                                    aria-pressed={videoFit === 'contain'}
-                                    onClick={() => setVideoFit('contain')}
-                                    className={`rounded-[12px] px-3 py-2 text-[10px] font-bold transition-colors ${videoFit === 'contain' ? 'bg-[#25f4ee]/15 text-[#25f4ee]' : 'bg-white/[.03] text-white/45 hover:text-white/75'}`}
-                                >
-                                    Mostrar completo
-                                </button>
-                            </div>
-                            <p className="text-[10px] leading-relaxed text-white/40">
-                                {processingSetup.hardware?.gpu_name || 'GPU no detectada'} · {processingSetup.hardware?.logical_cores || '—'} hilos · {processingSetup.hardware?.whisper_gpu_supported ? 'Aceleración Whisper disponible' : 'Fallback CPU activo'}
-                            </p>
-                        </SectionCard>
-
-                        <SectionCard>
-                            <SectionTitle icon={FaBrain} label="Fuentes Privadas" />
-                            <select
-                                value={cookiesBrowser}
-                                onChange={(event) => setCookiesBrowser(event.target.value as typeof cookiesBrowser)}
-                                className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white/90 outline-none focus:border-[#8a5cff]/50 transition-colors cursor-pointer"
-                            >
-                                <option value="">Solo fuentes públicas</option>
-                                <option value="chrome">Chrome (sesión local)</option>
-                                <option value="edge">Edge (sesión local)</option>
-                                <option value="firefox">Firefox (sesión local)</option>
-                            </select>
-                            <p className="mt-2 px-1 text-[10px] text-white/40 leading-relaxed">
-                                Para likes, favoritos o playlists privadas, inicia sesión en el navegador elegido. Pulsaria usa el lector local de yt-dlp y no copia ni guarda las cookies.
-                            </p>
-                        </SectionCard>
-
-                        <SectionCard>
-                            <div className="flex items-center justify-between gap-3">
-                            <SectionTitle icon={FaTriangleExclamation} label={`${t('health')} y sincronización`} />
-                                <button
-                                    type="button"
-                                    disabled={healthBusy}
-                                    onClick={() => void runHealthAction(async () => {
-                                        const { invoke } = await import('@tauri-apps/api/core');
-                                        await invoke('repair_library');
-                                    })}
-                                    className="rounded-[9px] border border-white/10 px-2 py-1 text-[8px] font-black uppercase tracking-wider text-white/55 hover:text-white disabled:opacity-40"
-                                >
-                                    Reparar biblioteca
-                                </button>
-                            </div>
-                            <p className="mb-3 text-[10px] leading-relaxed text-white/40">Pulsaria se ejecuta en la bandeja, revisa las fuentes activas cada 15 minutos y conserva un diagnóstico sin cookies ni secretos.</p>
-                            {runtimeHealth && (
-                                <div className="mb-3 grid grid-cols-2 gap-2 text-[9px]">
-                                    <div className="rounded-[10px] bg-black/30 p-2">
-                                        <span className="block text-white/35">Whisper</span>
-                                        <span className={runtimeHealth.model.ready ? 'font-bold text-emerald-400' : 'font-bold text-amber-400'}>{runtimeHealth.model.model} · {runtimeHealth.model.ready ? 'listo' : 'requiere reparación'}</span>
-                                        {!runtimeHealth.model.ready && (
-                                            <button type="button" disabled={healthBusy} onClick={() => void runHealthAction(async () => { await processingSetup.prepareForQuality(processingQuality); })} className="mt-1 block text-[8px] font-black uppercase tracking-wider text-[#25f4ee] disabled:opacity-40">Preparar modelo</button>
-                                        )}
-                                        {processingSetup.preparing && (
-                                            <button type="button" onClick={() => void processingSetup.cancelPreparation()} className="mt-1 block text-[8px] font-black uppercase tracking-wider text-[#fe2c55]">Cancelar</button>
-                                        )}
-                                    </div>
-                                    <div className="rounded-[10px] bg-black/30 p-2">
-                                        <span className="block text-white/35">Cola única</span>
-                                        <span className={runtimeHealth.backpressure_active ? 'font-bold text-amber-400' : 'font-bold text-white/70'}>{runtimeHealth.queue_depth} pendientes</span>
-                                    </div>
-                                    <div className="rounded-[10px] bg-black/30 p-2">
-                                        <span className="block text-white/35">Workers</span>
-                                        <span className="font-bold text-white/70">{runtimeHealth.worker_capacity} disponibles · {runtimeHealth.idle_workers} en espera</span>
-                                    </div>
-                                    <div className="rounded-[10px] bg-black/30 p-2">
-                                        <span className="block text-white/35">Inicio Windows</span>
-                                        <span className={runtimeHealth.autostart_enabled ? 'font-bold text-emerald-400' : 'font-bold text-amber-400'}>{runtimeHealth.autostart_enabled ? 'activo' : 'no disponible'}</span>
-                                    </div>
-                                    <div className="rounded-[10px] bg-black/30 p-2">
-                                        <span className="block text-white/35">Gateway local</span>
-                                        <span className={runtimeHealth.api_ready ? 'font-bold text-emerald-400' : 'font-bold text-amber-400'}>{runtimeHealth.api_ready ? 'disponible' : 'no disponible'}</span>
-                                        {runtimeHealth.api_error && <span className="mt-1 block text-[8px] leading-relaxed text-[#fe2c55]">{runtimeHealth.api_error}</span>}
-                                    </div>
-                                </div>
-                            )}
-                            <div className="flex flex-col gap-2">
-                                {sources.map((source) => (
-                                    <div key={source.id} className="rounded-[12px] border border-white/8 bg-black/30 p-3">
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div className="min-w-0">
-                                                <p className="truncate text-[10px] font-bold text-white/80" title={source.url}>{source.url}</p>
-                                                <p className="mt-1 text-[9px] uppercase tracking-wider text-white/35">{source.source_type} · {source.discovered_count} detectados · {source.consecutive_failures} fallos</p>
-                                            </div>
-                                            <span className={`rounded-full px-2 py-0.5 text-[8px] font-black uppercase ${source.active ? 'bg-[#25f4ee]/10 text-[#25f4ee]' : 'bg-white/5 text-white/35'}`}>{source.active ? 'Activa' : 'Pausada'}</span>
-                                        </div>
-                                        {source.last_error && <p className="mt-2 text-[9px] leading-relaxed text-[#fe2c55]">{source.last_error}</p>}
-                                        <div className="mt-2 flex gap-2">
-                                            <button type="button" disabled={healthBusy} onClick={() => void runHealthAction(async () => { const { invoke } = await import('@tauri-apps/api/core'); await invoke('set_collection_source_active', { sourceId: source.id, active: !source.active }); })} className="text-[8px] font-black uppercase tracking-wider text-white/55 hover:text-white">{source.active ? 'Pausar' : 'Reactivar'}</button>
-                                            <button type="button" disabled={healthBusy || !source.active} onClick={() => void runHealthAction(async () => { const { invoke } = await import('@tauri-apps/api/core'); await invoke('sync_collection_source_now', { sourceId: source.id }); })} className="text-[8px] font-black uppercase tracking-wider text-[#25f4ee] disabled:opacity-35">Sincronizar ahora</button>
-                                            <button type="button" disabled={healthBusy} onClick={() => setPendingSourceDelete(source)} className="ml-auto text-[8px] font-black uppercase tracking-wider text-[#fe2c55]">Eliminar</button>
-                                        </div>
-                                    </div>
-                                ))}
-                                {sources.length === 0 && <p className="rounded-[12px] border border-white/5 bg-black/20 p-3 text-center text-[10px] text-white/35">Pega un perfil, favoritos, Me gusta o colección de TikTok para registrarlo.</p>}
-                            </div>
-                            <div className="mt-3 max-h-32 space-y-1 overflow-y-auto rounded-[12px] bg-black/25 p-2">
-                                {healthEvents.slice(0, 12).map((event) => (
-                                    <div key={event.id} className="flex gap-2 border-b border-white/5 py-1.5 text-[9px] last:border-0">
-                                        <span className={event.severity === 'error' ? 'text-[#fe2c55]' : event.severity === 'warning' ? 'text-amber-400' : 'text-[#25f4ee]'}>{event.severity.toUpperCase()}</span>
-                                        <span className="min-w-0 flex-1 text-white/55">{event.component}: {event.diagnosis}</span>
-                                    </div>
-                                ))}
-                                {healthEvents.length === 0 && <p className="py-2 text-center text-[9px] text-white/30">Sin incidencias registradas.</p>}
-                            </div>
-                        </SectionCard>
-
-                        <SectionCard className="flex flex-col gap-3">
-                            <div className="flex items-start justify-between gap-3">
-                                <SectionTitle icon={FaRotate} label={t('updater')} />
-                                <span className="rounded-full border border-[#25f4ee]/25 bg-[#25f4ee]/10 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-[#25f4ee]">
-                                    {updaterBlocked ? 'Bloqueado externamente' : `Firmado · canal ${updaterChannel}`}
-                                </span>
-                            </div>
-                            <p className="text-[10px] leading-relaxed text-white/45">
-                                {updaterBlocked
-                                    ? 'El updater permanecerá bloqueado hasta contar con un manifiesto firmado, clave pública y artefactos oficiales verificables.'
-                                    : 'Pulsaria comprueba nuevas releases una vez al día y solo instala una actualización firmada después de tu confirmación.'}
-                            </p>
-
-                            {(updaterBlocked || !updater.isNative) && (
-                                <p className="rounded-[10px] border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-[9px] leading-relaxed text-amber-300/80">
-                                    Las actualizaciones firmadas no están disponibles en este build; no se ejecutará ninguna instalación sin evidencia de firma.
-                                </p>
-                            )}
-
-                            <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0" aria-live="polite">
-                                    <span className="block text-[9px] font-black uppercase tracking-wider text-white/35">Estado</span>
-                                    <span className="block truncate text-[10px] font-bold text-white/75">
-                                        {updater.status === 'idle' && 'Sin comprobar'}
-                                        {updater.status === 'checking' && 'Comprobando…'}
-                                        {updater.status === 'up-to-date' && 'Pulsaria está actualizado'}
-                                        {updater.status === 'available' && `Disponible: ${updater.version}`}
-                                        {updater.status === 'downloading' && `Descargando… ${updater.progress}%`}
-                                        {updater.status === 'installing' && 'Instalando y preparando reinicio…'}
-                                        {updater.status === 'blocked-by-active-job' && 'Esperando a que terminen los trabajos activos'}
-                                        {updater.status === 'error' && 'No se pudo actualizar'}
-                                    </span>
-                                </div>
-                                <button
-                                    type="button"
-                                    disabled={updaterBlocked || !updater.isNative || updater.status === 'checking' || updater.status === 'downloading' || updater.status === 'installing'}
-                                    onClick={() => {
-                                        setUpdateConfirming(false);
-                                        void updater.checkForUpdate();
-                                    }}
-                                    className="shrink-0 rounded-[10px] border border-[#25f4ee]/30 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[#25f4ee] transition hover:bg-[#25f4ee]/10 disabled:cursor-not-allowed disabled:opacity-35"
-                                >
-                                    {updater.status === 'checking' ? 'Comprobando…' : 'Buscar actualizaciones'}
-                                </button>
-                            </div>
-
-                            {updater.status === 'available' && updater.version && !updaterBlocked && (
-                                <div className="rounded-[12px] border border-[#25f4ee]/20 bg-[#25f4ee]/5 p-3">
-                                    <p className="text-[10px] font-black text-white">Versión {updater.version} disponible</p>
-                                    <p className="mt-1 text-[9px] leading-relaxed text-white/50">
-                                        {updater.notes || 'Incluye mejoras de estabilidad y seguridad.'}
-                                    </p>
-                                    {!updateConfirming ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => setUpdateConfirming(true)}
-                                            className="mt-3 rounded-[9px] bg-[#25f4ee]/15 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[#25f4ee] transition hover:bg-[#25f4ee]/25"
-                                        >
-                                            Preparar instalación
-                                        </button>
-                                    ) : (
-                                        <div className="mt-3 rounded-[10px] border border-amber-400/20 bg-amber-400/5 p-2.5">
-                                            <p className="text-[9px] leading-relaxed text-amber-200/80">
-                                                Pulsaria descargará la actualización firmada y se reiniciará. Guarda cualquier trabajo abierto antes de continuar.
-                                            </p>
-                                            <div className="mt-2 flex gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setUpdateConfirming(false)}
-                                                    className="rounded-[8px] border border-white/10 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-white/55 transition hover:text-white"
-                                                >
-                                                    Ahora no
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setUpdateConfirming(false);
-                                                    void updater.installUpdate();
-                                                    }}
-                                                    className="rounded-[8px] bg-[#25f4ee]/20 px-2.5 py-1.5 text-[8px] font-black uppercase tracking-wider text-[#25f4ee] transition hover:bg-[#25f4ee]/30"
-                                                >
-                                                    Confirmar e instalar
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {(updater.status === 'downloading' || updater.status === 'installing') && (
-                                <div className="rounded-[10px] bg-black/30 p-2.5" aria-live="polite">
-                                    <div className="mb-1 flex items-center justify-between text-[9px] text-white/45">
-                                        <span>{updater.status === 'installing' ? 'Instalando' : 'Descargando'}</span>
-                                        <span className="font-mono text-[#25f4ee]">{updater.progress}%</span>
-                                    </div>
-                                    <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-                                        <div className="h-full rounded-full bg-[#25f4ee] transition-[width]" style={{ width: `${Math.max(2, updater.progress)}%` }} />
-                                    </div>
-                                </div>
-                            )}
-
-                            {updater.error && (
-                                <p role="alert" className="rounded-[10px] border border-[#fe2c55]/25 bg-[#fe2c55]/10 px-3 py-2 text-[9px] leading-relaxed text-[#fe2c55]">
-                                    {updater.error}
-                                </p>
-                            )}
-                        </SectionCard>
-
-                        {/* Save Folder */}
-                        <SectionCard>
-
-                            <SectionTitle icon={SolidFolderIcon} label={t('saveFolder')} />
-                            <div
-                                className="flex items-center gap-2 px-3 py-2.5 rounded-[12px] bg-black/40 border border-white/10"
-                            >
-                                <div className="flex-shrink-0 flex items-center justify-center text-white/40">
-                                    <SolidFolderIcon />
-                                </div>
-                                <input
-                                    type="text"
-                                    value={folder}
-                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFolder(e.target.value)}
-                                    className="flex-1 bg-transparent outline-none font-mono text-xs text-white"
-                                    placeholder="~/Descargas/TikTok"
-                                />
-                            </div>
-                            <p className="mt-2 px-1 text-[10px] text-white/40 leading-relaxed">
-                                Los videos procesados se almacenan automáticamente en este directorio.
-                            </p>
-                        </SectionCard>
-
-                        <SectionCard className="flex flex-col gap-3">
-                            <SectionTitle icon={FaHardDrive} label={t('systemStorage')} />
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-white/55">
-                                Intención de uso
-                                <select
-                                    value={storageIntent}
-                                    onChange={(event) => setStorageIntent(event.target.value as typeof storageIntent)}
-                                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs font-normal normal-case tracking-normal text-white outline-none focus:border-[#25f4ee]/50"
-                                >
-                                    <option value="knowledge">Conocimiento local</option>
-                                    <option value="balanced">Equilibrado</option>
-                                    <option value="archive">Archivo multimedia</option>
-                                </select>
-                            </label>
-                            <div className="grid grid-cols-2 gap-2">
-                                <label className="text-[9px] font-bold uppercase tracking-wider text-white/45">
-                                    Cuota (GiB)
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        step="1"
-                                        value={Math.max(1, Math.round(quotaBytes / BYTES_PER_GIB))}
-                                        onChange={(event) => setQuotaBytes(Math.max(1, Number(event.target.value) || 1) * BYTES_PER_GIB)}
-                                        className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs font-normal normal-case tracking-normal text-white outline-none focus:border-[#25f4ee]/50"
-                                    />
-                                </label>
-                                <label className="text-[9px] font-bold uppercase tracking-wider text-white/45">
-                                    Reserva (GiB)
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        step="1"
-                                        value={Math.max(1, Math.round(reserveBytes / BYTES_PER_GIB))}
-                                        onChange={(event) => setReserveBytes(Math.max(1, Number(event.target.value) || 1) * BYTES_PER_GIB)}
-                                        className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs font-normal normal-case tracking-normal text-white outline-none focus:border-[#25f4ee]/50"
-                                    />
-                                </label>
-                            </div>
-                            <p className="text-[9px] leading-relaxed text-white/40">La cuota se comprueba contra el espacio libre real de la unidad y la reserva no puede ser consumida por medios.</p>
-                            <label className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-[10px] text-white/70">
-                                <span>
-                                    <span className="block font-bold text-white/80">Iniciar con Windows</span>
-                                    <span className="block text-[9px] text-white/35">Pulsaria se mantiene en la bandeja con --background.</span>
-                                </span>
-                                <input
-                                    type="checkbox"
-                                    checked={autostartEnabled}
-                                    disabled={!isTauriRuntime()}
-                                    onChange={(event) => setAutostartEnabled(event.target.checked)}
-                                    className="h-4 w-4 accent-[#25f4ee]"
-                                />
-                            </label>
-                        </SectionCard>
-                    </>
+                    <GeneralTab
+                        locale={locale}
+                        setLocale={setLocale}
+                        t={t}
+                        selectedTheme={selectedTheme}
+                        handleSelectTheme={handleSelectTheme}
+                        formats={formats}
+                        toggleFormat={toggleFormat}
+                        videoFit={videoFit}
+                        setVideoFit={setVideoFit}
+                        folder={folder}
+                        setFolder={setFolder}
+                        autostartEnabled={autostartEnabled}
+                        setAutostartEnabled={(enabled) => { setAutostartEnabled(enabled); setStartInBackground(enabled); }}
+                        keepInTrayOnClose={keepInTrayOnClose}
+                        setKeepInTrayOnClose={setKeepInTrayOnClose}
+                        isTauri={isTauriRuntime()}
+                        onReviewConsent={onReviewConsent}
+                        subtitleEnabled={subtitleEnabled}
+                        setSubtitleEnabled={setSubtitleEnabled}
+                        subtitleStyle={subtitleStyle}
+                        setSubtitleStyle={setSubtitleStyle}
+                        playbackProfile={playbackProfile}
+                        setPlaybackProfile={(profile) => {
+                            setPlaybackProfile(profile);
+                            if (profile !== 'gpu-experimental') setPerformanceMode(profile);
+                        }}
+                        gpuEnhancementEnabled={gpuEnhancementEnabled}
+                        setGpuEnhancementEnabled={setGpuEnhancementEnabled}
+                        showTikTokPill={showTikTokPill}
+                        setShowTikTokPill={setShowTikTokPill}
+                        hoverAutoplay={hoverAutoplay}
+                        setHoverAutoplay={setHoverAutoplay}
+                         showDemoVideos={showDemoVideos}
+                         setShowDemoVideos={setShowDemoVideos}
+                         pageConfig={pageConfig}
+                         onPageConfigChange={onPageConfigChange}
+                         searchMode={searchMode}
+                         onSearchModeChange={onSearchModeChange}
+                     />
                 )}
 
-                {/* TAB: ESTADÍSTICAS */}
-                {activeTab === 'stats' && (
-                    <SectionCard className="flex flex-col gap-4">
-                        <SectionTitle icon={FaChartSimple} label={t('libraryMetrics')} />
-
-                        <div className="grid grid-cols-2 gap-2.5">
-                            <div className="flex flex-col p-3 rounded-[14px] bg-black/40 border border-white/5 shadow-inner">
-                                <span className="text-white/40 text-[9px] uppercase font-bold tracking-widest mb-1">Total Videos</span>
-                                <span className="text-white font-black text-2xl leading-none">{stats.total}</span>
-                            </div>
-                            <div className="flex flex-col p-3 rounded-[14px] bg-black/40 border border-white/5 shadow-inner">
-                                <span className="text-white/40 text-[9px] uppercase font-bold tracking-widest mb-1">Duración Total</span>
-                                <span className="text-white font-black text-2xl leading-none truncate">{formatDuration(stats.totalDuration)}</span>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center justify-between p-3.5 rounded-[14px] bg-black/30 border border-white/5">
-                            <span className="text-white/40 text-[9px] uppercase font-bold tracking-widest">Fuente del MVP</span>
-                            <span className="text-[#fe2c55] text-xs font-black tracking-wider">TIKTOK</span>
-                        </div>
-
-                        <div className="flex items-center justify-between p-3 rounded-[12px] bg-white/[0.02] border border-white/5">
-                            <span className="text-white/50 text-[10px] uppercase font-bold tracking-wider">Actividad esta semana</span>
-                            <span className="text-emerald-400 font-black text-sm font-mono">+{stats.thisWeek} videos</span>
-                        </div>
-                    </SectionCard>
+                {activeTab === 'performance' && (
+                    <PerformanceTab
+                        isTauri={isTauriRuntime()}
+                        mode={performanceMode}
+                        setMode={changePerformanceMode}
+                        backgroundProcessing={backgroundProcessing}
+                        setBackgroundProcessing={setBackgroundProcessing}
+                        idleThresholdSeconds={idleThresholdSeconds}
+                        setIdleThresholdSeconds={setIdleThresholdSeconds}
+                        acOnlyForMaximum={acOnlyForMaximum}
+                        setAcOnlyForMaximum={setAcOnlyForMaximum}
+                        preferredAdapterId={preferredAdapterId}
+                        setPreferredAdapterId={setPreferredAdapterId}
+                        analysisDepth={analysisDepth}
+                        setAnalysisDepth={setAnalysisDepth}
+                        startInBackground={startInBackground}
+                        status={accelerationStatus}
+                        policy={performancePolicy}
+                        benchmarkBusy={benchmarkBusy}
+                        onBenchmark={runAccelerationBenchmark}
+                        onReset={resetPerformanceProfile}
+                    />
                 )}
 
-                {/* TAB: MOTOR SEMÁNTICO (ENGINE) */}
                 {activeTab === 'engine' && (
-                    <SectionCard className="flex flex-col gap-4">
-                        <div className="flex items-center justify-between">
-                            <SectionTitle icon={FaMicrochip} label="Motor Semántico ONNX" />
-                                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold border flex items-center gap-1 ${
-                                modelOnline === false
-                                    ? 'bg-[#fe2c55]/10 text-[#fe2c55] border-[#fe2c55]/30'
-                                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                            }`}>
-                                <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${modelOnline === false ? 'bg-[#fe2c55]' : 'bg-emerald-400'}`} />
-
-                                                                {modelOnline === null ? 'COMPROBANDO...' : modelOnline ? 'ONLINE' : 'NO DISPONIBLE'}
-
-                            </span>
-                        </div>
-
-                        {/* Model Specs Card */}
-                        <div className="p-3.5 rounded-[14px] bg-black/40 border border-[#25f4ee]/20 flex flex-col gap-2">
-                            <div className="flex items-center justify-between">
-                                <span className="text-xs font-black text-white">all-MiniLM-L6-v2</span>
-                                <span className="text-[10px] font-mono text-[#25f4ee]">ONNX Runtime</span>
-                            </div>
-                            <p className="text-[11px] text-white/50 leading-relaxed">
-                                Pipeline neuronal acelerado por CPU/GPU para cálculo de embeddings densos y búsqueda vectorial instantánea.
-                            </p>
-                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5 text-[10px] text-white/60">
-                                <div><strong className="text-white/80">Dimensión:</strong> 384 dimensiones</div>
-                                <div><strong className="text-white/80">Métrica:</strong> Distancia Coseno</div>
-                                <div><strong className="text-white/80">Shards HNSW:</strong> {hnswShards} particiones</div>
-                                <div><strong className="text-white/80">Embeddings:</strong> {stats.total} vectores</div>
-                            </div>
-                        </div>
-
-                        {/* Similarity Threshold Slider */}
-                        <div className="p-3.5 rounded-[14px] bg-black/30 border border-white/5 flex flex-col gap-2.5">
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] uppercase font-bold tracking-wider text-white/60">Umbral de Similitud Semántica</span>
-                                <span className="text-xs font-mono font-bold text-[#25f4ee]">{(similarityThreshold * 100).toFixed(0)}%</span>
-                            </div>
-                                                        <input
-                                type="range"
-                                aria-label="Umbral de similitud semántica"
-                                min="0.2"
-                                max="0.9"
-                                step="0.05"
-
-                                value={similarityThreshold}
-                                onChange={(e) => setSimilarityThreshold(parseFloat(e.target.value))}
-                                className="w-full accent-[#25f4ee] cursor-pointer"
-                            />
-                            <span className="text-[9px] text-white/40 leading-tight">
-                                Coincidencias con puntuación menor serán descartadas en la búsqueda inteligente.
-                            </span>
-                        </div>
-                    </SectionCard>
+                    <EngineTab
+                        modelOnline={modelOnline}
+                        hnswShards={hnswShards}
+                        statsTotal={stats.total}
+                        similarityThreshold={similarityThreshold}
+                        setSimilarityThreshold={setSimilarityThreshold}
+                        selectedWhisperModel={selectedWhisperModel}
+                        processingQuality={processingQuality}
+                        setProcessingQuality={setProcessingQuality}
+                        processingSetup={processingSetup}
+                        cookiesBrowser={cookiesBrowser}
+                        setCookiesBrowser={setCookiesBrowser}
+                        runtimeHealth={runtimeHealth}
+                        healthBusy={healthBusy}
+                        runHealthAction={runHealthAction}
+                        sources={sources}
+                        setPendingSourceDelete={setPendingSourceDelete}
+                        healthEvents={healthEvents}
+                        updater={updater}
+                        updaterBlocked={updaterBlocked}
+                        updaterChannel={updaterChannel}
+                        updateConfirming={updateConfirming}
+                        setUpdateConfirming={setUpdateConfirming}
+                        t={t}
+                    />
                 )}
 
-                {/* TAB: INTELIGENCIA ARTIFICIAL & CLUSTERS (AI) */}
                 {activeTab === 'ai' && (
-                    <SectionCard className="flex flex-col gap-4">
-                        <div className="flex items-center justify-between">
-                            <SectionTitle icon={FaBrain} label="Clustering & Grafos IA" />
-                                                        <button
-                                type="button"
-                                aria-label="Ejecutar clustering"
-                                onClick={runClustering}
+                    <AiTab
+                        localLlmStatus={localLlmStatus}
+                        localLlmBusy={localLlmBusy}
+                        localLlmMessage={localLlmMessage}
+                        prepareLocalLlm={prepareLocalLlm}
+                        cancelLocalLlm={cancelLocalLlm}
+                        isTauri={isTauriRuntime()}
+                        clusterThreshold={clusterThreshold}
+                        setClusterThreshold={setClusterThreshold}
+                        clusterMinSize={clusterMinSize}
+                        setClusterMinSize={setClusterMinSize}
+                        organizationCondition={organizationCondition}
+                        setOrganizationCondition={setOrganizationCondition}
+                        clustersList={clustersList}
+                        clusteringLoading={clusteringLoading}
+                        clusteringError={clusteringError}
+                        runClustering={runClustering}
+                        onPlaylistSelect={onPlaylistSelect}
+                        onClose={onClose}
+                    />
+                )}
 
-                                disabled={clusteringLoading}
-                                className="px-3 py-1 rounded-[10px] bg-[#8a5cff]/20 hover:bg-[#8a5cff]/30 text-[#8a5cff] border border-[#8a5cff]/40 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                            >
-                                <FaPlay size={8} />
-                                {clusteringLoading ? 'Agrupando...' : 'Ejecutar'}
-                            </button>
-                        </div>
-
-                        <p className="text-[11px] text-white/50 leading-relaxed">
-                            Crea colecciones automáticamente por similitud de transcripciones o usando una condición escrita por ti.
-                        </p>
-                        {clusteringError && (
-                            <div role="alert" className="rounded-xl border border-[#fe2c55]/30 bg-[#fe2c55]/10 px-3 py-2 text-[10px] text-[#fe2c55]">
-                                No se pudo ejecutar el clustering: {clusteringError}
-                            </div>
-                        )}
-
-                        <div className="p-3.5 rounded-[14px] bg-black/30 border border-white/5 flex flex-col gap-2.5">
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] uppercase font-bold tracking-wider text-white/60">Afinidad Mínima del Cluster</span>
-                                <span className="text-xs font-mono font-bold text-[#8a5cff]">{(clusterThreshold * 100).toFixed(0)}%</span>
-                            </div>
-                                                        <input
-                                type="range"
-                                aria-label="Afinidad mínima del cluster"
-                                min="0.5"
-                                max="0.95"
-                                step="0.05"
-
-                                value={clusterThreshold}
-                                                                onChange={(e) => setClusterThreshold(parseFloat(e.target.value))}
-                                className="w-full accent-[#8a5cff] cursor-pointer"
-                            />
-                        </div>
-
-                        <label className="flex items-center justify-between gap-3 p-3.5 rounded-[14px] bg-black/30 border border-white/5 text-[10px] uppercase font-bold tracking-wider text-white/60">
-                            Tamaño mínimo del cluster
-                            <input
-                                type="number"
-                                aria-label="Tamaño mínimo del cluster"
-                                min="2"
-                                max="50"
-                                value={clusterMinSize}
-                                onChange={(e) => setClusterMinSize(Math.min(50, Math.max(2, Number(e.target.value) || 2)))}
-                                className="w-16 rounded-lg bg-black/50 border border-white/10 px-2 py-1 text-right text-xs font-mono text-white outline-none focus:border-[#8a5cff]/50"
-                            />
-                        </label>
-
-                        <label className="flex flex-col gap-2 p-3.5 rounded-[14px] bg-black/30 border border-white/5 text-[10px] uppercase font-bold tracking-wider text-white/60">
-                            Condición opcional
-                            <input
-                                type="text"
-                                aria-label="Condición para organizar videos"
-                                value={organizationCondition}
-                                onChange={(e) => setOrganizationCondition(e.target.value)}
-                                placeholder="Ej. videos sobre diseño y tecnología"
-                                className="rounded-[10px] bg-black/50 border border-white/10 px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-white outline-none focus:border-[#8a5cff]/50"
-                            />
-                        </label>
-
-                        {/* Clusters List */}
-
-                        <div className="flex flex-col gap-2">
-                            <span className="text-[9px] uppercase font-bold tracking-widest text-white/40">
-                                Grupos Semánticos Detectados ({clustersList.length})
-                            </span>
-                            {clustersList.length > 0 ? (
-                                clustersList.map((group, idx) => (
-                                    <div key={idx} className="p-3 rounded-[12px] bg-black/40 border border-[#8a5cff]/20 flex items-center justify-between gap-3">
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-6 h-6 rounded-[8px] bg-[#8a5cff]/15 flex items-center justify-center text-[#8a5cff] font-bold text-xs">
-                                                #{idx + 1}
-                                            </div>
-                                            <span className="text-xs font-bold text-white truncate">{group.name}</span>
-                                        </div>
-                                        <div className="flex shrink-0 items-center gap-2">
-                                            <span className="text-[10px] font-mono text-[#8a5cff] font-bold">{group.count} videos</span>
-                                            {group.playlistId && <button type="button" onClick={() => { onPlaylistSelect?.(group.playlistId ?? null); onClose(); }} className="rounded-[8px] border border-[#25f4ee]/30 px-2 py-1 text-[8px] font-black uppercase tracking-wider text-[#25f4ee] transition hover:bg-[#25f4ee]/10">Ver</button>}
-                                        </div>
-                                    </div>
-                                ))
-                            ) : (
-                                <div className="p-4 rounded-[12px] bg-black/20 border border-white/5 text-center text-[10px] text-white/40">
-                                                                        Presiona «Ejecutar» para descubrir clusters temáticos en tu biblioteca.
-
-                                </div>
-                            )}
-                        </div>
-                    </SectionCard>
+                {activeTab === 'stats' && (
+                    <StatsTab
+                        stats={stats}
+                        formatDuration={formatDuration}
+                        storageStatus={storageStatus}
+                        storageStateClass={storageStateClass}
+                        storageStateLabel={storageStateLabel}
+                        storageBusy={storageBusy}
+                        storageMessage={storageMessage}
+                        storageError={storageError}
+                        refreshStorageStatus={refreshStorageStatus}
+                        folder={folder}
+                        retention={retention}
+                        handleRetentionChange={handleRetentionChange}
+                        retentionPreviewPending={retentionPreviewPending}
+                        setRetention={setRetention}
+                        setRetentionPreviewPending={setRetentionPreviewPending}
+                        purgePreview={purgePreview}
+                        setPurgePreview={setPurgePreview}
+                        storageCandidates={storageCandidates}
+                        purgeSelection={purgeSelection}
+                        setPurgeSelection={setPurgeSelection}
+                        storageIntent={storageIntent}
+                        setStorageIntent={setStorageIntent}
+                        quotaBytes={quotaBytes}
+                        setQuotaBytes={setQuotaBytes}
+                        reserveBytes={reserveBytes}
+                        setReserveBytes={setReserveBytes}
+                        handlePreviewPurge={handlePreviewPurge}
+                        lastPurgeId={lastPurgeId}
+                        handleUndoPurge={handleUndoPurge}
+                        trashConfirming={trashConfirming}
+                        setTrashConfirming={setTrashConfirming}
+                        handleEmptyTrash={handleEmptyTrash}
+                        purgeConfirming={purgeConfirming}
+                        setPurgeConfirming={setPurgeConfirming}
+                        handleApplyPurge={handleApplyPurge}
+                        selectedPurgeBytes={selectedPurgeBytes}
+                        isTauri={isTauriRuntime()}
+                        t={t}
+                    />
                 )}
             </div>
 
@@ -2129,7 +1501,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                     className="w-full py-2.5 rounded-[12px] font-black tracking-[0.15em] uppercase text-white transition-all active:scale-[0.98] cursor-pointer"
                     style={{
                         background: 'linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03))',
-                        border: '1px solid rgba(255,255,255,0.2)',
+                        border: 'none',
                         boxShadow: `0 4px 15px rgba(0,0,0,0.5)`,
                         fontSize: '12px',
                     }}
@@ -2139,7 +1511,7 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
                 <button
                     type="button"
                     onClick={handleCancel}
-                    className="rounded-[12px] border border-white/10 px-4 text-[10px] font-black uppercase tracking-wider text-white/55 transition hover:bg-white/5 hover:text-white"
+                    className="rounded-[12px] border-0 bg-white/5 px-4 text-[10px] font-black uppercase tracking-wider text-white/55 transition hover:bg-white/10 hover:text-white"
                 >
                     {t('cancel')}
                 </button>
@@ -2148,4 +1520,3 @@ export function SettingsPanel({ onClose, jobs = [], onPlaylistSelect }: Settings
         </div>
     );
 }
-

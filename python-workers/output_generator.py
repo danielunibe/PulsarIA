@@ -91,6 +91,8 @@ def _video_export(source: Path, destination: Path, format_name: str) -> None:
         "webm": ["-c:v", "libvpx-vp9", "-c:a", "libopus"],
         "mov": ["-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart"],
     }
+    if os.environ.get("PULSAR_FFMPEG_VIDEO_ENCODER", "cpu").strip().lower() == "nvenc" and format_name in {"mp4", "mov"}:
+        codecs[format_name] = ["-c:v", "h264_nvenc", "-c:a", "aac", "-movflags", "+faststart"]
     try:
         _run_ffmpeg([ffmpeg, "-i", str(source), "-y", *codecs[format_name], str(temporary)], temporary)
         os.replace(temporary, destination)
@@ -198,5 +200,6 @@ def generate_outputs(
             "size_bytes": destination.stat().st_size,
             "validated": True,
             "label": f"{category.upper()} {format_name.upper()}",
+            "backend": "NVENC" if category == "video" and os.environ.get("PULSAR_FFMPEG_VIDEO_ENCODER", "cpu").strip().lower() == "nvenc" and format_name in {"mp4", "mov"} else "CPU",
         })
     return outputs

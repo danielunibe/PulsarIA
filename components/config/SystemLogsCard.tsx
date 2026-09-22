@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef } from 'react';
 import { LogEntry } from '../../types/semanticConfig';
-import { FaTerminal } from 'react-icons/fa6';
+import { FaTerminal } from '@/components/icon-library';
 
 export default function SystemLogsCard({ logs }: { logs: LogEntry[] }) {
   const terminalRef = useRef<HTMLDivElement>(null);

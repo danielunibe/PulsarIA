@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { DebugSearchResult } from '../../types/semanticConfig';
-import { FaTerminal, FaPlay, FaMagnifyingGlass, FaClock } from 'react-icons/fa6';
+import { FaTerminal, FaPlay, FaMagnifyingGlass, FaClock } from '@/components/icon-library';
 
 interface Props {
   actions: { debugSearch: (query: string) => Promise<DebugSearchResult> };

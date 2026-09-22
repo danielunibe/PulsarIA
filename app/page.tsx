@@ -1,17 +1,23 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 
-import { Sidebar } from '@/components/Sidebar';
-import { Header, WindowTitlebar, type SearchMode } from '@/components/Header';
+import { Sidebar, type GlobalSection } from '@/components/Sidebar';
+import { Header, type SearchMode } from '@/components/Header';
+import { AddLinks } from '@/components/AddLinks';
+import { QueueSection } from '@/components/QueueSection';
+import { NotificationsPopover } from '@/components/NotificationsPopover';
+import { PlaylistsPanel } from '@/components/PlaylistsPanel';
+import { SettingsPanel } from '@/components/SettingsPanel';
+import { SpotlightSearch } from '@/components/SpotlightSearch';
 
 import { VideoGrid } from '@/components/VideoGrid';
 import { toast } from 'sonner';
 import { useScrollParallax } from '@/hooks/useScrollParallax';
-import { FaMagnifyingGlass, FaArrowLeft, FaBrain } from 'react-icons/fa6';
+import { FaMagnifyingGlass, FaArrowLeft, FaBrain } from '@/components/icon-library';
 
 import { useSettings } from '@/lib/settings-context';
 import { useI18n } from '@/lib/i18n';
@@ -29,6 +35,7 @@ import type { PageConfig, SortKey } from '@/components/PagePanel';
 import type { CinemaVideo, VideoData } from '@/types';
 import { apiFetch } from '@/lib/api-client';
 import { LocalizedErrorBoundary } from '@/components/ErrorBoundary';
+import { ContextMenu, type PulsariaContextMenuAction, type PulsariaContextMenuKind } from '@/components/ContextMenu';
 
 type SearchVideoDetails = VideoData & {
     sourceState?: 'local' | 'online' | 'unavailable';
@@ -44,11 +51,6 @@ const ColorBends = dynamic(
 
 const ExpandedVideoModal = dynamic(
     () => import('@/components/ExpandedVideoModal').then((mod) => mod.ExpandedVideoModal),
-    { ssr: false }
-);
-
-const SettingsPanel = dynamic(
-    () => import('@/components/SettingsPanel').then((mod) => mod.SettingsPanel),
     { ssr: false }
 );
 
@@ -71,6 +73,13 @@ const DEFAULT_PAGE_CONFIG: PageConfig = {
     platformFilter: 'all',
 };
 
+interface ContextMenuState {
+    x: number;
+    y: number;
+    kind: PulsariaContextMenuKind;
+    videoId?: number;
+}
+
 function formatJobDuration(value: unknown): string {
     const seconds = Math.max(0, Math.floor(Number(value) || 0));
     const minutes = Math.floor(seconds / 60);
@@ -91,18 +100,32 @@ function loadPageConfig(): PageConfig {
 
 export default function Page() {
 
-    const { settings } = useSettings();
+    const { settings, updateSettings } = useSettings();
     const { t } = useI18n();
     const processingSetup = useProcessingSettings();
     const legalConsent = useLegalConsent();
-    const legalGateReady = !isTauriRuntime() || legalConsent.accepted;
+    // Resolve the native shell only after the first client render. Tauri is
+    // detectable from `window`, so reading it during render makes the native
+    // client tree differ from the SSR tree and triggers hydration failures.
+    const [runtimeResolved, setRuntimeResolved] = useState(false);
+    useEffect(() => {
+        setRuntimeResolved(true);
+    }, []);
+    const nativeShell = runtimeResolved && isTauriRuntime();
+    const legalGateReady = !nativeShell || legalConsent.accepted;
     const [welcomeAnimationVisible, setWelcomeAnimationVisible] = useState(false);
-    const activeTheme = settings.theme || 'carbon';
-    const [settingsOpen, setSettingsOpen] = useState(false);
-    const settingsPanelRef = useRef<HTMLDivElement>(null);
+    const activeTheme = settings.theme || 'chromatic';
+    const [activeSection, setActiveSection] = useState<GlobalSection>('home');
+    const [homeResetSignal, setHomeResetSignal] = useState(0);
+    const [layersVisible, setLayersVisible] = useState(true);
+    const [legalReviewOpen, setLegalReviewOpen] = useState(false);
     const [activeVideoId, setActiveVideoId] = useState<number | null>(null);
     const [cinemaOpen, setCinemaOpen] = useState(false);
+    const [cinemaPhase, setCinemaPhase] = useState<'idle' | 'entering' | 'open' | 'exiting'>('idle');
+    const [cinemaInitialVideoId, setCinemaInitialVideoId] = useState<number | null>(null);
     const [cinemaVideos, setCinemaVideos] = useState<CinemaVideo[]>([]);
+    const cinemaTransitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const cinemaNativeFullscreenRef = useRef(false);
     const {
         jobs,
         pending,
@@ -156,6 +179,7 @@ export default function Page() {
     const jobCount = jobsReady
         ? completedJobs.length
         : 0;
+    const activityCount = pending.length + jobs.filter((job) => !['complete', 'completed', 'done'].includes(job.status.toLowerCase())).length;
 
         const [searchResults, setSearchResults] = useState<SemanticSearchResult[] | null>(null);
     const [searchMode, setSearchMode] = useState<SearchMode>('literal');
@@ -169,9 +193,12 @@ export default function Page() {
     const [geminiLoading, setGeminiLoading] = useState(false);
 
     const [isSearching, setIsSearching] = useState(false);
+    const [spotlightOpen, setSpotlightOpen] = useState(false);
+    const [spotlightQuery, setSpotlightQuery] = useState('');
 
-        const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
+    const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
     const [pageConfig, setPageConfig] = useState<PageConfig>(loadPageConfig);
+    const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
     const searchRequestRef = useRef(0);
     const scrollY = useScrollParallax(0.2);
@@ -183,12 +210,6 @@ export default function Page() {
             // El almacenamiento puede estar deshabilitado en una WebView o navegador privado.
         }
     }, [pageConfig]);
-
-    useEffect(() => {
-        const panel = settingsPanelRef.current;
-        if (!panel) return;
-        (panel as HTMLDivElement & { inert: boolean }).inert = !settingsOpen;
-    }, [settingsOpen]);
 
         useEffect(() => {
         (async () => {
@@ -244,6 +265,7 @@ export default function Page() {
         setSelectedPlaylistId(id);
         setActiveVideoId(null);
         setCinemaOpen(false);
+        setCinemaPhase('idle');
         setCinemaVideos([]);
         setSearchResults(null);
         setSearchError(null);
@@ -256,19 +278,122 @@ export default function Page() {
     }, []);
 
     const isSearchView = isSearching || searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null || geminiAnswer !== null || geminiError !== null;
+    // Cinema se puede abrir desde la biblioteca, pero no desde una vista de
+    // búsqueda. La lista ya incluye fichas online/no disponibles, así que no
+    // depende de que la conversión de cada asset local haya terminado.
     const canOpenCinema = !isSearchView && cinemaVideos.length > 0;
-    const handleOpenCinema = useCallback(() => {
-        if (!canOpenCinema) {
-            toast.info(t('noVideosCinema'), {
-                description: `${t('clearSearch')} o ${t('processContent').toLowerCase()}.`,
-                duration: 3000,
-            });
-            return;
+    const enterCinemaWindowFullscreen = useCallback(async () => {
+        if (!nativeShell) return;
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const currentWindow = getCurrentWindow();
+            if (!(await currentWindow.isFullscreen())) {
+                await currentWindow.setFullscreen(true);
+                cinemaNativeFullscreenRef.current = true;
+            }
+        } catch (error) {
+            // El viewport CSS sigue cubriendo toda la ventana aunque el host
+            // no permita fullscreen nativo en una configuración concreta.
+            console.warn('Could not enter Cinema fullscreen:', error);
         }
-        setSettingsOpen(false);
+    }, [nativeShell]);
+
+    const restoreCinemaWindow = useCallback(async () => {
+        if (!nativeShell || !cinemaNativeFullscreenRef.current) return;
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            await getCurrentWindow().setFullscreen(false);
+        } catch (error) {
+            console.warn('Could not restore the native window after Cinema:', error);
+        } finally {
+            cinemaNativeFullscreenRef.current = false;
+        }
+    }, [nativeShell]);
+
+    const handleOpenCinema = useCallback((videoId?: number) => {
+        if (!canOpenCinema || cinemaOpen || cinemaPhase !== 'idle') return;
+        if (cinemaTransitionTimerRef.current) clearTimeout(cinemaTransitionTimerRef.current);
+        setActiveSection('home');
         setActiveVideoId(null);
+        setCinemaInitialVideoId(videoId ?? null);
+        setCinemaPhase('entering');
         setCinemaOpen(true);
-    }, [canOpenCinema, t]);
+        cinemaTransitionTimerRef.current = setTimeout(() => {
+            setCinemaPhase('open');
+            cinemaTransitionTimerRef.current = null;
+        }, 760);
+        void enterCinemaWindowFullscreen();
+    }, [canOpenCinema, cinemaOpen, cinemaPhase, enterCinemaWindowFullscreen]);
+
+    const openContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>, kind: PulsariaContextMenuKind, videoId?: number) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return;
+        event.preventDefault();
+        setContextMenu({ x: event.clientX, y: event.clientY, kind, videoId });
+    }, []);
+
+    const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+    const handleContextMenuAction = useCallback((action: PulsariaContextMenuAction) => {
+        const selected = contextMenu;
+        setContextMenu(null);
+        if (!selected) return;
+
+        switch (action) {
+            case 'open':
+                if (selected.videoId !== undefined) {
+                    setActiveSection('home');
+                    setSelectedPlaylistId(null);
+                    setActiveVideoId(selected.videoId);
+                }
+                break;
+            case 'cinema':
+            case 'demo-preview':
+                handleOpenCinema(selected.videoId);
+                break;
+            case 'copy-url': {
+                const job = selected.videoId === undefined ? undefined : jobs.find((item) => item.id === selected.videoId);
+                if (!job?.url) {
+                    toast.info('Este preview DEMO no tiene una URL de biblioteca.');
+                    break;
+                }
+                void navigator.clipboard?.writeText(job.url)
+                    .then(() => toast.success('Enlace copiado'))
+                    .catch(() => toast.error('No se pudo copiar el enlace'));
+                break;
+            }
+            case 'hide-demos':
+                updateSettings({ showDemoVideos: false });
+                toast.info('Ejemplos DEMO ocultos');
+                break;
+            case 'quick-settings':
+                setSpotlightOpen(false);
+                setActiveSection('settings');
+                setActiveVideoId(null);
+                break;
+            case 'sort-recent':
+                handleSortChange('date_desc');
+                toast.info('Biblioteca ordenada por recientes');
+                break;
+        }
+    }, [contextMenu, handleOpenCinema, handleSortChange, jobs, updateSettings]);
+
+    const handleCloseCinema = useCallback(() => {
+        if (cinemaPhase === 'exiting') return;
+        if (cinemaTransitionTimerRef.current) clearTimeout(cinemaTransitionTimerRef.current);
+        setCinemaPhase('exiting');
+        cinemaTransitionTimerRef.current = setTimeout(() => {
+            setCinemaOpen(false);
+            setCinemaPhase('idle');
+            setCinemaInitialVideoId(null);
+            cinemaTransitionTimerRef.current = null;
+            void restoreCinemaWindow();
+        }, 460);
+    }, [cinemaPhase, restoreCinemaWindow]);
+
+    useEffect(() => () => {
+        if (cinemaTransitionTimerRef.current) clearTimeout(cinemaTransitionTimerRef.current);
+    }, []);
 
     const applyAiResponse = (answer: string) => {
         if (answer.startsWith('No fue posible consultar el modelo local:')) {
@@ -384,7 +509,7 @@ export default function Page() {
 
     const handleClearSearch = useCallback(() => {
         searchRequestRef.current += 1;
-                setSearchResults(null);
+        setSearchResults(null);
         setSearchModeUsed(null);
         setSearchError(null);
         setAiAnswer(null);
@@ -394,8 +519,44 @@ export default function Page() {
         setGeminiError(null);
         setGeminiLoading(false);
         setIsSearching(false);
+        setSpotlightQuery('');
         setActiveVideoId(null);
     }, []);
+
+    const handleOpenSpotlight = useCallback(() => {
+        setSpotlightOpen(true);
+    }, []);
+
+    const handleCloseSpotlight = useCallback(() => {
+        setSpotlightOpen(false);
+    }, []);
+
+    const handleSpotlightQueryChange = useCallback((query: string) => {
+        setSpotlightQuery(query);
+        if (!query.trim()) handleClearSearch();
+    }, [handleClearSearch]);
+
+    const handleReturnHome = useCallback(() => {
+        setActiveSection('home');
+        setHomeResetSignal((current) => current + 1);
+        handlePlaylistSelect(null);
+        handleClearSearch();
+    }, [handleClearSearch, handlePlaylistSelect]);
+
+    const handleGlobalNavigate = useCallback((section: GlobalSection) => {
+        setSpotlightOpen(false);
+        if (section === 'home') {
+            handleReturnHome();
+            return;
+        }
+
+        setActiveSection(section);
+        setActiveVideoId(null);
+        handleClearSearch();
+        if (section !== 'library') {
+            setSelectedPlaylistId(null);
+        }
+    }, [handleClearSearch, handleReturnHome]);
 
     const handleSearchResultClick = useCallback((result: SemanticSearchResult) => {
         const job = jobs.find((candidate) => Number(candidate.id) === result.video_id);
@@ -472,6 +633,23 @@ export default function Page() {
         resolveVideo();
         return () => { cancelled = true; };
     }, [activeVideoId, jobs, searchResults]);
+    if (cinemaOpen) {
+        return (
+            <div className={`cinema-transition-host cinema-transition-host--${cinemaPhase}`}>
+                <CinemaMode
+                    videos={cinemaVideos}
+                    initialVideoId={cinemaInitialVideoId ?? undefined}
+                    onClose={handleCloseCinema}
+                />
+                {(cinemaPhase === 'entering' || cinemaPhase === 'exiting') && (
+                    <div className="cinema-transition-veil" role="status" aria-live="polite">
+                        <span className="sr-only">{cinemaPhase === 'entering' ? 'Entrando en modo Cinema…' : 'Saliendo de modo Cinema…'}</span>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
     return (
 
         <div
@@ -511,15 +689,15 @@ export default function Page() {
             )}
 
             {activeTheme === 'carbon' && (
-                <div className="fixed inset-0 z-[-10] pointer-events-none overflow-hidden bg-[#0a0b0e]">
+                <div className="fixed inset-0 z-[-10] pointer-events-none overflow-hidden bg-[#09090b]">
                     {/* Ultra-smooth Luxury Charcoal Gradient Layers */}
                     <div
                         className="absolute inset-0"
                         style={{
                             backgroundImage: `
-                                radial-gradient(ellipse 120% 80% at 20% 10%, rgba(38, 43, 56, 0.70) 0%, transparent 60%),
-                                radial-gradient(ellipse 100% 70% at 80% 90%, rgba(24, 27, 36, 0.85) 0%, transparent 60%),
-                                radial-gradient(ellipse 80% 80% at 50% 50%, rgba(17, 19, 25, 0.95) 0%, #07080a 100%)
+                                radial-gradient(ellipse 120% 80% at 20% 10%, rgba(32, 32, 36, 0.70) 0%, transparent 60%),
+                                radial-gradient(ellipse 100% 70% at 80% 90%, rgba(20, 20, 24, 0.85) 0%, transparent 60%),
+                                radial-gradient(ellipse 80% 80% at 50% 50%, rgba(14, 14, 16, 0.95) 0%, #070708 100%)
                             `,
                         }}
                     />
@@ -527,7 +705,7 @@ export default function Page() {
                     <div
                         className="absolute inset-0"
                         style={{
-                            background: 'radial-gradient(ellipse 90% 85% at 50% 50%, transparent 40%, rgba(4, 5, 7, 0.88) 100%)'
+                            background: 'radial-gradient(ellipse 90% 85% at 50% 50%, transparent 40%, rgba(5, 5, 6, 0.88) 100%)'
                         }}
                     />
                 </div>
@@ -561,56 +739,72 @@ export default function Page() {
                 </div>
             )}
 
-            {!cinemaOpen && <WindowTitlebar />}
+            {activeTheme === 'solar' && (
+                <div className="fixed inset-0 z-[-10] pointer-events-none bg-[#0d0705]">
+                    <div
+                        className="absolute inset-0"
+                        style={{
+                            backgroundImage: `
+                                radial-gradient(ellipse 70% 60% at 20% 20%, rgba(234, 88, 12, 0.22) 0%, transparent 60%),
+                                radial-gradient(ellipse 65% 55% at 85% 85%, rgba(245, 158, 11, 0.18) 0%, transparent 55%),
+                                radial-gradient(ellipse 80% 70% at 50% 50%, rgba(69, 10, 10, 0.28) 0%, #080403 100%)
+                            `,
+                        }}
+                    />
+                </div>
+            )}
 
-            <div className="flex min-h-0 flex-1 w-full">
-                {/* Sidebar Exclusivo Dashboard */}
+            {/* Desenfoque progresivo inferior: difumina el contenido detrás sin
+                dibujar una línea rígida que recorte la última fila. */}
+            <div aria-hidden="true" className="library-bottom-blur" />
+
+            <div
+                className={`pulsaria-app-layout flex min-h-0 flex-1 w-full${spotlightOpen ? ' pulsaria-app-layout--spotlight-blurred' : ''}`}
+                aria-hidden={spotlightOpen}
+            >
                 <Sidebar
-                    jobs={jobs}
-                    pending={pending}
-                    globalProgress={globalProgress}
-                    onSubmitLinks={enqueueLinks}
-                    onRetryJob={retryJob}
-                    onRetryPending={retryPending}
-                    onPlaylistSelect={handlePlaylistSelect}
-                    selectedPlaylistId={selectedPlaylistId}
+                    activeSection={activeSection}
+                    onNavigate={handleGlobalNavigate}
+                    activityCount={activityCount}
+                    onOpenSearch={handleOpenSpotlight}
+                    onOpenCinema={handleOpenCinema}
+                    canOpenCinema={canOpenCinema}
+                    layersVisible={layersVisible}
+                    onToggleLayers={() => setLayersVisible((visible) => !visible)}
                 />
 
                 {/* Main Content Area */}
-                <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar flex flex-col min-w-0 relative z-10">
+                <main
+                    className="cinema-shell-panel flex-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain custom-scrollbar flex flex-col relative z-10"
+                    onContextMenu={(event) => openContextMenu(event, 'empty')}
+                >
                 <Header
-                    onOpenSettings={() => setSettingsOpen(true)}
                     activeCount={jobCount}
                     isLoading={jobsLoading}
-                    onSearchSubmit={handleSearch}
-                    onSearchClear={handleClearSearch}
-                    pageConfig={pageConfig}
-                    onPageConfigChange={handlePageConfigChange}
-                    onSortChange={handleSortChange}
-                    sortKey={pageConfig.sortKey}
-                    searchMode={searchMode}
-                    onSearchModeChange={setSearchMode}
-                    onOpenCinema={handleOpenCinema}
-                    canOpenCinema={canOpenCinema}
+                    onOpenSearch={handleOpenSpotlight}
+                    showTikTokPill={settings.showTikTokPill}
+                    onContextMenu={(event) => openContextMenu(event, 'shell')}
                 />
 
                 {!jobsLoading && !jobsReady && (
-                    <div role="alert" className="mx-8 mt-2 flex items-center justify-between gap-4 rounded-2xl border border-[#fe2c55]/25 bg-[#fe2c55]/[0.08] px-4 py-3 text-xs text-white/70">
-                        <span>{jobsError || 'La biblioteca local no está disponible en este momento.'}</span>
-                        <button
-                            type="button"
-                            onClick={() => void refreshJobs().catch((error) => console.warn('Manual job refresh failed:', error))}
-                            className="shrink-0 font-bold uppercase tracking-wider text-[#25f4ee] hover:text-white"
-                        >
-                            Reintentar
-                        </button>
+                    <div className="flex justify-center px-6 pt-3">
+                        <div role="alert" className="flex w-full max-w-4xl items-center justify-center gap-4 rounded-full border border-[#fe2c55]/25 bg-[#fe2c55]/[0.08] px-5 py-2.5 text-center text-xs text-white/70 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl max-sm:flex-col max-sm:gap-2">
+                            <span className="min-w-0 truncate">{jobsError || 'La biblioteca local no está disponible en este momento.'}</span>
+                            <button
+                                type="button"
+                                onClick={() => void refreshJobs().catch((error) => console.warn('Manual job refresh failed:', error))}
+                                className="shrink-0 font-bold uppercase tracking-wider text-white/80 transition-colors hover:text-white"
+                            >
+                                Reintentar
+                            </button>
+                        </div>
                     </div>
                 )}
 
                 {isSearching ? (
                     <div className="w-full h-full flex items-center justify-center p-8">
-                        <div className="p-8 rounded-3xl bg-black/60 backdrop-blur-2xl border border-white/10 flex items-center gap-4 shadow-2xl">
-                            <span className="w-6 h-6 rounded-full border-2 border-[#8a5cff] border-t-transparent animate-spin" />
+                        <div className="p-8 rounded-3xl bg-[#141416]/80 backdrop-blur-2xl border border-white/10 flex items-center gap-4 shadow-2xl">
+                            <span className="w-6 h-6 rounded-full border-2 border-white/80 border-t-transparent animate-spin" />
                             <div className="flex flex-col">
                                 <span className="text-white font-black text-sm tracking-wider uppercase">Búsqueda Inteligente IA</span>
                                 <span className="text-white/40 text-xs font-mono">Inferencia semántica ONNX + síntesis LLM local...</span>
@@ -623,7 +817,7 @@ export default function Page() {
                         {/* Search View Header */}
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className="h-6 w-1 rounded-full bg-gradient-to-b from-[#fe2c55] via-[#8a5cff] to-[#25f4ee]"></div>
+                                <div className="h-6 w-1 rounded-full bg-gradient-to-b from-[#fe2c55] to-white/70"></div>
                                 <h2 className="text-xl font-bold text-white tracking-wide flex items-center gap-2">
                                     <span>{t('search')}</span>
                                 </h2>
@@ -654,11 +848,11 @@ export default function Page() {
                                 <button
                                     type="button"
                                     onClick={() => void handleGeminiSynthesis()}
-                                    disabled={!isTauriRuntime() || geminiLoading || !lastSearchQuery}
-                                    title={isTauriRuntime() ? 'Enviar hasta cinco fragmentos relevantes a Gemini' : 'Gemini requiere la aplicación de escritorio'}
+                                    disabled={!nativeShell || geminiLoading || !lastSearchQuery}
+                                    title={nativeShell ? 'Enviar hasta cinco fragmentos relevantes a Gemini' : 'Gemini requiere la aplicación de escritorio'}
                                     className="shrink-0 rounded-xl border border-[#4285f4]/40 bg-[#4285f4]/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-[#b9d4ff] transition-colors hover:bg-[#4285f4]/25 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
-                                    {geminiLoading ? 'Generando…' : isTauriRuntime() ? 'Sintetizar con Gemini' : 'Solo app de escritorio'}
+                                    {geminiLoading ? 'Generando…' : nativeShell ? 'Sintetizar con Gemini' : 'Solo app de escritorio'}
                                 </button>
                             </section>
                         )}
@@ -741,7 +935,7 @@ export default function Page() {
 
                                     <div className="w-24 h-36 rounded-xl overflow-hidden shrink-0 shadow-lg border border-white/10 relative bg-black">
                                                                                 <Image
-                                            src={result.thumbnail || '/demo/demo-01.jpg'}
+                                            src={result.thumbnail || '/pulsaria-icon.png'}
                                             alt={result.title || 'Video'}
                                             fill
                                             unoptimized
@@ -794,90 +988,142 @@ export default function Page() {
                         )}
                     </div>
                 ) : (
-                    <>
-
-                        {selectedPlaylistId !== null && (
-                            <div className="mx-8 mt-2 mb-1 px-4 py-3 rounded-2xl border border-[#8a5cff]/25 bg-[#8a5cff]/10 flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-3 min-w-0">
-                                    <span className="w-2 h-2 rounded-full bg-[#8a5cff] shadow-[0_0_10px_#8a5cff] shrink-0" />
-                                    <span className="text-xs text-white/80 truncate">Mostrando los videos de la playlist seleccionada</span>
+                    <div className="pulsaria-workspace">
+                        <aside className="pulsaria-context-pane" aria-label="Panel contextual">
+                            {activeSection === 'home' && (
+                                <div className="pulsaria-context-pane__scroll custom-scrollbar">
+                                    <AddLinks
+                                        mode="ingest"
+                                        onSubmitLinks={enqueueLinks}
+                                        homeResetSignal={homeResetSignal}
+                                    />
+                                    <QueueSection
+                                        jobs={jobs}
+                                        pending={pending}
+                                        globalProgress={globalProgress}
+                                        onRetryJob={retryJob}
+                                        onRetryPending={retryPending}
+                                    />
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => handlePlaylistSelect(null)}
-                                    className="text-[10px] font-bold uppercase tracking-wider text-[#25f4ee] hover:text-white transition-colors shrink-0"
-                                >
-                                    Ver biblioteca completa
-                                </button>
-                            </div>
-                        )}
-                        <LocalizedErrorBoundary>
-                          <VideoGrid
-                            activeVideoId={activeVideoId}
-                            onVideoPlayStart={handlePlayStart}
-                            onVideoPlayStop={handlePlayStop}
-                            sortKey={pageConfig.sortKey}
-                            playlistId={selectedPlaylistId ?? undefined}
-                            layout={pageConfig.layout}
-                            columns={pageConfig.columns}
-                            showOnlyCompleted={pageConfig.showOnlyCompleted}
-                            showErrors={pageConfig.showErrors}
-                            keepStatusFilter={pageConfig.keepStatusFilter}
-                            platformFilter={pageConfig.platformFilter}
-                            jobs={jobs}
-                            jobsLoading={jobsLoading}
-                            jobsReady={jobsReady}
-                            onVisibleVideosChange={setCinemaVideos}
-                          />
-                        </LocalizedErrorBoundary>
-                    </>
+                            )}
+
+                            {activeSection === 'profiles' && (
+                                <div className="pulsaria-context-pane__scroll custom-scrollbar">
+                                    <AddLinks mode="profiles" onSubmitLinks={enqueueLinks} />
+                                </div>
+                            )}
+
+                            {activeSection === 'activity' && (
+                                <div id="pulsaria-activity" className="pulsaria-context-pane__scroll custom-scrollbar">
+                                    <NotificationsPopover
+                                        jobs={jobs}
+                                        pending={pending}
+                                        onRetryJob={retryJob}
+                                        onRetryPending={retryPending}
+                                        onOpenLibrary={(jobId) => {
+                                            handleClearSearch();
+                                            setActiveSection('home');
+                                            setSelectedPlaylistId(null);
+                                            setActiveVideoId(jobId);
+                                        }}
+                                    />
+                                </div>
+                            )}
+
+                            {activeSection === 'library' && (
+                                <div className="pulsaria-context-pane__scroll custom-scrollbar">
+                                    <PlaylistsPanel
+                                        onPlaylistSelect={handlePlaylistSelect}
+                                        selectedPlaylistId={selectedPlaylistId}
+                                    />
+                                </div>
+                            )}
+
+                            {activeSection === 'settings' && (
+                                <div className="pulsaria-context-pane__settings">
+                                    <SettingsPanel
+                                        embedded
+                                        jobs={jobs}
+                                        onPlaylistSelect={handlePlaylistSelect}
+                                        pageConfig={pageConfig}
+                                        onPageConfigChange={handlePageConfigChange}
+                                        searchMode={searchMode}
+                                        onSearchModeChange={setSearchMode}
+                                        onClose={() => handleGlobalNavigate('home')}
+                                        onReviewConsent={() => setLegalReviewOpen(true)}
+                                    />
+                                </div>
+                            )}
+                        </aside>
+
+                        <section className="pulsaria-library-stage" aria-label="Biblioteca de videos">
+                            {selectedPlaylistId !== null && (
+                                <div className="mx-8 mt-2 mb-1 px-4 py-3 rounded-2xl border border-[#8a5cff]/25 bg-[#8a5cff]/10 flex items-center justify-between gap-4">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <span className="w-2 h-2 rounded-full bg-[#8a5cff] shadow-[0_0_10px_#8a5cff] shrink-0" />
+                                        <span className="text-xs text-white/80 truncate">Mostrando los videos de la playlist seleccionada</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => handlePlaylistSelect(null)}
+                                        className="text-[10px] font-bold uppercase tracking-wider text-[#25f4ee] hover:text-white transition-colors shrink-0"
+                                    >
+                                        Ver biblioteca completa
+                                    </button>
+                                </div>
+                            )}
+                            <LocalizedErrorBoundary>
+                                <VideoGrid
+                                    activeVideoId={activeVideoId}
+                                    onVideoPlayStart={handlePlayStart}
+                                    onVideoPlayStop={handlePlayStop}
+                                    sortKey={pageConfig.sortKey}
+                                    playlistId={selectedPlaylistId ?? undefined}
+                                    layout={pageConfig.layout}
+                                    columns={pageConfig.columns}
+                                    showOnlyCompleted={pageConfig.showOnlyCompleted}
+                                    showErrors={pageConfig.showErrors}
+                                    keepStatusFilter={pageConfig.keepStatusFilter}
+                                    platformFilter={pageConfig.platformFilter}
+                                    jobs={jobs}
+                                    jobsLoading={jobsLoading}
+                                    jobsReady={jobsReady}
+                                    onVisibleVideosChange={setCinemaVideos}
+                                    onOpenCinemaAt={handleOpenCinema}
+                                    showDemoVideos={settings.showDemoVideos}
+                                    hoverAutoplay={settings.hoverAutoplay}
+                                    onContextMenu={(event, video) => openContextMenu(event, 'isDemo' in video && video.isDemo ? 'demo-card' : 'real-card', video.id)}
+                                />
+                            </LocalizedErrorBoundary>
+                        </section>
+                    </div>
                 )}
 
                 </main>
             </div>
 
-            {cinemaOpen && (
-                <CinemaMode
-                    videos={cinemaVideos}
-                    initialIndex={0}
-                    onClose={() => setCinemaOpen(false)}
-                />
-            )}
-
-            {/* Settings Modal Backdrop & Panel */}
-            <div
-                className="fixed inset-x-0 bottom-0 top-10 transition-all duration-300"
-                style={{
-                    zIndex: 40,
-                    top: '40px',
-                    background: settingsOpen ? 'rgba(0,0,0,0.6)' : 'transparent',
-                    backdropFilter: settingsOpen ? 'blur(6px)' : 'none',
-                    pointerEvents: settingsOpen ? 'auto' : 'none',
+            <SpotlightSearch
+                open={spotlightOpen}
+                query={spotlightQuery}
+                onQueryChange={handleSpotlightQueryChange}
+                onSubmit={() => void handleSearch(spotlightQuery, searchMode)}
+                onClear={handleClearSearch}
+                onClose={handleCloseSpotlight}
+                searchMode={searchMode}
+                isSearching={isSearching}
+                searchResults={searchResults}
+                searchError={searchError}
+                aiAnswer={aiAnswer}
+                aiError={aiError}
+                onResultClick={(result) => {
+                    setSpotlightOpen(false);
+                    handleSearchResultClick(result);
                 }}
-                onClick={() => setSettingsOpen(false)}
             />
-
-            <div
-                ref={settingsPanelRef}
-                className="fixed right-0 bottom-0 top-10 w-[400px] xl:w-[440px] overflow-hidden transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
-                aria-hidden={!settingsOpen}
-                style={{
-                    zIndex: 50,
-                    top: '40px',
-                    transform: settingsOpen ? 'translateX(0)' : 'translateX(100%)',
-                    boxShadow: settingsOpen ? '-15px 0 60px rgba(0,0,0,0.9)' : 'none',
-                    background: '#0e1017',
-                    borderLeft: '1px solid rgba(255,255,255,0.12)',
-                }}
-            >
-                            <LocalizedErrorBoundary>
-                              <SettingsPanel onClose={() => setSettingsOpen(false)} jobs={jobs} onPlaylistSelect={handlePlaylistSelect} />
-                            </LocalizedErrorBoundary>
-            </div>
 
             {welcomeAnimationVisible && <WelcomeAnimation onFinish={finishWelcomeAnimation} />}
 
-            {!welcomeAnimationVisible && isTauriRuntime() && (legalConsent.loading || legalConsent.needsConsent) && (
+            {runtimeResolved && !welcomeAnimationVisible && nativeShell && (legalConsent.loading || legalConsent.needsConsent) && (
                 <LegalConsentModal
                     loading={legalConsent.loading}
                     saving={legalConsent.saving}
@@ -886,11 +1132,27 @@ export default function Page() {
                 />
             )}
 
-            {legalGateReady && processingSetup.showSetup && (
+            {!welcomeAnimationVisible && legalReviewOpen && !legalConsent.loading && legalConsent.accepted && (
+                <LegalConsentModal
+                    loading={false}
+                    saving={legalConsent.saving}
+                    error={legalConsent.error}
+                    allowClose
+                    onClose={() => setLegalReviewOpen(false)}
+                    onAccept={async (locale) => {
+                        const accepted = await legalConsent.accept(locale);
+                        if (accepted) setLegalReviewOpen(false);
+                        return accepted;
+                    }}
+                />
+            )}
+
+            {runtimeResolved && nativeShell && legalGateReady && processingSetup.showSetup && (
                 <ProcessingSetupModal
                     hardware={processingSetup.hardware}
                     processing={processingSetup.processing}
                     modelStatus={processingSetup.modelStatus}
+                    modelSetupState={processingSetup.modelSetupState}
                     loading={processingSetup.loading}
                     initializationError={processingSetup.initializationError}
                     preparationError={processingSetup.preparationError}
@@ -901,11 +1163,22 @@ export default function Page() {
                         await processingSetup.cancelPreparation();
                     }}
                     onRetry={processingSetup.refresh}
+                    onRetryModel={processingSetup.retryModel}
+                    onRepairModel={processingSetup.repairModel}
                     onDismiss={processingSetup.dismissSetup}
+                />
+            )}
+
+            {contextMenu && (
+                <ContextMenu
+                    x={contextMenu.x}
+                    y={contextMenu.y}
+                    kind={contextMenu.kind}
+                    onAction={handleContextMenuAction}
+                    onClose={closeContextMenu}
                 />
             )}
 
         </div>
     );
 }
-

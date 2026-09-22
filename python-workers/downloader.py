@@ -340,15 +340,14 @@ def extract_metadata(url: str) -> dict:
         raise RuntimeError(f"Respuesta inválida de metadata: {error}") from error
 
 
-def extract_playlist_videos(url: str) -> list[str]:
-    """Extrae URLs individuales de una playlist de TikTok."""
+def extract_playlist_entries(url: str, playlist_end: int = 200) -> list[dict]:
+    """Extrae entradas de una colección sin descargar vídeos."""
     cmd = build_yt_dlp_base_cmd() + [
         "--quiet",
         "--no-warnings",
         "--flat-playlist",
-        "--playlist-end", "200",
+        "--playlist-end", str(max(1, min(1000, playlist_end))),
         "--dump-json",
-
         "--no-download",
         url
     ]
@@ -356,7 +355,8 @@ def extract_playlist_videos(url: str) -> list[str]:
         result = subprocess.run(
             cmd, capture_output=True, text=True, check=True, timeout=60
         )
-        videos = []
+        entries = []
+        seen = set()
 
         for line_number, line in enumerate(result.stdout.splitlines(), start=1):
             if line.strip():
@@ -370,12 +370,25 @@ def extract_playlist_videos(url: str) -> list[str]:
                     continue
                 candidate = info.get('webpage_url') or info.get('original_url') or info.get('url')
                 if isinstance(candidate, str) and candidate.startswith(('http://', 'https://')):
-                    videos.append(candidate)
+                    if candidate in seen:
+                        continue
+                    seen.add(candidate)
+                    entries.append({
+                        "url": candidate,
+                        "id": str(info.get("id") or "") or None,
+                        "upload_date": str(info.get("upload_date") or "") or None,
+                        "timestamp": info.get("timestamp"),
+                    })
 
-        return list(dict.fromkeys(videos))
+        return entries
     except subprocess.CalledProcessError as error:
         raise RuntimeError(
             f"Fallo expandiendo colección: {_process_error_detail(error)}"
         ) from error
     except (subprocess.TimeoutExpired, OSError) as error:
         raise RuntimeError(f"Fallo expandiendo colección: {error}") from error
+
+
+def extract_playlist_videos(url: str) -> list[str]:
+    """Extrae URLs individuales de una playlist de TikTok."""
+    return [entry["url"] for entry in extract_playlist_entries(url)]

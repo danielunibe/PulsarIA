@@ -393,6 +393,102 @@
   white-space: nowrap;
 }
 
+.preparationPlan {
+  margin-top: 1.35rem;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+  padding-top: 1rem;
+}
+
+.preparationPlanSteps {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  margin-top: .65rem;
+}
+
+.preparationPlanStep {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: .38rem;
+  color: rgba(255, 255, 255, .38);
+  font-size: .59rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.preparationPlanStep[data-active="true"] {
+  color: #25f4ee;
+}
+
+.preparationPlanStep[data-done="true"] {
+  color: rgba(255, 255, 255, .78);
+}
+
+.preparationPlanDot {
+  display: inline-flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 999px;
+  color: inherit;
+  font-size: .55rem;
+}
+
+.preparationPlanStep[data-active="true"] .preparationPlanDot {
+  border-color: rgba(37, 244, 238, .8);
+  box-shadow: 0 0 14px rgba(37, 244, 238, .25);
+}
+
+.preparationPlanStep[data-done="true"] .preparationPlanDot {
+  border-color: rgba(37, 244, 238, .55);
+  background: rgba(37, 244, 238, .12);
+  color: #25f4ee;
+}
+
+.preparationPlanLine {
+  width: clamp(.35rem, 2vw, 2rem);
+  height: 1px;
+  background: rgba(255, 255, 255, .14);
+}
+
+.preparationPlanMessage {
+  margin: .75rem 0 0;
+  color: rgba(255, 255, 255, .48);
+  font-size: .68rem;
+  line-height: 1.5;
+}
+
+.preparationProgress {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  margin-top: .7rem;
+  color: rgba(37, 244, 238, .8);
+  font-size: .62rem;
+  font-weight: 800;
+}
+
+.preparationProgressTrack {
+  height: .35rem;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .1);
+}
+
+.preparationProgressTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #25f4ee, #8a5cff);
+  transition: width .25s ease;
+}
+
 .errorMessage {
   margin: 1rem 0 0;
   border: 1px solid rgba(254, 44, 85, .35);
@@ -402,6 +498,29 @@
   color: rgba(255, 255, 255, .82);
   font-size: .72rem;
   line-height: 1.55;
+}
+
+.errorMessage p {
+  margin: 0;
+}
+
+.errorAction {
+  margin-top: .65rem;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: .55rem;
+  background: rgba(255, 255, 255, .08);
+  padding: .45rem .7rem;
+  color: white;
+  cursor: pointer;
+  font-size: .6rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.errorAction:disabled {
+  cursor: not-allowed;
+  opacity: .45;
 }
 
 .saveButton {

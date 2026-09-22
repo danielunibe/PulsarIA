@@ -59,6 +59,7 @@ impl SearchService {
         }
 
         let mut indexed_count = 0;
+        let mut chunk_records = Vec::with_capacity(chunks.len());
 
         for chunk in chunks {
             // 1. Generar Vector 384d
@@ -76,11 +77,19 @@ impl SearchService {
                     e
                 })?;
 
+            chunk_records.push((chunk.chunk_index, chunk.text, embedding));
             indexed_count += 1;
         }
 
+        // 4. Persistir chunks y embeddings en SQLite (transcript_embeddings)
+        self.query_coordinator
+            .persist_embeddings(job_id, &chunk_records)?;
+
         histogram!("vector_index_latency_seconds").record(start_time.elapsed().as_secs_f64());
-        info!("Indexados {} chunks para el Job {}", indexed_count, job_id);
+        info!(
+            "Indexados y persistidos {} chunks para el Job {}",
+            indexed_count, job_id
+        );
         Ok(())
     }
 

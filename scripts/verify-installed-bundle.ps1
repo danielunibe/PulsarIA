@@ -5,6 +5,7 @@ param(
     [ValidateSet('debug', 'release')]
     [string]$Configuration = 'debug',
     [switch]$RunLive,
+    [string]$ApiToken,
     [string]$TikTokUrl = 'https://www.tiktok.com/@scout2015/video/6718335390845095173',
     [int]$ApiPort = 18874,
     [int]$StartupTimeoutSeconds = 90,
@@ -155,6 +156,9 @@ $result = [ordered]@{
 }
 
 try {
+    if ($RunLive -and [string]::IsNullOrWhiteSpace($ApiToken)) {
+        throw 'RunLive requires the process-scoped API token from the native Tauri IPC harness.'
+    }
     New-Item -ItemType Directory -Path $installDir, $appDataRoot, $downloadsDir -Force | Out-Null
     if ($Bundle -eq 'msi') {
         $msiInstallArguments = @(
@@ -263,10 +267,13 @@ try {
     if ([string]$health.version -ne $expectedVersion) {
         throw "Installed health version $($health.version) does not match expected $expectedVersion"
     }
-    $initialJobs = Get-JobList (Invoke-RestMethod -Method Get -Uri "$baseUrl/api/v1/jobs" -TimeoutSec 10)
-    $result.initialJobCount = $initialJobs.Count
-
     if ($RunLive) {
+        # Protected API routes require the process-scoped JWT delivered to the
+        # native frontend through IPC. The offline smoke intentionally does
+        # not invent credentials; live mode is reserved for a native harness.
+        $initialJobs = Get-JobList (Invoke-RestMethod -Method Get -Uri "$baseUrl/api/v1/jobs" -TimeoutSec 10)
+        $result.initialJobCount = $initialJobs.Count
+
         $payload = @{ url = $TikTokUrl } | ConvertTo-Json -Compress
         $result.ingest = Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/ingest" -ContentType 'application/json' -Body $payload -TimeoutSec 30
         $jobId = [int64]$result.ingest.job_id

@@ -1,6 +1,6 @@
 'use client';
 import { DbStatus } from '../../types/semanticConfig';
-import { FaDatabase, FaWrench, FaTrashCan } from 'react-icons/fa6';
+import { FaDatabase, FaWrench, FaTrashCan } from '@/components/icon-library';
 
 interface Props {
   status: DbStatus | null;

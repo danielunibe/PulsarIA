@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
-import { FaCheck, FaXmark, FaInfo } from 'react-icons/fa6';
+import { Loader2 } from '@/components/icon-library';
+import { FaCheck, FaXmark, FaInfo } from '@/components/icon-library';
 
 // ============================================================
 // ToastNotification — Sistema de Feedback Visual
@@ -85,8 +85,8 @@ function SingleToast({ toast, onDismiss }: { toast: ToastData; onDismiss: (id: s
             className="flex items-start gap-3 px-4 py-3 rounded-[24px] cursor-pointer select-none"
             style={{
                 background: `linear-gradient(145deg, #1e1e1e, #141414)`,
-                border: `1px solid rgba(255,255,255,0.06)`,
-                boxShadow: `0 20px 40px rgba(0,0,0,0.7), 0 0 20px ${colors.glow}, inset 0 1px 0 rgba(255,255,255,0.05)`,
+                border: 'none',
+                boxShadow: `0 20px 40px rgba(0,0,0,0.7), 0 0 20px ${colors.glow}`,
                 transform: visible ? 'translateX(0) scale(1)' : 'translateX(20px) scale(0.96)',
                 opacity: visible ? 1 : 0,
                 transition: 'transform 0.35s cubic-bezier(0.22,1,0.36,1), opacity 0.3s ease',
@@ -116,7 +116,7 @@ function SingleToast({ toast, onDismiss }: { toast: ToastData; onDismiss: (id: s
                     width: '28px',
                     height: '28px',
                     background: colors.bg,
-                    border: `1px solid ${colors.icon}30`,
+                    border: 'none',
                     color: colors.icon,
                     boxShadow: `0 0 10px ${colors.glow}`,
                     marginLeft: '8px',

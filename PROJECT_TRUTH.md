@@ -106,17 +106,17 @@ solo puede llamarse MVP instalada después de ejecutar el smoke de instalación
 y, cuando exista una URL autorizada, el smoke live documentado en
 `docs/MVP_STATUS.md`.
 
-## Estado de gates — 2026-09-13
+## Estado de gates — 2026-09-19
 
 | Gate | Estado | Evidencia o límite |
 | --- | --- | --- |
 | Lint, TypeScript, build Next | PASS | Incluidos en `npm run verify:mvp` (13/13) |
 | Locale es/en | PASS | `scripts/verify-locale.ps1`, incluido en `npm run verify:mvp` |
-| Rust fmt/check/tests | PASS | 60 tests Rust sin fallos, incluidos persistencia atómica de ajustes, migración, reconciliación de storage, snapshots HNSW single/multi-shard, metadatos de modelo, cache local, JWT, validación TikTok, Gemini y loopback |
+| Rust fmt/check/tests | PASS | 74 tests Rust sin fallos, incluidos persistencia atómica de ajustes, migración, reconciliación de storage, snapshots HNSW single/multi-shard, metadatos de modelo, cache local, JWT, validación TikTok, Gemini, loopback y recuperación del modelo local |
 | Cache semántica desktop | PASS | Cache LRU acotada en memoria con TTL, invalidación por versión y métricas hit/miss; Redis ya no es dependencia de runtime |
 | API REST local | PASS condicionado | Bind loopback y token JWT por proceso; health público y resto de rutas protegido. El frontend nativo obtiene el token por IPC |
 | Metadatos de embeddings | PASS | Migración con backup previo, hash de modelo/tokenizer, dimensión y detección de índice obsoleto; la reindexación parcial conserva los datos anteriores |
-| Python | PASS | 26 tests y un skip live intencional; incluye FFmpeg/FFprobe, duración desconocida, transcript vacío, artifacts y los 13 formatos de salida |
+| Python | PASS | 27 tests PASS y 1 skip live intencional; incluye preparación y reparación selectiva. Los smoke live siguen separados y no se simulan |
 | Runtime preparado | PASS en staging local | 51/51 recursos canónicos verificados; Python, workers, ONNX, Whisper tiny, FFmpeg, FFprobe y licencia presentes |
 | Auditoría de dependencias | PARTIAL | `npm audit --omit=dev` conserva 2 vulnerabilidades de producción; el fix disponible requiere la migración aislada a Next 16.3.5 |
 | Instalador NSIS/MSI | PASS build + arranque Release local | NSIS `Pulsaria_0.1.0_x64-setup.exe`, 580,906,561 bytes, SHA-256 `C1B8683BA5D5137DB319B68D2F849FCF629EB9F6F19D1607D80D30FE0F7D90B8`; MSI `Pulsaria_0.1.0_x64_en-US.msi`, 707,754,713 bytes, SHA-256 `183626C56615DC3845D80C1692E819DD911A1CC15CC11DF609C03CDB70089828`; la build Release arranca con la base existente y la migración duplicada está cubierta por prueba; Authenticode/updater siguen pendientes |
@@ -172,3 +172,103 @@ smoke nativo y procesamiento live. El orden posterior es: benchmark Whisper
 en español, OCR, chat RAG, playlists inteligentes, expansión multiplataforma y
 release pública firmada. Gemini permanece disponible únicamente como síntesis
 manual opcional y no es un requisito del procesamiento local.
+
+## Beta 2 — integración canónica activa
+
+La integración Beta 2 se realiza directamente sobre este checkout de `main`.
+`pulsaria.zip` es una referencia de diseño y no una segunda fuente ejecutable.
+La interfaz activa vive únicamente en `app/`, `components/`, `hooks/`, `lib/`
+y `types/`; el backend y los workers permanecen en `src-tauri/src/` y
+`python-workers/`.
+
+El frontend funcional usa `@tabler/icons-react` mediante
+`components/icon-library.tsx`. El PNG de marca de
+`C:\Users\danie\Downloads\icono pulsaria .png` es la fuente visual del icono
+web y de los assets nativos generados para Tauri. La ventana usa decoraciones
+nativas desactivadas y la barra principal React conserva la caja de marca
+Pulsaria junto con los símbolos de minimizar, maximizar/restaurar y cerrar.
+
+El desarrollo utiliza exclusivamente `http://127.0.0.1:3000`; el launcher
+rechaza procesos antiguos o aplicaciones ajenas que ocupen el puerto y no
+permite fallback silencioso a `3001`. El canal DEMO es una excepción aislada y
+opt-in: `lib/demo-media.ts` consume únicamente el manifest generado en
+`public/demo/pulsaria-dev` y nunca escribe en SQLite, jobs, búsqueda,
+playlists, fuentes, estadísticas o la cola. La carpeta
+`C:\Users\danie\Desktop\imagenes pulsaria` es staging temporal; hoy contiene
+15 slots y no se inventa un slot adicional si la carpeta no lo proporciona.
+
+Para iterar la interfaz sin recompilar Tauri/Rust se añadió el perfil
+`TESTER DEV`, ejecutable con `npm run dev:tester`. Este perfil usa el directorio
+de desarrollo aislado `.next-dev`, conserva el puerto único `127.0.0.1:3000`,
+verifica el contrato de versión antes de arrancar y publica los marcadores
+`beta2-canonical`, `0.1.0-beta.2` y `tester-dev` en la respuesta HTML. Tiene
+recarga en caliente para React/Next y no genera un ejecutable ni reinstala el
+runtime. `npm run tauri dev` queda reservado para validar la integración nativa
+IPC; `npm run tauri build` queda reservado para una build de release.
+
+### Fuentes TikTok persistentes
+
+`collection_sources` es la única autoridad persistente para perfiles conectados.
+`collection_source_items` relaciona cada URL descubierta con su categoría y el
+job real; `collection_source_activity` conserva el historial compacto visible.
+`src-tauri/src/application/collection_service.rs` ejecuta el ciclo de
+descubrimiento y reutiliza `QueueService`; no existe un downloader ni una cola
+paralela para fuentes.
+
+La pestaña visible es `Fuentes` aunque conserva la clave interna `cuenta` para
+no romper navegación existente. La conexión acepta perfiles TikTok o handles,
+usa únicamente el selector existente de cookies de Chrome, Edge o Firefox,
+nunca embebe un login ni guarda credenciales. El scanner
+`python-workers/source_scanner.py` enumera sin descargar, distingue categorías
+vacías de categorías inaccesibles y deja deshabilitada toda capacidad no
+confirmada. `new_only` registra un baseline; `history` aplica el límite elegido.
+La deduplicación final usa `jobs.canonical_url`, y eliminar una fuente nunca
+elimina videos de la biblioteca.
+
+El modo navegador tester-dev demuestra la composición y los estados vacíos,
+pero no puede certificar SQLite, cookies, yt-dlp ni eventos Tauri. El estado
+`TIKTOK ACTIVITY SOURCE: PASS` queda reservado para una conexión autorizada
+que haya descubierto, deduplicado y enviado elementos reales al pipeline.
+
+### Task 01 — registro canónico de perfil
+
+La fase inicial de perfiles usa register_profile_source para validar y
+persistir identidad + selección en collection_sources sin lanzar scanner,
+descarga ni sincronización. update_profile_source_settings conserva la
+selección independiente de posts, reposts, saved y favorites, mapeando
+favorites al contrato histórico likes de SQLite. La tarjeta reconstruida en
+components/TikTokSourcesPanel.tsx representa metadata ausente como pendiente;
+no fabrica avatar, portada, verificación, métricas ni contadores. La
+normalización estricta vive en lib/profile-source.ts y
+src-tauri/src/url_utils.rs; la interfaz TikTokProfileMetadataProvider queda
+preparada para una integración autorizada posterior.
+
+## Verificación Beta 2 — 2026-09-20
+
+Este bloque es la referencia de estado actual para la integración Beta 2; las
+tablas históricas anteriores se conservan como registro y no sustituyen estos
+resultados.
+
+| Gate | Estado | Evidencia o límite |
+| --- | --- | --- |
+| Gates automáticos MVP | PASS | `npm run verify:mvp`: 13/13 gates; incluye typecheck, lint, build, canonical, a11y, onboarding, Python y Rust |
+| Frontend canónico | PASS | Next.js 16.3.5; `app/page.tsx` es la única entrada activa; el ZIP se mantiene como referencia |
+| Contrato de versión | PASS | `npm run verify:versions`: package, lockfile, manifest, Tauri, Cargo y runtime coinciden en `0.1.0-beta.2` |
+| Perfil TESTER DEV | PASS | `scripts/dev-tester.ps1` está activo; la cadena `dev-tester -> dev-next -> next dev` sirve `.next-dev` en `127.0.0.1:3000`, con HTTP 200, marcadores canónicos y sin fallback a `3001`. El guard detecta y rechaza una segunda instancia |
+| Iconos | PASS | `npm run verify:icons`; PNG web y assets nativos provienen del PNG proporcionado y `components/icon-library.tsx` centraliza los iconos funcionales |
+| Dependencias de producción | PASS | `npm audit --omit=dev`: 0 vulnerabilidades encontradas |
+| Rust | PASS | `cargo fmt`, `cargo check` y `cargo test`: 77 tests sin fallos |
+| Python | PASS parcial | 32 tests PASS y 1 skip live intencional; incluye scanner de fuentes; el smoke live requiere una URL autorizada |
+| Runtime | PASS | `verify-runtime-manifest.ps1`: 51/51 recursos canónicos |
+| Bundle Tauri Release | PASS histórico / pendiente de regenerar | La build anterior arrancó técnicamente, pero sus artefactos `0.1.0-2` son anteriores a la sincronización actual `0.1.0-beta.2`; no se recompilan durante la iteración TESTER DEV |
+| Preview web | PASS | HTTP 200 en `127.0.0.1:3000`; una única barra principal con caja Pulsaria y controles de ventana, consentimiento rechazado por defecto, Cinema sin biblioteca real cuando no hay jobs y demos solo mediante el interruptor aislado, Ajustes con General/Motor/IA/Métricas |
+| Canal DEMO tester | IMPLEMENTADO | `npm run sync:demo` genera slots estables desde la carpeta externa; imágenes son previews estáticos y MP4/WebM del mismo slot tienen prioridad. El canal no participa en SQLite ni en la píldora de TikToks reales |
+| Reset tester | IMPLEMENTADO | `npm run reset:tester` muestra preview; `npm run reset:tester -- -ConfirmReset` crea backup timestamped, elimina solo jobs de prueba confirmados y conserva medios físicos hasta una limpieza explícita |
+| Fuentes TikTok persistentes | IMPLEMENTADO / LIVE PENDIENTE | `collection_sources` es la única base; UI `Fuentes`, scanner por categorías, baseline, historial limitado, actividad y dedupe contra `jobs.canonical_url`; falta una cuenta/sesión autorizada para certificar la enumeración real |
+| Arranque nativo debug | PASS técnico | `npm run tauri dev` compiló y ejecutó `target-tauri/debug/pulsaria.exe`; frontend HTTP 200, API `8080` y métricas `9001` activos; no reaparecieron `Hydration failed` ni el warning de `THREE.Clock` tras las correcciones |
+| Aceptación visual nativa | BLOCKED_EXTERNAL | Esta sesión no expone una ventana Tauri al inspector visual; el preview web no sustituye esa evidencia |
+| Firma, updater y publicación | BLOCKED_EXTERNAL | Requieren certificado, secretos, endpoint y aceptación externa; no se fabrican esos artefactos |
+
+La base de datos, medios, runtime y modelos existentes no se reinicializaron ni
+se eliminaron. No se hizo `git reset`, `git clean`, stash global, commit ni
+push durante esta integración.

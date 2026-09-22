@@ -2,11 +2,11 @@
   "project": "Pulsaria",
   "name": "Pulsaria",
   "description": "Motor local-first de escritorio para procesar contenido audiovisual autorizado de TikTok, generar transcripciones y análisis, e indexar una biblioteca para búsqueda literal y semántica.",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.2",
   "language": "Rust + TypeScript",
   "framework": {
     "backend": "Tauri 2",
-    "frontend": "Next.js 15 / React 19",
+    "frontend": "Next.js 16.3.5 / React 19",
     "workers": "Python (faster-whisper, yt-dlp, ffmpeg)"
   },
   "domains": [
@@ -43,7 +43,7 @@
   ],
   "entrypoints": {
     "rust": "src-tauri/src/main.rs",
-    "frontend": "app/page.tsx",
+    "frontend": "app/page.tsx (única fuente activa; ZIP solo de referencia)",
     "workers": "python-workers/main.py"
   },
   "commands": [
@@ -53,10 +53,34 @@
     "npm run build"
   ],
   "ports": {
-    "tauri": "dynamic",
+    "tauri": "127.0.0.1:3000",
     "api": 8080,
     "metrics": 9001,
-    "frontend": 3000
+    "frontend": 3000,
+    "frontendPolicy": "single canonical app/components/hooks/lib/types tree; isolated opt-in DemoMediaProvider only; no demo content in library runtime"
+  },
+  "canonicalPolicy": {
+    "frontendRoots": ["app", "components", "hooks", "lib", "types"],
+    "backendRoots": ["src-tauri/src", "python-workers"],
+    "supportingRoots": ["semantic", "sdk/typescript"],
+    "persistentSourceModel": "collection_sources + collection_source_items + collection_source_activity",
+    "persistentSourceService": "src-tauri/src/application/collection_service.rs",
+    "persistentSourceScanner": "python-workers/source_scanner.py",
+    "singleIngestionQueue": "QueueService",
+    "manualProfileFlow": "Task 01 uses register_profile_source and update_profile_source_settings; later discovery delegates to connect_tiktok_source; no parallel profile downloader",
+    "zipRole": "reference-only",
+    "demoRuntime": "isolated-demo-only",
+    "demoLibraryData": "forbidden",
+    "demoAssetProvider": "lib/demo-media.ts -> public/demo/pulsaria-dev/demo-slots.json",
+    "demoStagingSource": "C:/Users/danie/Desktop/imagenes pulsaria (staging only)",
+    "developmentUrl": "http://127.0.0.1:3000",
+    "fallbackPorts": []
+  },
+  "identity": {
+    "iconSource": "C:/Users/danie/Downloads/icono pulsaria .png",
+    "webAsset": "public/pulsaria-icon.png",
+    "nativeAssetRoot": "src-tauri/icons",
+    "functionalIconBoundary": "components/icon-library.tsx"
   },
   "tests": {
     "rust": ["src-tauri/src/main.rs::unib_tests", "src-tauri/tests/test_hnsw.rs"],

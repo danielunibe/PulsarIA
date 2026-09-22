@@ -8,7 +8,7 @@ $checks = @(
     @{ Path = 'lib/i18n.tsx'; Pattern = 'export function I18nProvider'; Label = 'I18n provider' },
     @{ Path = 'lib/i18n.tsx'; Pattern = "translations\['es-MX'\]"; Label = 'Spanish fallback' },
     @{ Path = 'components/ProcessingSetupModal.tsx'; Pattern = 'setLocale\(value\)'; Label = 'First-launch selector' },
-    @{ Path = 'components/SettingsPanel.tsx'; Pattern = 'setLocale\(value\)'; Label = 'Settings selector' }
+    @{ Path = 'components/settings/GeneralTab.tsx'; Pattern = 'setLocale\(value\)'; Label = 'Settings selector' }
 )
 
 foreach ($check in $checks) {

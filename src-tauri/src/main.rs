@@ -64,12 +64,18 @@ use crate::infrastructure::scheduler;
 use crate::infrastructure::semantic_cache;
 use crate::infrastructure::vector_shards;
 use crate::maintenance::reindex_pipeline;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tokio::sync::Mutex;
+
+#[derive(Clone)]
+struct ExitSignal(Arc<AtomicBool>);
+#[derive(Clone)]
+struct SyncPause(Arc<AtomicBool>);
 
 fn write_startup_log(data_dir: &std::path::Path, stage: &str, detail: &str) {
     use std::io::Write;
@@ -108,7 +114,10 @@ async fn main() {
             connection
         }
         Err(error) => {
-            let detail = format!("library.db initialization failed: {error}");
+            let detail = format!(
+                "library.db initialization failed at {}: {error}",
+                data_dir.join("library.db").display()
+            );
             write_startup_log(&data_dir, "sqlite_error", &detail);
             tracing::error!("{detail}");
             return;
@@ -305,8 +314,18 @@ async fn main() {
         jwt_secret,
         rate_limiter,
     });
-    let api_session_token = security::create_session_token(&security_config.jwt_secret)
-        .expect("API session token must be issuable from the generated process secret");
+    let api_session_token = match security::create_session_token(&security_config.jwt_secret) {
+        Ok(token) => {
+            write_startup_log(&data_dir, "security", "api session token created");
+            token
+        }
+        Err(e) => {
+            let detail = format!("API session token generation failed: {e}");
+            write_startup_log(&data_dir, "security_error", &detail);
+            tracing::error!("{detail}");
+            return;
+        }
+    };
     let api_runtime = api::ApiRuntimeState::default();
 
     let api_state = gateway::ApiState {
@@ -327,19 +346,29 @@ async fn main() {
 
     let arc_config = Arc::new(Mutex::new(search_config));
     let arc_metrics = Arc::new(Mutex::new(metrics));
+    write_startup_log(&data_dir, "local_llm", "initializing local LLM manager");
     let local_llm = Arc::new(
-        infrastructure::local_llm::LocalLlmManager::new()
-            .expect("local LLM manifest must be valid"),
+        infrastructure::local_llm::LocalLlmManager::new().unwrap_or_else(|e| {
+            let detail = format!("local LLM manifest warning ({e}), fallback to degraded mode");
+            write_startup_log(&data_dir, "local_llm_warn", &detail);
+            tracing::warn!("{detail}");
+            infrastructure::local_llm::LocalLlmManager::new_noop()
+        }),
     );
 
     let collection_db = std_db.clone();
     let collection_queue = queue_service.clone();
     let startup_app_settings = initial_app_settings.clone();
+    let exit_signal = Arc::new(ExitSignal(Arc::new(AtomicBool::new(false))));
+    let sync_pause = Arc::new(SyncPause(Arc::new(AtomicBool::new(false))));
+    let sync_pause_for_setup = sync_pause.clone();
+    let sync_pause_for_loop = sync_pause.clone();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
+                let _ = window.unminimize();
                 let _ = window.set_focus();
             }
         }))
@@ -349,57 +378,194 @@ async fn main() {
             Some(vec!["--background"]),
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage((*exit_signal).clone())
+        .manage((*sync_pause).clone())
         .setup(move |app| {
             let show_item = MenuItem::with_id(app, "show", "Abrir Pulsaria", true, None::<&str>)?;
+            let queue_item = MenuItem::with_id(app, "queue-status", "Cola activa: consultando…", false, None::<&str>)?;
+            let source_item = MenuItem::with_id(app, "source-status", "Perfiles: sincronización automática", false, None::<&str>)?;
+            let toggle_sync_item = MenuItem::with_id(app, "toggle-sync", "Pausar nuevas sincronizaciones", true, None::<&str>)?;
+            let toggle_processing_item = MenuItem::with_id(app, "toggle-processing", "Pausar procesamiento", true, None::<&str>)?;
             let quit_item =
                 MenuItem::with_id(app, "quit", "Salir de Pulsaria", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
-            TrayIconBuilder::new()
-                .icon(
-                    app.default_window_icon()
-                        .cloned()
-                        .expect("Pulsaria icon is required"),
-                )
-                .menu(&tray_menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+            let tray_menu = Menu::with_items(app, &[&show_item, &queue_item, &source_item, &toggle_sync_item, &toggle_processing_item, &quit_item])?;
+            let queue_item_for_status = queue_item.clone();
+            let source_item_for_status = source_item.clone();
+            let toggle_sync_item_for_status = toggle_sync_item.clone();
+            let toggle_processing_item_for_status = toggle_processing_item.clone();
+            let status_db = collection_db.clone();
+            let status_queue = collection_queue.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                    let active = status_queue.active_job_ids().await.len();
+                    let queued = status_db.lock().ok().and_then(|connection| {
+                        connection.query_row(
+                            "SELECT COUNT(*) FROM jobs WHERE status IN ('queued','metadata','downloading','processing','extracting_audio','transcribing','indexing')",
+                            [], |row| row.get::<_, i64>(0),
+                        ).ok()
+                    }).unwrap_or(0);
+                    let profiles = status_db.lock().ok().and_then(|connection| {
+                        connection.query_row(
+                            "SELECT COUNT(*) FROM collection_sources WHERE active = 1 AND status = 'checking'",
+                            [], |row| row.get::<_, i64>(0),
+                        ).ok()
+                    }).unwrap_or(0);
+                    let _ = queue_item_for_status.set_text(format!("Cola activa: {} · pendientes: {}", active, queued));
+                    let _ = source_item_for_status.set_text(format!("Perfiles sincronizando: {}", profiles));
+                    let paused = sync_pause_for_setup.0.load(Ordering::SeqCst);
+                    let _ = toggle_sync_item_for_status.set_text(if paused { "Reanudar nuevas sincronizaciones" } else { "Pausar nuevas sincronizaciones" });
+                    let processing_paused = status_queue.is_processing_paused();
+                    let _ = toggle_processing_item_for_status.set_text(if processing_paused { "Reanudar procesamiento" } else { "Pausar procesamiento" });
+                }
+            });
+            if let Some(icon) = app.default_window_icon().cloned() {
+                TrayIconBuilder::new()
+                    .icon(icon)
+                    .menu(&tray_menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
                         }
-                    }
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                        "toggle-sync" => {
+                            let paused = app.state::<SyncPause>().0.load(Ordering::SeqCst);
+                            app.state::<SyncPause>().0.store(!paused, Ordering::SeqCst);
                         }
-                    }
-                })
-                .build(app)?;
+                        "toggle-processing" => {
+                            let queue = app.state::<commands::AppState>().queue.clone();
+                            queue.set_processing_paused(!queue.is_processing_paused());
+                        }
+                        "quit" => {
+                            app.state::<ExitSignal>().0.store(true, Ordering::SeqCst);
+                            app.exit(0)
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    })
+                    .build(app)?;
+            } else {
+                tracing::warn!("Default window icon is missing, skipping system tray creation");
+            }
             if startup_app_settings.autostart_enabled {
                 if let Err(error) = app.autolaunch().enable() {
                     tracing::warn!("Could not enable Windows autostart: {}", error);
                 }
-            } else if let Err(error) = app.autolaunch().disable() {
-                tracing::warn!("Could not disable Windows autostart: {}", error);
+            } else {
+                match app.autolaunch().is_enabled() {
+                    Ok(true) => {
+                        if let Err(error) = app.autolaunch().disable() {
+                            tracing::warn!("Could not disable Windows autostart: {}", error);
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        tracing::warn!("Could not inspect Windows autostart: {}", error);
+                    }
+                }
             }
             if std::env::args().any(|argument| argument == "--background") {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.hide();
                 }
+            } else if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+                let _ = window.center();
+                let vis = window.is_visible();
+                let min = window.is_minimized();
+                let size = window.outer_size();
+                let pos = window.outer_position();
+                write_startup_log(&db::data_dir_path(), "window", &format!("Main window explicitly shown, unminimized, and focused (vis={vis:?}, min={min:?}, size={size:?}, pos={pos:?})"));
+            } else {
+                write_startup_log(&db::data_dir_path(), "window_warn", "Window 'main' not found in setup");
             }
             let handle = app.handle().clone();
+            let governor_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let mut previous_signature = String::new();
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+                    let settings = governor_handle
+                        .state::<commands::AppState>()
+                        .app_settings
+                        .read()
+                        .await
+                        .clone();
+                    let mode = settings.performance_mode.clone();
+                    let preferred = settings.preferred_adapter_id.clone();
+                    let probe = tokio::task::spawn_blocking(move || {
+                        crate::infrastructure::acceleration::probe(&mode, preferred.as_deref())
+                    })
+                    .await;
+                    let Ok(mut status) = probe else { continue };
+                    commands::merge_persisted_acceleration_verification(
+                        &mut status,
+                        settings.last_verified_accelerators.as_deref(),
+                    );
+                    commands::mark_active_accelerators(&mut status, &settings);
+                    let policy = crate::infrastructure::acceleration::performance_policy(
+                        &settings.performance_mode,
+                        settings.background_processing,
+                        settings.ac_only_for_maximum,
+                        settings.idle_threshold_seconds,
+                        &status,
+                    );
+                    let background_pause = !policy.background_allowed;
+                    governor_handle
+                        .state::<commands::AppState>()
+                        .queue
+                        .set_background_admission_paused(background_pause);
+                    let signature = serde_json::to_string(&(
+                        &policy,
+                        &status.power_source,
+                        &status.user_state,
+                        status.idle_seconds / 15,
+                        &status.active_adapter_id,
+                        status
+                            .adapters
+                            .iter()
+                            .map(|adapter| {
+                                (
+                                    &adapter.id,
+                                    &adapter.state,
+                                    adapter.temperature_c.map(|value| value.round()),
+                                    adapter.utilization_percent.map(|value| value.round()),
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                        status
+                            .capabilities
+                            .iter()
+                            .map(|capability| (&capability.name, &capability.state))
+                            .collect::<Vec<_>>(),
+                    ))
+                    .unwrap_or_default();
+                    if signature != previous_signature {
+                        previous_signature = signature;
+                        let _ = governor_handle.emit("acceleration-status-changed", &status);
+                    }
+                }
+            });
             if let Some(ref err) = onnx_load_error {
                 commands::emit_log(&handle, err.clone());
             }
@@ -407,18 +573,24 @@ async fn main() {
             let sync_queue = collection_queue.clone();
             let sync_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
-                // Espera inicial para que el backend est� completamente listo
+                // Espera inicial para que el backend está completamente listo
                 tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
                 crate::application::collection_service::start_collection_sync_loop(
                     sync_db,
                     sync_queue,
                     sync_handle,
+                    sync_pause_for_loop.0.clone(),
                 )
                 .await;
             });
             commands::emit_log(
                 &handle,
-                "Backend initialized; REST gateway status is reported in Salud".into(),
+                "Backend initialized; REST gateway startup is being verified in Salud".into(),
+            );
+            write_startup_log(
+                &db::data_dir_path(),
+                "setup",
+                "Backend initialized; REST gateway startup is being verified",
             );
             Ok(())
         })
@@ -451,6 +623,22 @@ async fn main() {
             local_llm,
         })
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let should_hide = window
+                    .app_handle()
+                    .state::<commands::AppState>()
+                    .app_settings
+                    .try_read()
+                    .map(|settings| settings.keep_in_tray_on_close)
+                    .unwrap_or(true)
+                    && !window.app_handle().state::<ExitSignal>().0.load(Ordering::SeqCst);
+                if should_hide {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    write_startup_log(&db::data_dir_path(), "window", "Main window hidden to system tray");
+                    return;
+                }
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let local_llm = window
                     .app_handle()
@@ -465,14 +653,22 @@ async fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::add_job,
             commands::get_jobs,
+            commands::get_job_activity,
             commands::retry_job,
+            commands::connect_tiktok_source,
+            commands::register_profile_source,
+            commands::update_profile_source_settings,
             commands::get_collection_sources,
             commands::set_collection_source_active,
+            commands::update_collection_source_config,
             commands::delete_collection_source,
             commands::sync_collection_source_now,
+            commands::get_collection_source_activity,
             commands::get_health_events,
             commands::get_api_session_token,
             commands::get_runtime_health,
+            commands::get_processing_pause,
+            commands::set_processing_pause,
             commands::get_legal_consent,
             commands::save_legal_consent,
             commands::get_app_settings,
@@ -492,6 +688,11 @@ async fn main() {
             commands::debug_search_transcripts,
             commands::get_system_metrics,
             commands::get_hardware_profile,
+            commands::get_acceleration_status,
+            commands::get_performance_policy,
+            commands::set_performance_policy,
+            commands::run_acceleration_benchmark,
+            commands::reset_performance_profile,
             commands::get_runtime_preflight,
             commands::get_embedding_index_status,
             commands::get_storage_status,
@@ -509,7 +710,10 @@ async fn main() {
             commands::set_processing_settings,
             commands::save_mvp_settings,
             commands::get_whisper_model_status,
+            commands::get_local_model_state,
             commands::prepare_whisper_model,
+            commands::retry_local_model_setup,
+            commands::repair_local_model,
             commands::cancel_whisper_model_preparation,
             commands::rebuild_index,
             commands::reindex_sqlite_indexes,
@@ -540,6 +744,13 @@ async fn main() {
             commands::generate_local_response,
             commands::generate_gemini_response
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .unwrap_or_else(|error| {
+            let detail = format!("error while building tauri application: {error}");
+            write_startup_log(&data_dir, "tauri_build_error", &detail);
+            panic!("{detail}");
+        });
+
+    write_startup_log(&data_dir, "tauri", "running tauri application loop");
+    app.run(|_app_handle, _event| {});
 }

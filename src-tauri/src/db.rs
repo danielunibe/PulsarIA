@@ -178,18 +178,75 @@ pub struct PlaylistRecord {
 pub struct CollectionSourceRecord {
     pub id: i64,
     pub url: String,
+    pub profile_url: String,
     pub source_type: String,
+    pub platform: String,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
     pub browser: Option<String>,
     pub active: bool,
+    pub status: String,
+    pub capabilities_json: String,
+    pub watch_config_json: String,
+    pub initial_import_mode: String,
+    pub history_limit: Option<i64>,
+    pub history_from: Option<String>,
+    pub rules_json: String,
     pub interval_minutes: i64,
     pub last_attempt_at: Option<String>,
+    pub last_sync_at: Option<String>,
     pub last_success_at: Option<String>,
     pub next_sync_at: Option<String>,
     pub discovered_count: i64,
     pub consecutive_failures: i64,
     pub last_error: Option<String>,
+    pub last_sync_summary_json: Option<String>,
     pub created_at: String,
+    pub cover_url: Option<String>,
+    pub verified: Option<bool>,
+    pub following_count: Option<i64>,
+    pub followers_count: Option<i64>,
+    pub likes_count: Option<i64>,
+    pub updated_at: Option<String>,
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct CollectionSourceItemRecord {
+    pub id: i64,
+    pub source_id: i64,
+    pub canonical_url: String,
+    pub platform_video_id: Option<String>,
+    pub activity_types_json: String,
+    pub state: String,
+    pub job_id: Option<i64>,
+    pub reason: Option<String>,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct CollectionSourceActivityRecord {
+    pub id: i64,
+    pub source_id: i64,
+    pub created_at: String,
+    pub event_type: String,
+    pub activity_type: Option<String>,
+    pub message: String,
+    pub canonical_url: Option<String>,
+    pub job_id: Option<i64>,
+    pub state: Option<String>,
+    pub found_count: i64,
+    pub queued_count: i64,
+    pub duplicate_count: i64,
+    pub ignored_count: i64,
+    pub error_count: i64,
+}
+
+const DEFAULT_SOURCE_CAPABILITIES: &str = "{}";
+const DEFAULT_SOURCE_WATCH_CONFIG: &str =
+    r#"{"posts":false,"likes":true,"saved":true,"reposts":false}"#;
+const DEFAULT_SOURCE_RULES: &str = r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct HealthEvent {
@@ -200,6 +257,20 @@ pub struct HealthEvent {
     pub diagnosis: String,
     pub action: Option<String>,
     pub result: Option<String>,
+}
+
+/// Persisted checkpoints for the Activity surface. This is deliberately a
+/// low-volume transition log, not a raw progress-metrics stream.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct JobActivityEvent {
+    pub id: i64,
+    pub job_id: i64,
+    pub status: String,
+    pub progress: i32,
+    pub user_message: Option<String>,
+    pub technical_error: Option<String>,
+    pub error_code: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
@@ -230,7 +301,7 @@ pub struct StorageReconciliationReport {
     pub removed_stale_outputs: usize,
 }
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 9;
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn migration_error(message: impl Into<String>) -> rusqlite::Error {
@@ -442,6 +513,21 @@ pub fn init_db() -> Result<Connection> {
         )",
         [],
     )?;
+
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS job_activity_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            progress INTEGER NOT NULL DEFAULT 0,
+            user_message TEXT,
+            technical_error TEXT,
+            error_code TEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
     for (table, column, definition) in [
         ("jobs", "error_message", "TEXT"),
         ("jobs", "retry_count", "INTEGER NOT NULL DEFAULT 0"),
@@ -610,10 +696,12 @@ pub fn init_db() -> Result<Connection> {
             start_time REAL NOT NULL,
             end_time REAL NOT NULL,
             text TEXT NOT NULL,
+            words_json TEXT,
             FOREIGN KEY(job_id) REFERENCES jobs(id)
         )",
         [],
     )?;
+    ensure_column(&transaction, "transcript_segments", "words_json", "TEXT")?;
 
     transaction.execute(
         "CREATE TABLE IF NOT EXISTS embedding_metadata (
@@ -716,16 +804,117 @@ pub fn init_db() -> Result<Connection> {
         ("active", "BOOLEAN NOT NULL DEFAULT 1"),
         ("source_type", "TEXT NOT NULL DEFAULT 'collection'"),
         ("browser", "TEXT"),
+        ("profile_url", "TEXT"),
+        ("platform", "TEXT NOT NULL DEFAULT 'tiktok'"),
+        ("username", "TEXT"),
+        ("display_name", "TEXT"),
+        ("avatar_url", "TEXT"),
+        ("status", "TEXT NOT NULL DEFAULT 'active'"),
+        ("capabilities_json", "TEXT NOT NULL DEFAULT '{}'"),
+        (
+            "watch_config_json",
+            "TEXT NOT NULL DEFAULT '{\"posts\":false,\"likes\":true,\"saved\":true,\"reposts\":false}'",
+        ),
+        ("initial_import_mode", "TEXT NOT NULL DEFAULT 'new_only'"),
+        ("history_limit", "INTEGER"),
+        ("history_from", "TEXT"),
+        (
+            "rules_json",
+            "TEXT NOT NULL DEFAULT '{\"ignoreDuplicates\":true,\"autoEnqueue\":true}'",
+        ),
         ("interval_minutes", "INTEGER NOT NULL DEFAULT 15"),
         ("last_attempt_at", "DATETIME"),
+        ("last_sync_at", "DATETIME"),
         ("last_success_at", "DATETIME"),
         ("next_sync_at", "DATETIME"),
         ("discovered_count", "INTEGER NOT NULL DEFAULT 0"),
         ("consecutive_failures", "INTEGER NOT NULL DEFAULT 0"),
         ("last_error", "TEXT"),
+        ("last_sync_summary_json", "TEXT"),
+        ("cover_url", "TEXT"),
+        ("verified", "BOOLEAN"),
+        ("following_count", "INTEGER"),
+        ("followers_count", "INTEGER"),
+        ("likes_count", "INTEGER"),
+        ("updated_at", "DATETIME"),
     ] {
         ensure_column(&transaction, "collection_sources", column, definition)?;
     }
+    transaction.execute(
+        "UPDATE collection_sources
+         SET profile_url = CASE
+             WHEN profile_url IS NULL OR trim(profile_url) = '' THEN
+                 CASE
+                     WHEN lower(url) LIKE '%/liked' THEN substr(url, 1, length(url) - length('/liked'))
+                     WHEN lower(url) LIKE '%/saved' THEN substr(url, 1, length(url) - length('/saved'))
+                     WHEN lower(url) LIKE '%/reposts' THEN substr(url, 1, length(url) - length('/reposts'))
+                     WHEN lower(url) LIKE '%/favorite' THEN substr(url, 1, length(url) - length('/favorite'))
+                     ELSE url
+                 END
+             ELSE profile_url
+         END,
+         platform = coalesce(nullif(platform, ''), 'tiktok'),
+         capabilities_json = coalesce(nullif(capabilities_json, ''), '{}'),
+         watch_config_json = coalesce(nullif(watch_config_json, ''), ?1),
+         initial_import_mode = coalesce(nullif(initial_import_mode, ''), 'new_only'),
+         rules_json = coalesce(nullif(rules_json, ''), ?2),
+         status = CASE
+             WHEN active = 0 THEN 'paused'
+             WHEN status IS NULL OR trim(status) = '' THEN 'active'
+             ELSE status
+         END,
+         last_sync_at = coalesce(last_sync_at, last_success_at, last_synced_at),
+         updated_at = coalesce(updated_at, last_sync_at, last_success_at, last_synced_at, created_at, CURRENT_TIMESTAMP)
+         WHERE profile_url IS NULL OR trim(profile_url) = ''
+            OR platform IS NULL OR trim(platform) = ''
+            OR capabilities_json IS NULL OR trim(capabilities_json) = ''
+            OR watch_config_json IS NULL OR trim(watch_config_json) = ''
+            OR initial_import_mode IS NULL OR trim(initial_import_mode) = ''
+            OR rules_json IS NULL OR trim(rules_json) = ''
+            OR status IS NULL OR trim(status) = ''
+            OR last_sync_at IS NULL
+            OR updated_at IS NULL",
+        rusqlite::params![DEFAULT_SOURCE_WATCH_CONFIG, DEFAULT_SOURCE_RULES],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS collection_source_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            canonical_url TEXT NOT NULL,
+            platform_video_id TEXT,
+            activity_types_json TEXT NOT NULL DEFAULT '[]',
+            state TEXT NOT NULL,
+            job_id INTEGER,
+            reason TEXT,
+            first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(source_id, canonical_url),
+            FOREIGN KEY(source_id) REFERENCES collection_sources(id) ON DELETE CASCADE,
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
+        )",
+        [],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS collection_source_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            event_type TEXT NOT NULL,
+            activity_type TEXT,
+            message TEXT NOT NULL,
+            canonical_url TEXT,
+            job_id INTEGER,
+            state TEXT,
+            found_count INTEGER NOT NULL DEFAULT 0,
+            queued_count INTEGER NOT NULL DEFAULT 0,
+            duplicate_count INTEGER NOT NULL DEFAULT 0,
+            ignored_count INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(source_id) REFERENCES collection_sources(id) ON DELETE CASCADE,
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
+        )",
+        [],
+    )?;
     transaction.execute(
         "UPDATE collection_sources
          SET source_type = CASE
@@ -763,7 +952,12 @@ pub fn init_db() -> Result<Connection> {
         "CREATE INDEX IF NOT EXISTS idx_purge_history_job_id ON purge_history(job_id, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_playlist_items_job_id ON playlist_items(job_id)",
         "CREATE INDEX IF NOT EXISTS idx_collection_sources_due ON collection_sources(active, next_sync_at)",
+        "CREATE INDEX IF NOT EXISTS idx_collection_sources_profile_url ON collection_sources(profile_url)",
+        "CREATE INDEX IF NOT EXISTS idx_collection_source_items_source ON collection_source_items(source_id, last_seen_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_collection_source_items_url ON collection_source_items(canonical_url)",
+        "CREATE INDEX IF NOT EXISTS idx_collection_source_activity_source ON collection_source_activity(source_id, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_health_events_created_at ON health_events(created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_job_activity_job_id ON job_activity_events(job_id, id ASC)",
     ] {
         transaction.execute(index, [])?;
     }
@@ -905,7 +1099,11 @@ pub fn insert_job(conn: &Connection, url: &str) -> Result<i64> {
          VALUES (?1, ?2, 'queued', 0, 0)",
         params![url, canonical_url],
     ) {
-        Ok(_) => Ok(conn.last_insert_rowid()),
+        Ok(_) => {
+            let job_id = conn.last_insert_rowid();
+            append_job_activity_event(conn, job_id, "queued", 0, None, None, None)?;
+            Ok(job_id)
+        }
         Err(error) => {
             // The unique partial index is the final race-safety boundary for
             // callers in different processes. If another writer won between
@@ -945,13 +1143,24 @@ pub fn get_all_jobs(conn: &Connection) -> Result<Vec<JobRecord>> {
 }
 
 pub fn update_job_status(conn: &Connection, id: i64, status: &str, progress: i32) -> Result<()> {
+    let previous_status = conn
+        .query_row(
+            "SELECT status FROM jobs WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
     let rows = conn.execute(
         "UPDATE jobs SET status = ?1, progress = ?2,
             error_message = CASE WHEN ?1 IN ('error', 'error_dlq') THEN error_message ELSE NULL END
          WHERE id = ?3",
         params![status, progress, id],
     )?;
-    require_rows_changed(rows)
+    require_rows_changed(rows)?;
+    if previous_status.as_deref() != Some(status) {
+        append_job_activity_event(conn, id, status, progress, None, None, None)?;
+    }
+    Ok(())
 }
 
 pub fn update_job_retrying(conn: &Connection, id: i64, attempt: u32) -> Result<()> {
@@ -959,7 +1168,8 @@ pub fn update_job_retrying(conn: &Connection, id: i64, attempt: u32) -> Result<(
         "UPDATE jobs SET status = 'retrying', progress = 0, retry_count = ?1, error_message = NULL WHERE id = ?2",
         params![attempt, id],
     )?;
-    require_rows_changed(rows)
+    require_rows_changed(rows)?;
+    append_job_activity_event(conn, id, "retrying", 0, None, None, None)
 }
 
 pub fn reset_job_for_retry(conn: &Connection, id: i64) -> Result<()> {
@@ -967,7 +1177,8 @@ pub fn reset_job_for_retry(conn: &Connection, id: i64) -> Result<()> {
         "UPDATE jobs SET status = 'queued', progress = 0, retry_count = 0, error_message = NULL WHERE id = ?1",
         params![id],
     )?;
-    require_rows_changed(rows)
+    require_rows_changed(rows)?;
+    append_job_activity_event(conn, id, "queued", 0, None, None, None)
 }
 
 pub fn set_media_keep_status(conn: &Connection, job_id: i64, status: &str) -> Result<()> {
@@ -1297,6 +1508,39 @@ pub fn get_transcript_segments_with_timestamps(
     Ok(segments)
 }
 
+pub fn get_transcript_segments_with_words(
+    conn: &Connection,
+    job_id: i64,
+) -> Result<Vec<(i64, String, f64, f64, Option<String>)>> {
+    let mut stmt = conn.prepare(
+        "SELECT segment_index, text, start_time, end_time, words_json FROM transcript_segments WHERE job_id = ?1 ORDER BY segment_index ASC"
+    )?;
+    let rows = stmt.query_map(params![job_id], |row| {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+        ))
+    })?;
+    rows.collect::<Result<Vec<_>>>()
+}
+
+pub fn update_transcript_words(
+    conn: &Connection,
+    job_id: i64,
+    entries: &[(i64, String)],
+) -> Result<()> {
+    for (segment_index, words_json) in entries {
+        conn.execute(
+            "UPDATE transcript_segments SET words_json = ?1 WHERE job_id = ?2 AND segment_index = ?3",
+            params![words_json, job_id, segment_index],
+        )?;
+    }
+    Ok(())
+}
+
 // ========================================================================
 // PLAYLIST OPERATIONS
 // ========================================================================
@@ -1423,8 +1667,25 @@ pub fn data_dir_path() -> std::path::PathBuf {
         return std::path::PathBuf::from(configured);
     }
 
-    // Keep the repository layout convenient during development without
-    // writing beside an installed executable in a protected directory.
+    // Tauri can launch the Rust process with `src-tauri` (or another build
+    // directory) as its current directory. Use the compile-time workspace
+    // root in debug builds so a development instance never races the
+    // installed release instance over the same AppData SQLite database.
+    #[cfg(debug_assertions)]
+    {
+        let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(std::path::Path::to_path_buf);
+        if let Some(workspace_root) = workspace_root {
+            if workspace_root.join("package.json").exists() {
+                return workspace_root.join("data");
+            }
+        }
+    }
+
+    // Keep the repository layout convenient during development when the
+    // compile-time root is unavailable, without writing beside an installed
+    // executable in a protected directory.
     if let Ok(current_dir) = std::env::current_dir() {
         if current_dir.join("package.json").exists() && current_dir.join("src-tauri").is_dir() {
             return current_dir.join("data");
@@ -1541,7 +1802,77 @@ pub fn update_job_error(conn: &Connection, id: i64, status: &str, message: &str)
         "UPDATE jobs SET status = ?1, error_message = ?2 WHERE id = ?3",
         params![status, message, id],
     )?;
-    require_rows_changed(rows)
+    require_rows_changed(rows)?;
+    append_job_activity_event(
+        conn,
+        id,
+        status,
+        0,
+        Some("No pudimos completar este trabajo."),
+        Some(message),
+        Some(activity_error_code(message)),
+    )
+}
+
+fn activity_error_code(message: &str) -> String {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("spawn") || normalized.contains("python worker") {
+        "LOCAL_WORKER_START_FAILED".to_string()
+    } else if normalized.contains("timed out") || normalized.contains("timeout") {
+        "PIPELINE_TIMEOUT".to_string()
+    } else if normalized.contains("network") || normalized.contains("http") {
+        "SOURCE_UNAVAILABLE".to_string()
+    } else {
+        "PIPELINE_FAILED".to_string()
+    }
+}
+
+fn append_job_activity_event(
+    conn: &Connection,
+    job_id: i64,
+    status: &str,
+    progress: i32,
+    user_message: Option<&str>,
+    technical_error: Option<&str>,
+    error_code: Option<String>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO job_activity_events
+            (job_id, status, progress, user_message, technical_error, error_code)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            job_id,
+            status,
+            progress.clamp(0, 100),
+            user_message,
+            technical_error,
+            error_code
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_job_activity(conn: &Connection, job_id: i64) -> Result<Vec<JobActivityEvent>> {
+    let mut statement = conn.prepare(
+        "SELECT id, job_id, status, progress, user_message, technical_error,
+                error_code, created_at
+         FROM job_activity_events
+         WHERE job_id = ?1
+         ORDER BY id ASC",
+    )?;
+    let rows = statement.query_map(params![job_id], |row| {
+        Ok(JobActivityEvent {
+            id: row.get(0)?,
+            job_id: row.get(1)?,
+            status: row.get(2)?,
+            progress: row.get(3)?,
+            user_message: row.get(4)?,
+            technical_error: row.get(5)?,
+            error_code: row.get(6)?,
+            created_at: row.get(7)?,
+        })
+    })?;
+    rows.collect()
 }
 
 /// Marks jobs that have exceeded the stale threshold, excluding jobs that
@@ -1560,14 +1891,37 @@ pub fn mark_stale_jobs(conn: &Connection, active_job_ids: &[i64]) -> Result<usiz
           AND datetime(created_at) < datetime('now', '-2 hours')";
 
     if active_job_ids.is_empty() {
-        return conn.execute(base_query, []);
+        let updated = conn.execute(base_query, [])?;
+        append_stale_activity_events(conn)?;
+        return Ok(updated);
     }
 
     let placeholders = std::iter::repeat_n("?", active_job_ids.len())
         .collect::<Vec<_>>()
         .join(", ");
     let query = format!("{base_query} AND id NOT IN ({placeholders})");
-    conn.execute(&query, rusqlite::params_from_iter(active_job_ids.iter()))
+    let updated = conn.execute(&query, rusqlite::params_from_iter(active_job_ids.iter()))?;
+    append_stale_activity_events(conn)?;
+    Ok(updated)
+}
+
+fn append_stale_activity_events(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "INSERT INTO job_activity_events
+            (job_id, status, progress, user_message, technical_error, error_code)
+         SELECT j.id, 'error', 0, 'No pudimos completar este trabajo.',
+                j.error_message, 'PIPELINE_STALE'
+         FROM jobs j
+         WHERE j.status = 'error'
+           AND j.error_message = 'Job abandoned after exceeding the processing timeout'
+           AND NOT EXISTS (
+               SELECT 1 FROM job_activity_events e
+               WHERE e.job_id = j.id AND e.status = 'error'
+                 AND e.error_code = 'PIPELINE_STALE'
+           )",
+        [],
+    )?;
+    Ok(())
 }
 
 pub fn clear_transcript_data(conn: &Connection, job_id: i64) -> Result<()> {
@@ -1954,15 +2308,172 @@ pub fn register_collection_source_with_browser(
     } else {
         "profile"
     };
+    let canonical_url = crate::url_utils::canonicalize_tiktok_url(url);
+    let profile_url = crate::url_utils::tiktok_profile_url(&canonical_url)
+        .unwrap_or_else(|| canonical_url.clone());
+    let username = crate::url_utils::tiktok_username(&profile_url);
     conn.execute(
-        "INSERT INTO collection_sources (url, source_type, browser, active, last_synced_at)
-         VALUES (?1, ?2, ?3, 1, CURRENT_TIMESTAMP)
+        "INSERT INTO collection_sources
+            (url, profile_url, source_type, platform, username, browser, active, status,
+             last_synced_at, last_sync_at, capabilities_json, watch_config_json, rules_json)
+         VALUES (?1, ?2, ?3, 'tiktok', ?4, ?5, 1, 'active', CURRENT_TIMESTAMP,
+                 CURRENT_TIMESTAMP, ?6, ?7, ?8)
          ON CONFLICT(url) DO UPDATE SET
-            browser = coalesce(?3, collection_sources.browser),
-            active = 1",
-        params![url, source_type, browser],
+            profile_url = coalesce(collection_sources.profile_url, excluded.profile_url),
+            platform = 'tiktok',
+            username = coalesce(collection_sources.username, excluded.username),
+            browser = coalesce(?5, collection_sources.browser),
+            active = 1,
+            status = 'active'",
+        params![
+            canonical_url,
+            profile_url,
+            source_type,
+            username,
+            browser,
+            DEFAULT_SOURCE_CAPABILITIES,
+            DEFAULT_SOURCE_WATCH_CONFIG,
+            DEFAULT_SOURCE_RULES,
+        ],
     )?;
     Ok(())
+}
+
+pub fn upsert_tiktok_source(
+    conn: &Connection,
+    profile_url: &str,
+    browser: Option<&str>,
+    initial_import_mode: &str,
+    history_limit: Option<i64>,
+    history_from: Option<&str>,
+) -> Result<i64> {
+    let canonical_url = crate::url_utils::tiktok_profile_url(profile_url).ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("invalid TikTok profile URL".into())
+    })?;
+    let username = crate::url_utils::tiktok_username(&canonical_url);
+    let existing_id = conn
+        .query_row(
+            "SELECT id FROM collection_sources WHERE profile_url = ?1 OR url = ?1 ORDER BY id ASC LIMIT 1",
+            params![canonical_url],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(source_id) = existing_id {
+        conn.execute(
+            "UPDATE collection_sources SET
+                profile_url = ?1,
+                source_type = 'profile',
+                platform = 'tiktok',
+                username = coalesce(?2, username),
+                browser = coalesce(?3, browser),
+                active = 1,
+                status = 'checking',
+                initial_import_mode = ?4,
+                history_limit = ?5,
+                history_from = ?6,
+                last_error = NULL
+             WHERE id = ?7",
+            params![
+                canonical_url,
+                username,
+                browser,
+                initial_import_mode,
+                history_limit,
+                history_from,
+                source_id,
+            ],
+        )?;
+        return Ok(source_id);
+    }
+
+    conn.execute(
+        "INSERT INTO collection_sources
+            (url, profile_url, source_type, platform, username, browser, active, status,
+             capabilities_json, watch_config_json, initial_import_mode, history_limit,
+             history_from, rules_json)
+         VALUES (?1, ?1, 'profile', 'tiktok', ?2, ?3, 1, 'checking', ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            canonical_url,
+            username,
+            browser,
+            DEFAULT_SOURCE_CAPABILITIES,
+            DEFAULT_SOURCE_WATCH_CONFIG,
+            initial_import_mode,
+            history_limit,
+            history_from,
+            DEFAULT_SOURCE_RULES,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Registers a profile identity without scanning it or enqueueing content.
+/// The collection_sources table remains the single persistence authority used
+/// by the later scanner, so this path only establishes the durable profile
+/// contract.
+pub fn register_profile_source(
+    conn: &Connection,
+    profile_url: &str,
+    username: &str,
+    watch_config_json: &str,
+    active: bool,
+) -> Result<(i64, bool)> {
+    let existing_id = conn
+        .query_row(
+            "SELECT id
+             FROM collection_sources
+             WHERE profile_url = ?1
+                OR url = ?1
+                OR (platform = 'tiktok' AND lower(username) = lower(?2))
+             ORDER BY id ASC
+             LIMIT 1",
+            params![profile_url, username],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(source_id) = existing_id {
+        return Ok((source_id, true));
+    }
+
+    conn.execute(
+        "INSERT INTO collection_sources
+            (url, profile_url, source_type, platform, username, active, status,
+             capabilities_json, watch_config_json, initial_import_mode, rules_json,
+             updated_at)
+         VALUES (?1, ?1, 'profile', 'tiktok', ?2, ?3, ?4, '{}', ?5, 'new_only', ?6,
+                 CURRENT_TIMESTAMP)",
+        params![
+            profile_url,
+            username,
+            active,
+            if active { "ready" } else { "paused" },
+            watch_config_json,
+            DEFAULT_SOURCE_RULES,
+        ],
+    )?;
+    Ok((conn.last_insert_rowid(), false))
+}
+
+pub fn update_profile_source_settings(
+    conn: &Connection,
+    source_id: i64,
+    watch_config_json: &str,
+    active: bool,
+) -> Result<CollectionSourceRecord> {
+    let rows = conn.execute(
+        "UPDATE collection_sources SET
+            watch_config_json = ?1,
+            active = ?2,
+            status = CASE WHEN ?2 = 1 THEN 'ready' ELSE 'paused' END,
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?3 AND platform = 'tiktok' AND source_type = 'profile'",
+        params![watch_config_json, active, source_id],
+    )?;
+    require_rows_changed(rows)?;
+    get_collection_source(conn, source_id)
 }
 
 pub fn register_collection_source(conn: &Connection, url: &str) -> Result<()> {
@@ -1978,32 +2489,74 @@ pub fn find_collection_source_id_by_url(conn: &Connection, url: &str) -> Result<
     .optional()
 }
 
+const COLLECTION_SOURCE_COLUMNS: &str = "id, url, coalesce(profile_url, url),
+    coalesce(source_type, 'collection'), coalesce(platform, 'tiktok'), username,
+    display_name, avatar_url, browser, active, coalesce(status, 'active'),
+    coalesce(capabilities_json, '{}'),
+    coalesce(watch_config_json, '{\"posts\":false,\"likes\":true,\"saved\":true,\"reposts\":false}'),
+    coalesce(initial_import_mode, 'new_only'), history_limit, history_from,
+    coalesce(rules_json, '{\"ignoreDuplicates\":true,\"autoEnqueue\":true}'),
+    coalesce(interval_minutes, 15), last_attempt_at,
+    coalesce(last_sync_at, last_success_at, last_synced_at), last_success_at,
+    next_sync_at, coalesce(discovered_count, 0), coalesce(consecutive_failures, 0),
+    last_error, last_sync_summary_json, created_at, cover_url, verified,
+    following_count, followers_count, likes_count, updated_at";
+
+fn collection_source_from_row(row: &Row<'_>) -> rusqlite::Result<CollectionSourceRecord> {
+    Ok(CollectionSourceRecord {
+        id: row.get(0)?,
+        url: row.get(1)?,
+        profile_url: row.get(2)?,
+        source_type: row.get(3)?,
+        platform: row.get(4)?,
+        username: row.get(5)?,
+        display_name: row.get(6)?,
+        avatar_url: row.get(7)?,
+        browser: row.get(8)?,
+        active: row.get(9)?,
+        status: row.get(10)?,
+        capabilities_json: row.get(11)?,
+        watch_config_json: row.get(12)?,
+        initial_import_mode: row.get(13)?,
+        history_limit: row.get(14)?,
+        history_from: row.get(15)?,
+        rules_json: row.get(16)?,
+        interval_minutes: row.get(17)?,
+        last_attempt_at: row.get(18)?,
+        last_sync_at: row.get(19)?,
+        last_success_at: row.get(20)?,
+        next_sync_at: row.get(21)?,
+        discovered_count: row.get(22)?,
+        consecutive_failures: row.get(23)?,
+        last_error: row.get(24)?,
+        last_sync_summary_json: row.get(25)?,
+        created_at: row.get(26)?,
+        cover_url: row.get(27)?,
+        verified: row.get(28)?,
+        following_count: row.get(29)?,
+        followers_count: row.get(30)?,
+        likes_count: row.get(31)?,
+        updated_at: row.get(32)?,
+    })
+}
+
+pub fn get_collection_source(conn: &Connection, source_id: i64) -> Result<CollectionSourceRecord> {
+    conn.query_row(
+        &format!(
+            "SELECT {} FROM collection_sources WHERE id = ?1",
+            COLLECTION_SOURCE_COLUMNS
+        ),
+        params![source_id],
+        collection_source_from_row,
+    )
+}
+
 pub fn get_collection_sources(conn: &Connection) -> Result<Vec<CollectionSourceRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, url, coalesce(source_type, 'collection'), browser, active,
-                coalesce(interval_minutes, 15), last_attempt_at, last_success_at,
-                next_sync_at, coalesce(discovered_count, 0), coalesce(consecutive_failures, 0),
-                last_error, created_at
-         FROM collection_sources
-         ORDER BY id ASC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(CollectionSourceRecord {
-            id: row.get(0)?,
-            url: row.get(1)?,
-            source_type: row.get(2)?,
-            browser: row.get(3)?,
-            active: row.get(4)?,
-            interval_minutes: row.get(5)?,
-            last_attempt_at: row.get(6)?,
-            last_success_at: row.get(7)?,
-            next_sync_at: row.get(8)?,
-            discovered_count: row.get(9)?,
-            consecutive_failures: row.get(10)?,
-            last_error: row.get(11)?,
-            created_at: row.get(12)?,
-        })
-    })?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM collection_sources ORDER BY id ASC",
+        COLLECTION_SOURCE_COLUMNS
+    ))?;
+    let rows = stmt.query_map([], collection_source_from_row)?;
     let mut sources = Vec::new();
     for row in rows {
         sources.push(row?);
@@ -2012,33 +2565,14 @@ pub fn get_collection_sources(conn: &Connection) -> Result<Vec<CollectionSourceR
 }
 
 pub fn get_collection_sources_to_sync(conn: &Connection) -> Result<Vec<CollectionSourceRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, url, coalesce(source_type, 'collection'), browser, active,
-                coalesce(interval_minutes, 15), last_attempt_at, last_success_at,
-                next_sync_at, coalesce(discovered_count, 0), coalesce(consecutive_failures, 0),
-                last_error, created_at
-         FROM collection_sources
-         WHERE active = 1
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM collection_sources
+         WHERE active = 1 AND coalesce(status, 'active') IN ('active', 'checking')
            AND (next_sync_at IS NULL OR next_sync_at <= datetime('now'))
          ORDER BY id ASC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(CollectionSourceRecord {
-            id: row.get(0)?,
-            url: row.get(1)?,
-            source_type: row.get(2)?,
-            browser: row.get(3)?,
-            active: row.get(4)?,
-            interval_minutes: row.get(5)?,
-            last_attempt_at: row.get(6)?,
-            last_success_at: row.get(7)?,
-            next_sync_at: row.get(8)?,
-            discovered_count: row.get(9)?,
-            consecutive_failures: row.get(10)?,
-            last_error: row.get(11)?,
-            created_at: row.get(12)?,
-        })
-    })?;
+        COLLECTION_SOURCE_COLUMNS
+    ))?;
+    let rows = stmt.query_map([], collection_source_from_row)?;
     let mut sources = Vec::new();
     for row in rows {
         sources.push(row?);
@@ -2048,8 +2582,77 @@ pub fn get_collection_sources_to_sync(conn: &Connection) -> Result<Vec<Collectio
 
 pub fn set_collection_source_active(conn: &Connection, source_id: i64, active: bool) -> Result<()> {
     let rows = conn.execute(
-        "UPDATE collection_sources SET active = ?1 WHERE id = ?2",
+        "UPDATE collection_sources SET
+            active = ?1,
+            status = CASE
+                WHEN ?1 = 0 THEN 'paused'
+                WHEN status IN ('needs_auth', 'error') THEN 'checking'
+                ELSE 'active'
+            END,
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?2",
         params![active, source_id],
+    )?;
+    require_rows_changed(rows)
+}
+
+pub fn update_collection_source_config(
+    conn: &Connection,
+    source_id: i64,
+    watch_config_json: &str,
+    initial_import_mode: &str,
+    history_limit: Option<i64>,
+    history_from: Option<&str>,
+    rules_json: &str,
+) -> Result<()> {
+    let rows = conn.execute(
+        "UPDATE collection_sources SET
+            watch_config_json = ?1,
+            initial_import_mode = ?2,
+            history_limit = ?3,
+            history_from = ?4,
+            rules_json = ?5,
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?6",
+        params![
+            watch_config_json,
+            initial_import_mode,
+            history_limit,
+            history_from,
+            rules_json,
+            source_id,
+        ],
+    )?;
+    require_rows_changed(rows)
+}
+
+pub fn update_collection_source_scan(
+    conn: &Connection,
+    source_id: i64,
+    capabilities_json: &str,
+    status: &str,
+    display_name: Option<&str>,
+    avatar_url: Option<&str>,
+    summary_json: Option<&str>,
+) -> Result<()> {
+    let rows = conn.execute(
+        "UPDATE collection_sources SET
+            capabilities_json = ?1,
+            status = ?2,
+            display_name = coalesce(?3, display_name),
+            avatar_url = coalesce(?4, avatar_url),
+            last_sync_summary_json = coalesce(?5, last_sync_summary_json),
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?6",
+        params![
+            capabilities_json,
+            status,
+            display_name,
+            avatar_url,
+            summary_json,
+            source_id,
+        ],
     )?;
     require_rows_changed(rows)
 }
@@ -2064,7 +2667,7 @@ pub fn delete_collection_source(conn: &Connection, source_id: i64) -> Result<()>
 
 pub fn force_collection_source_due(conn: &Connection, source_id: i64) -> Result<()> {
     let rows = conn.execute(
-        "UPDATE collection_sources SET next_sync_at = datetime('now', '-1 minute') WHERE id = ?1",
+        "UPDATE collection_sources SET next_sync_at = datetime('now', '-1 minute'), updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![source_id],
     )?;
     require_rows_changed(rows)
@@ -2072,20 +2675,40 @@ pub fn force_collection_source_due(conn: &Connection, source_id: i64) -> Result<
 
 pub fn mark_collection_source_attempt(conn: &Connection, source_id: i64) -> Result<()> {
     let rows = conn.execute(
-        "UPDATE collection_sources SET last_attempt_at = datetime('now') WHERE id = ?1",
+        "UPDATE collection_sources SET last_attempt_at = datetime('now'), updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![source_id],
     )?;
     require_rows_changed(rows)
 }
 
 pub fn mark_collection_source_failed(conn: &Connection, source_id: i64, error: &str) -> Result<()> {
+    let normalized = error.to_ascii_lowercase();
+    let status = if [
+        "cookie",
+        "login",
+        "sign in",
+        "private",
+        "unauthorized",
+        "forbidden",
+        "401",
+        "403",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        "needs_auth"
+    } else {
+        "error"
+    };
     let rows = conn.execute(
         "UPDATE collection_sources SET
+            status = ?2,
             consecutive_failures = consecutive_failures + 1,
-            last_error = ?2,
-            next_sync_at = datetime('now', '+' || min(180, (15 * (consecutive_failures + 1))) || ' minutes')
+            last_error = ?3,
+            next_sync_at = datetime('now', '+' || min(180, (15 * (consecutive_failures + 1))) || ' minutes'),
+            updated_at = CURRENT_TIMESTAMP
          WHERE id = ?1",
-        params![source_id, error],
+        params![source_id, status, error],
     )?;
     require_rows_changed(rows)
 }
@@ -2097,16 +2720,196 @@ pub fn mark_collection_source_synced(
 ) -> Result<()> {
     let rows = conn.execute(
         "UPDATE collection_sources SET
+            status = CASE WHEN active = 1 THEN 'active' ELSE 'paused' END,
+            last_sync_at = datetime('now'),
             last_success_at = datetime('now'),
             last_synced_at = datetime('now'),
             consecutive_failures = 0,
             last_error = NULL,
             discovered_count = discovered_count + ?2,
-            next_sync_at = datetime('now', '+' || interval_minutes || ' minutes')
+            next_sync_at = datetime('now', '+' || interval_minutes || ' minutes'),
+            updated_at = CURRENT_TIMESTAMP
          WHERE id = ?1",
         params![source_id, queued as i64],
     )?;
     require_rows_changed(rows)
+}
+
+pub fn set_collection_source_summary(
+    conn: &Connection,
+    source_id: i64,
+    summary_json: &str,
+) -> Result<()> {
+    let rows = conn.execute(
+        "UPDATE collection_sources SET last_sync_summary_json = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![summary_json, source_id],
+    )?;
+    require_rows_changed(rows)
+}
+
+pub fn get_collection_source_item(
+    conn: &Connection,
+    source_id: i64,
+    canonical_url: &str,
+) -> Result<Option<CollectionSourceItemRecord>> {
+    conn.query_row(
+        "SELECT id, source_id, canonical_url, platform_video_id, activity_types_json,
+                state, job_id, reason, first_seen_at, last_seen_at
+         FROM collection_source_items
+         WHERE source_id = ?1 AND canonical_url = ?2",
+        params![source_id, canonical_url],
+        |row| {
+            Ok(CollectionSourceItemRecord {
+                id: row.get(0)?,
+                source_id: row.get(1)?,
+                canonical_url: row.get(2)?,
+                platform_video_id: row.get(3)?,
+                activity_types_json: row.get(4)?,
+                state: row.get(5)?,
+                job_id: row.get(6)?,
+                reason: row.get(7)?,
+                first_seen_at: row.get(8)?,
+                last_seen_at: row.get(9)?,
+            })
+        },
+    )
+    .optional()
+}
+
+pub fn upsert_collection_source_item(
+    conn: &Connection,
+    source_id: i64,
+    canonical_url: &str,
+    platform_video_id: Option<&str>,
+    activity_type: &str,
+    state: &str,
+    job_id: Option<i64>,
+    reason: Option<&str>,
+) -> Result<CollectionSourceItemRecord> {
+    let existing = get_collection_source_item(conn, source_id, canonical_url)?;
+    let mut activity_types = existing
+        .as_ref()
+        .and_then(|item| serde_json::from_str::<Vec<String>>(&item.activity_types_json).ok())
+        .unwrap_or_default();
+    if !activity_types.iter().any(|item| item == activity_type) {
+        activity_types.push(activity_type.to_string());
+    }
+    let activity_types_json = serde_json::to_string(&activity_types)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+
+    if let Some(existing) = existing {
+        conn.execute(
+            "UPDATE collection_source_items SET
+                platform_video_id = coalesce(?1, platform_video_id),
+                activity_types_json = ?2,
+                state = ?3,
+                job_id = coalesce(?4, job_id),
+                reason = ?5,
+                last_seen_at = CURRENT_TIMESTAMP
+             WHERE id = ?6",
+            params![
+                platform_video_id,
+                activity_types_json,
+                state,
+                job_id,
+                reason,
+                existing.id,
+            ],
+        )?;
+    } else {
+        conn.execute(
+            "INSERT INTO collection_source_items
+                (source_id, canonical_url, platform_video_id, activity_types_json, state,
+                 job_id, reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                source_id,
+                canonical_url,
+                platform_video_id,
+                activity_types_json,
+                state,
+                job_id,
+                reason,
+            ],
+        )?;
+    }
+
+    get_collection_source_item(conn, source_id, canonical_url)?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn insert_collection_source_activity(
+    conn: &Connection,
+    source_id: i64,
+    event_type: &str,
+    activity_type: Option<&str>,
+    message: &str,
+    canonical_url: Option<&str>,
+    job_id: Option<i64>,
+    state: Option<&str>,
+    found_count: i64,
+    queued_count: i64,
+    duplicate_count: i64,
+    ignored_count: i64,
+    error_count: i64,
+) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO collection_source_activity
+            (source_id, event_type, activity_type, message, canonical_url, job_id, state,
+             found_count, queued_count, duplicate_count, ignored_count, error_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            source_id,
+            event_type,
+            activity_type,
+            message,
+            canonical_url,
+            job_id,
+            state,
+            found_count,
+            queued_count,
+            duplicate_count,
+            ignored_count,
+            error_count,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn get_collection_source_activity(
+    conn: &Connection,
+    source_id: i64,
+    limit: usize,
+) -> Result<Vec<CollectionSourceActivityRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, source_id, created_at, event_type, activity_type, message,
+                canonical_url, job_id, state, found_count, queued_count, duplicate_count,
+                ignored_count, error_count
+         FROM collection_source_activity
+         WHERE source_id = ?1
+         ORDER BY id DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![source_id, limit as i64], |row| {
+        Ok(CollectionSourceActivityRecord {
+            id: row.get(0)?,
+            source_id: row.get(1)?,
+            created_at: row.get(2)?,
+            event_type: row.get(3)?,
+            activity_type: row.get(4)?,
+            message: row.get(5)?,
+            canonical_url: row.get(6)?,
+            job_id: row.get(7)?,
+            state: row.get(8)?,
+            found_count: row.get(9)?,
+            queued_count: row.get(10)?,
+            duplicate_count: row.get(11)?,
+            ignored_count: row.get(12)?,
+            error_count: row.get(13)?,
+        })
+    })?;
+    rows.collect()
 }
 
 // ========================================================================
@@ -2535,6 +3338,16 @@ mod tests {
                 error_message TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE job_activity_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                progress INTEGER NOT NULL DEFAULT 0,
+                user_message TEXT,
+                technical_error TEXT,
+                error_code TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE media (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id INTEGER NOT NULL UNIQUE,
@@ -2623,16 +3436,65 @@ mod tests {
                 url TEXT NOT NULL UNIQUE,
                 source_type TEXT NOT NULL DEFAULT 'collection',
                 browser TEXT,
-                active BOOLEAN NOT NULL DEFAULT 1,
+                profile_url TEXT,
+                platform TEXT NOT NULL DEFAULT 'tiktok',
+                username TEXT,
+                 display_name TEXT,
+                 avatar_url TEXT,
+                 cover_url TEXT,
+                 verified BOOLEAN,
+                 following_count INTEGER,
+                 followers_count INTEGER,
+                 likes_count INTEGER,
+                 active BOOLEAN NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'active',
+                capabilities_json TEXT NOT NULL DEFAULT '{}',
+                watch_config_json TEXT NOT NULL DEFAULT '{}',
+                initial_import_mode TEXT NOT NULL DEFAULT 'new_only',
+                history_limit INTEGER,
+                history_from TEXT,
+                rules_json TEXT NOT NULL DEFAULT '{}',
                 interval_minutes INTEGER NOT NULL DEFAULT 15,
                 last_attempt_at DATETIME,
+                last_sync_at DATETIME,
                 last_success_at DATETIME,
                 next_sync_at DATETIME,
                 discovered_count INTEGER NOT NULL DEFAULT 0,
                 consecutive_failures INTEGER NOT NULL DEFAULT 0,
                 last_error TEXT,
-                last_synced_at DATETIME,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                 last_sync_summary_json TEXT,
+                 last_synced_at DATETIME,
+                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                 updated_at DATETIME
+             );
+            CREATE TABLE collection_source_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL,
+                canonical_url TEXT NOT NULL,
+                platform_video_id TEXT,
+                activity_types_json TEXT NOT NULL DEFAULT '[]',
+                state TEXT NOT NULL,
+                job_id INTEGER,
+                reason TEXT,
+                first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source_id, canonical_url)
+            );
+            CREATE TABLE collection_source_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                event_type TEXT NOT NULL,
+                activity_type TEXT,
+                message TEXT NOT NULL,
+                canonical_url TEXT,
+                job_id INTEGER,
+                state TEXT,
+                found_count INTEGER NOT NULL DEFAULT 0,
+                queued_count INTEGER NOT NULL DEFAULT 0,
+                duplicate_count INTEGER NOT NULL DEFAULT 0,
+                ignored_count INTEGER NOT NULL DEFAULT 0,
+                error_count INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE health_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2653,6 +3515,19 @@ mod tests {
         )
         .expect("Failed to create test schema");
         conn
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_data_dir_is_pinned_to_the_workspace() {
+        let previous = std::env::var_os("PULSAR_DATA_DIR");
+        std::env::remove_var("PULSAR_DATA_DIR");
+        let path = data_dir_path();
+        assert!(path.ends_with("data"));
+        assert!(path.parent().unwrap().join("package.json").exists());
+        if let Some(previous) = previous {
+            std::env::set_var("PULSAR_DATA_DIR", previous);
+        }
     }
 
     fn test_embedding(first: f32, second: f32) -> Vec<f32> {
@@ -2855,6 +3730,45 @@ mod tests {
     }
 
     #[test]
+    fn activity_timeline_records_real_transitions_and_errors() {
+        let conn = memory_db();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/activity").unwrap();
+
+        update_job_status(&conn, job_id, "downloading", 15).unwrap();
+        update_job_status(&conn, job_id, "downloading", 50).unwrap();
+        update_job_status(&conn, job_id, "transcribing", 65).unwrap();
+        update_job_error(
+            &conn,
+            job_id,
+            "error",
+            "ProcessSpawnError: worker unavailable",
+        )
+        .unwrap();
+
+        let events = get_job_activity(&conn, job_id).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.status.as_str())
+                .collect::<Vec<_>>(),
+            ["queued", "downloading", "transcribing", "error",]
+        );
+        assert_eq!(events[1].progress, 15);
+        assert_eq!(
+            events[3].error_code.as_deref(),
+            Some("LOCAL_WORKER_START_FAILED")
+        );
+        assert_eq!(
+            events[3].user_message.as_deref(),
+            Some("No pudimos completar este trabajo.")
+        );
+        assert_eq!(
+            events[3].technical_error.as_deref(),
+            Some("ProcessSpawnError: worker unavailable")
+        );
+    }
+
+    #[test]
     fn canonical_url_variants_do_not_create_a_second_job() {
         let conn = memory_db();
         let first = insert_job(
@@ -2895,6 +3809,133 @@ mod tests {
         assert_eq!(recovered.consecutive_failures, 0);
         assert_eq!(recovered.discovered_count, 3);
         assert!(recovered.last_error.is_none());
+    }
+
+    #[test]
+    fn profile_source_registration_persists_selection_and_deduplicates() {
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: true,
+            favorites: true,
+        };
+
+        let first = crate::application::collection_service::register_profile_source(
+            &conn, "@daniel", &selection,
+        )
+        .unwrap();
+        assert!(!first.duplicate);
+        assert_eq!(first.source.profile_url, "https://www.tiktok.com/@daniel");
+        assert_eq!(first.source.status, "ready");
+
+        let duplicate = crate::application::collection_service::register_profile_source(
+            &conn,
+            "https://tiktok.com/@daniel/",
+            &selection,
+        )
+        .unwrap();
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.source.id, first.source.id);
+        assert_eq!(
+            get_collection_sources(&conn).unwrap().len(),
+            1,
+            "canonical profile variants must share one SQLite row"
+        );
+
+        let stored = get_collection_source(&conn, first.source.id).unwrap();
+        assert_eq!(
+            stored.watch_config_json,
+            r#"{"posts":true,"likes":true,"saved":true,"reposts":false}"#
+        );
+        assert!(get_collection_sources_to_sync(&conn).unwrap().is_empty());
+
+        let paused = crate::application::collection_service::ProfileSourceSelection {
+            posts: false,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let updated = crate::application::collection_service::update_profile_source_settings(
+            &conn,
+            first.source.id,
+            &paused,
+        )
+        .unwrap();
+        assert_eq!(updated.status, "paused");
+        assert!(!updated.active);
+        let reloaded = get_collection_source(&conn, first.source.id).unwrap();
+        assert_eq!(reloaded.status, "paused");
+        assert_eq!(
+            reloaded.watch_config_json,
+            r#"{"posts":false,"likes":false,"saved":false,"reposts":false}"#
+        );
+    }
+
+    #[test]
+    fn profile_source_survives_database_reopen_with_updated_settings() {
+        let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
+        let original = std::env::var_os("PULSAR_DATA_DIR");
+        let test_dir = std::env::temp_dir().join(format!(
+            "pulsaria-profile-source-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&test_dir).unwrap();
+        std::env::set_var("PULSAR_DATA_DIR", &test_dir);
+
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let source_id = {
+            let connection = init_db().unwrap();
+            crate::application::collection_service::register_profile_source(
+                &connection,
+                "@persisted",
+                &selection,
+            )
+            .unwrap()
+            .source
+            .id
+        };
+
+        let updated_selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: false,
+            reposts: false,
+            saved: true,
+            favorites: false,
+        };
+        {
+            let connection = init_db().unwrap();
+            let stored = get_collection_source(&connection, source_id).unwrap();
+            assert_eq!(stored.status, "ready");
+            assert_eq!(stored.username.as_deref(), Some("@persisted"));
+            crate::application::collection_service::update_profile_source_settings(
+                &connection,
+                source_id,
+                &updated_selection,
+            )
+            .unwrap();
+        }
+
+        let reopened = init_db().unwrap();
+        let stored = get_collection_source(&reopened, source_id).unwrap();
+        assert_eq!(stored.status, "ready");
+        assert_eq!(
+            stored.watch_config_json,
+            r#"{"posts":false,"likes":false,"saved":true,"reposts":false}"#
+        );
+        drop(reopened);
+
+        if let Some(value) = original {
+            std::env::set_var("PULSAR_DATA_DIR", value);
+        } else {
+            std::env::remove_var("PULSAR_DATA_DIR");
+        }
+        fs::remove_dir_all(&test_dir).unwrap();
     }
 
     #[test]

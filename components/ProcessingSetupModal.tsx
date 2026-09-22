@@ -9,8 +9,8 @@ import {
   FaMemory,
   FaMicrochip,
   FaShieldHalved,
-} from 'react-icons/fa6';
-import type { HardwareProfile, ProcessingSettings, SetupSaveOptions, WhisperModelStatus } from '@/hooks/use-processing-settings';
+} from '@/components/icon-library';
+import type { HardwareProfile, LocalModelSetupState, ProcessingSettings, SetupSaveOptions, WhisperModelStatus } from '@/hooks/use-processing-settings';
 import { isTauriRuntime } from '@/hooks/use-processing-settings';
 import { useSettings, type ProcessingQuality } from '@/lib/settings-context';
 import { useI18n } from '@/lib/i18n';
@@ -21,11 +21,14 @@ interface ProcessingSetupModalProps {
   hardware?: HardwareProfile | null;
   processing?: ProcessingSettings | null;
   modelStatus?: WhisperModelStatus | null;
+  modelSetupState?: LocalModelSetupState | null;
   loading?: boolean;
   initializationError?: string | null;
   onSave: (quality: number, setup?: SetupSaveOptions) => Promise<ProcessingSettings | null>;
   onCancelPreparation: () => Promise<void>;
   onRetry?: () => Promise<void> | void;
+  onRetryModel?: () => Promise<unknown>;
+  onRepairModel?: () => Promise<unknown>;
   onDismiss?: () => void;
   preparationError?: string | null;
 }
@@ -33,6 +36,7 @@ interface ProcessingSetupModalProps {
 type SetupProfile = 'fast' | 'balanced' | 'high';
 type SetupIntent = 'knowledge' | 'balanced' | 'archive';
 type SetupStep = 'runtime' | 'welcome' | 'hardware' | 'language' | 'intent' | 'storage' | 'model' | 'success';
+type PreparationPhase = 'configure' | 'download' | 'prepare' | 'ready' | 'error';
 type IntentQuestionIndex = 0 | 1 | 2 | 3;
 type PlaybackAnswer = 'yes' | 'not-needed';
 type PriorityAnswer = 'knowledge' | 'videos';
@@ -99,6 +103,12 @@ function formatBytes(bytes: number | null | undefined) {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return 'No medido';
   if (bytes >= GIB) return `${(bytes / GIB).toFixed(bytes >= 10 * GIB ? 0 : 1)} GiB`;
   return `${Math.max(0, Math.round(bytes / 1024 / 1024))} MiB`;
+}
+
+function formatEta(seconds: number | null | undefined) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return null;
+  if (seconds < 45) return `~${Math.max(1, Math.round(seconds))} s restantes`;
+  return `~${Math.max(1, Math.round(seconds / 60))} min restantes`;
 }
 
 function profileForQuality(quality: number): SetupProfile {
@@ -252,11 +262,14 @@ export function ProcessingSetupModal({
   hardware,
   processing,
   modelStatus,
+  modelSetupState,
   loading = false,
   initializationError,
   onSave,
   onCancelPreparation,
   onRetry,
+  onRetryModel,
+  onRepairModel,
   onDismiss,
   preparationError,
 }: ProcessingSetupModalProps) {
@@ -333,11 +346,16 @@ export function ProcessingSetupModal({
     ? 'Tu equipo puede mantener el análisis local con aceleración de GPU.'
     : 'El análisis local funcionará en CPU, con prioridad en estabilidad y privacidad.';
   const rangeBackground = `linear-gradient(90deg, #25f4ee 0%, #8a5cff ${quality}%, rgba(255,255,255,.14) ${quality}%, rgba(255,255,255,.14) 100%)`;
-  const targetModel = modelForQuality(quality);
-  const effectiveTargetModel = targetModel === 'medium' && !hardware?.whisper_gpu_supported ? 'small' : targetModel;
-  const modelReadyForSelection = savedProcessing
-    ? Boolean(modelStatus?.ready && modelStatus.model === savedProcessing.whisper_model)
-    : Boolean(modelStatus?.ready && modelStatus.model === effectiveTargetModel);
+  const backendPhase = modelSetupState?.phase;
+  const preparationPhase: PreparationPhase = localError || preparationError || backendPhase === 'error'
+    ? 'error'
+    : backendPhase === 'ready' || completed || (savedProcessing && modelStatus?.ready && modelStatus.model === savedProcessing.whisper_model)
+      ? 'ready'
+    : backendPhase === 'downloading'
+        ? 'download'
+        : backendPhase === 'verifying' || backendPhase === 'preparing' || backendPhase === 'validating' || saving
+          ? 'prepare'
+        : 'configure';
   const effectiveStep: SetupStep = !hasSetupData || loading || initializationError
     ? 'runtime'
     : step === 'runtime'
@@ -1008,7 +1026,7 @@ export function ProcessingSetupModal({
                         const typedModel = model as 'tiny' | 'small' | 'medium';
                         const disabled = typedModel === 'medium' && !hardware?.whisper_gpu_supported;
                         return (
-                          <button key={model} type="button" role="radio" disabled={disabled || saving} aria-checked={selectedModel === typedModel} onClick={() => { if (!disabled) { userAdjustedQuality.current = true; setQuality(modelQuality(typedModel)); void handleSave(modelQuality(typedModel)); } }} className={styles.modelCard} data-selected={selectedModel === typedModel} data-disabled={disabled}>
+                            <button key={model} type="button" role="radio" disabled={disabled || saving} aria-checked={selectedModel === typedModel} onClick={() => { if (!disabled) { userAdjustedQuality.current = true; setQuality(modelQuality(typedModel)); } }} className={styles.modelCard} data-selected={selectedModel === typedModel} data-disabled={disabled}>
                             <span className={styles.modelTopline}><strong>Whisper {model}</strong><small>{badge}</small></span>
                             <span>{label}</span>
                             <small>{description}</small>
@@ -1034,10 +1052,54 @@ export function ProcessingSetupModal({
                     </div>
                     <div className={styles.profileDetail}>
                       <div><p className={styles.modelName}>{modelLabel} <span>· {deviceLabel}</span></p><p className={styles.qualityDescription}>{qualityDescription}</p></div>
-                      <div className={styles.downloadNote}><FaDownload size={10} /><span>{modelReadyForSelection ? 'Modelo listo' : 'Se prepara al confirmar'}</span></div>
+                      <div className={styles.downloadNote}><FaDownload size={10} /><span>{preparationPhase === 'ready' ? 'Modelo listo' : 'Se prepara al confirmar'}</span></div>
                     </div>
 
-                    {(localError || preparationError) && <p role="alert" className={styles.errorMessage}>{localError || preparationError}</p>}
+                    <div className={styles.preparationPlan} aria-label="Plan de preparación">
+                      <p className={styles.sectionEyebrow}>Plan de preparación</p>
+                      <div className={styles.preparationPlanSteps}>
+                        {[
+                          ['Configurar', 'configure'],
+                          ['Descargar', 'download'],
+                          ['Preparar', 'prepare'],
+                          ['Listo', 'ready'],
+                        ].map(([label, phase], index) => {
+                          const phaseIndex = ['configure', 'download', 'prepare', 'ready'].indexOf(preparationPhase === 'error' ? 'prepare' : preparationPhase);
+                          const itemIndex = index;
+                          const done = preparationPhase === 'ready' || itemIndex < phaseIndex;
+                          const active = preparationPhase !== 'ready' && itemIndex === phaseIndex;
+                          return (
+                            <span key={phase} className={styles.preparationPlanStep} data-active={active} data-done={done}>
+                              <span className={styles.preparationPlanDot}>{done ? '✓' : index + 1}</span>
+                              <span>{label}</span>
+                              {index < 3 && <span className={styles.preparationPlanLine} aria-hidden="true" />}
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <p className={styles.preparationPlanMessage}>
+                        {preparationPhase === 'configure' && 'Revisa el modelo y confirma para iniciar el proceso.'}
+                        {preparationPhase === 'download' && `Descargando Whisper ${selectedModel}${modelSetupState?.downloadedBytes ? ` · ${formatBytes(modelSetupState.downloadedBytes)}${modelSetupState.totalBytes ? ` / ${formatBytes(modelSetupState.totalBytes)}` : ''}` : ''}${formatEta(modelSetupState?.etaSeconds) ? ` · ${formatEta(modelSetupState?.etaSeconds)}` : ''}.`}
+                        {preparationPhase === 'prepare' && (modelSetupState?.phase === 'verifying' ? 'Comprobando integridad del modelo descargado.' : modelSetupState?.phase === 'validating' ? 'Validando que Whisper pueda inicializarse.' : 'Preparando el modelo local. La ventana permanecerá aquí hasta validar el resultado.')}
+                        {preparationPhase === 'ready' && 'El backend confirmó que el modelo está preparado y disponible.'}
+                        {preparationPhase === 'error' && 'La preparación no terminó. Revisa el error y vuelve a intentarlo.'}
+                      </p>
+                      {preparationPhase === 'download' && modelSetupState?.progress !== null && modelSetupState?.progress !== undefined && (
+                        <div className={styles.preparationProgress} role="status" aria-label={`Descarga ${Math.round(modelSetupState.progress * 100)}%`}>
+                          <div className={styles.preparationProgressTrack}><span style={{ width: `${Math.max(0, Math.min(100, modelSetupState.progress * 100))}%` }} /></div>
+                          <span>{Math.round(modelSetupState.progress * 100)}%</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {(localError || preparationError || modelSetupState?.error) && (
+                      <div role="alert" className={styles.errorMessage}>
+                        <p>{localError || preparationError || modelSetupState?.error?.message || 'El modelo local no pudo prepararse.'}</p>
+                        <button type="button" onClick={() => void (modelSetupState?.error?.code === 'corrupt_model' ? onRepairModel?.() : onRetryModel?.())} disabled={saving || preflightBlocked || lowDisk || quotaGiB < 1} className={styles.errorAction}>
+                          {modelSetupState?.error?.code === 'corrupt_model' ? 'Reparar modelo' : 'Reintentar'}
+                        </button>
+                      </div>
+                    )}
                     <div className={styles.confirmationSummary}>
                       <span>Listo para guardar</span>
                       <p><strong>{answers.intent}</strong> · {quotaGiB} GiB · {recommendation.retention === 'online' ? 'retención de conocimiento' : 'medios locales'} · {answers.mediaRoot}</p>
@@ -1057,7 +1119,7 @@ export function ProcessingSetupModal({
                   <div className={styles.navigation}>
                     <button type="button" onClick={previousStep} disabled={saving} className={styles.backButton}>{t('back')}</button>
                     <button type="button" onClick={() => void handleSave()} disabled={saving || preflightBlocked || lowDisk || quotaGiB < 1} className={styles.saveButton}>
-                      {saving ? 'Preparando modelo…' : 'Guardar y preparar modelo'}
+                      {saving ? 'Descargando y preparando…' : 'Descargar y preparar'}
                     </button>
                   </div>
                 )}

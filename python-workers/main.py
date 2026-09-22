@@ -35,6 +35,7 @@ from pathlib import Path
 from models import JobInput
 from events import emit_event, emit_error
 from downloader import download_video, extract_metadata, extract_playlist_videos
+from source_scanner import scan_tiktok_source
 from audio_extractor import extract_audio, resolve_ffmpeg_path, resolve_ffprobe_path
 from output_generator import generate_outputs
 from transcriber import transcribe_audio
@@ -266,12 +267,36 @@ def main() -> None:
     parser.add_argument("--job_id", type=int, help="Job ID para ejecución individual")
     parser.add_argument("--url", type=str, help="URL del video para ejecución individual")
     parser.add_argument("--expand-url", type=str, help="Expandir un perfil, playlist o feed público a URLs de videos")
+    parser.add_argument("--scan-source", action="store_true", help="Inspeccionar categorías de actividad TikTok sin descargar")
+    parser.add_argument("--profile-url", type=str, help="URL canónica del perfil TikTok para --scan-source")
+    parser.add_argument("--categories", type=str, default="", help="JSON array de categorías para --scan-source")
+    parser.add_argument("--limit", type=int, default=200, help="Límite de elementos para --scan-source")
+    parser.add_argument("--from-date", type=str, default="", help="Fecha YYYY-MM-DD para filtrar --scan-source")
 
     args, unknown = parser.parse_known_args()
 
     if args.expand_url:
         try:
             print(json.dumps(extract_playlist_videos(args.expand_url)), flush=True)
+        except Exception as error:
+            print(json.dumps({"error": str(error)}), flush=True)
+            raise SystemExit(1)
+        return
+
+    if args.scan_source:
+        if not args.profile_url:
+            print(json.dumps({"error": "--profile-url es obligatorio para --scan-source"}), flush=True)
+            raise SystemExit(2)
+        try:
+            categories = json.loads(args.categories) if args.categories else []
+            if not isinstance(categories, list):
+                raise ValueError("--categories debe ser un array JSON")
+            print(json.dumps(scan_tiktok_source(
+                args.profile_url,
+                [str(category) for category in categories],
+                max(1, min(1000, args.limit)),
+                args.from_date or None,
+            )), flush=True)
         except Exception as error:
             print(json.dumps({"error": str(error)}), flush=True)
             raise SystemExit(1)

@@ -39,6 +39,17 @@ export interface JobRecord {
   poster_path?: string;
 }
 
+export interface JobActivityEvent {
+  id: number;
+  job_id: number;
+  status: string;
+  progress: number;
+  user_message?: string | null;
+  technical_error?: string | null;
+  error_code?: string | null;
+  created_at: string;
+}
+
 export type PendingJobStatus = 'pending' | 'submitting' | 'retryable';
 
 export interface PendingJob {
@@ -61,7 +72,19 @@ export interface QueueSnapshot {
   ready: boolean;
 }
 
+export interface SubmitLinksResult {
+  accepted: Array<{ url: string; jobId?: number }>;
+  rejected: Array<{ url: string; reason: string }>;
+}
+
 const COMPLETE_STATUSES = new Set(['complete', 'completed', 'done']);
+
+function createClientId(now: number, index: number): string {
+  const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${now}-${index}`;
+  return `${now}-${index}-${suffix}`;
+}
 
 export function isCompletedJob(job: Pick<JobRecord, 'status'>): boolean {
   return COMPLETE_STATUSES.has(String(job.status).toLowerCase());
@@ -101,6 +124,9 @@ function userFacingError(error: unknown, fallback: string): string {
 
   const status = raw.match(/\b([45]\d{2})\b/)?.[1];
   if (status === '401' || status === '403') {
+    if (!isNativeShell()) {
+      return 'El modo navegador no tiene acceso a la biblioteca local. Abre Pulsaria en su ventana de escritorio.';
+    }
     return 'La solicitud no fue autorizada por el motor local. Revisa la configuración e inténtalo de nuevo.';
   }
   if (status === '429') {
@@ -148,13 +174,25 @@ async function enqueueThroughSources(url: string): Promise<number> {
   }
 }
 
+export async function fetchJobActivity(jobId: number): Promise<JobActivityEvent[]> {
+  try {
+    return await invokeTauri<JobActivityEvent[]>('get_job_activity', { jobId });
+  } catch (error) {
+    if (isNativeShell()) throw error;
+    const response = await apiFetch(`${REST_API_BASE}/jobs/${jobId}/activity`);
+    if (!response.ok) throw new Error(`No se pudo actualizar la actividad (${response.status})`);
+    return response.json() as Promise<JobActivityEvent[]>;
+  }
+}
+
 export function useJobs(): QueueSnapshot & {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<JobRecord[]>;
-  enqueueLinks: (urls: string[]) => Promise<void>;
+  enqueueLinks: (urls: string[]) => Promise<SubmitLinksResult>;
   retryJob: (jobId: number) => Promise<void>;
   retryPending: (clientId: string) => Promise<void>;
+  getJobActivity: (jobId: number) => Promise<JobActivityEvent[]>;
 } {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [pending, setPending] = useState<PendingJob[]>([]);
@@ -187,8 +225,19 @@ jobsRef.current = jobs;
 
   useEffect(() => {
     let mounted = true;
+    const nativeShell = isNativeShell();
+    const logRefreshFailure = (prefix: string, error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      // A browser without the local IPC token receives the expected 401/403
+      // boundary. The UI already presents that state; do not flood the
+      // browser console while the backoff poll keeps the screen current.
+      if (nativeShell || !/\b(?:401|403)\b/.test(message)) {
+        console.warn(prefix, error);
+      }
+    };
+
     void refresh().catch((error) => {
-      if (mounted) console.warn('Initial job refresh failed:', error);
+      if (mounted) logRefreshFailure('Initial job refresh failed:', error);
     });
 
     let pollInterval = 2000;
@@ -196,7 +245,7 @@ jobsRef.current = jobs;
 
     const poll = async () => {
       if (!mounted) return;
-      await refresh().catch((error) => console.warn('Job refresh failed:', error));
+      await refresh().catch((error) => logRefreshFailure('Job refresh failed:', error));
       if (!mounted) return;
 
       const hasActiveJobs = jobsRef.current.some((j) =>
@@ -211,22 +260,24 @@ jobsRef.current = jobs;
     timerId = setTimeout(poll, pollInterval);
 
     let cleanups: Array<() => void> = [];
-    void import('@tauri-apps/api/event').then(async ({ listen }) => {
-      if (!mounted) return;
-      const events = ['job_progress', 'job_completed_notify', 'media_indexed'];
-      const subscriptions = await Promise.all(events.map(async (eventName) => {
-        try {
-          return await listen(eventName, () => {
-            void refresh().catch((error) => console.warn(`Job refresh after ${eventName} failed:`, error));
-          });
-        } catch (error) {
-          console.warn(`Could not subscribe to ${eventName}:`, error);
-          return () => {};
-        }
-      }));
-      if (mounted) cleanups = subscriptions;
-      else subscriptions.forEach((cleanup) => cleanup());
-    }).catch((error) => console.warn('Could not initialize native job events:', error));
+    if (nativeShell) {
+      void import('@tauri-apps/api/event').then(async ({ listen }) => {
+        if (!mounted) return;
+        const events = ['job_progress', 'job_completed_notify', 'media_indexed'];
+        const subscriptions = await Promise.all(events.map(async (eventName) => {
+          try {
+            return await listen(eventName, () => {
+              void refresh().catch((error) => logRefreshFailure(`Job refresh after ${eventName} failed:`, error));
+            });
+          } catch (error) {
+            console.warn(`Could not subscribe to ${eventName}:`, error);
+            return () => {};
+          }
+        }));
+        if (mounted) cleanups = subscriptions;
+        else subscriptions.forEach((cleanup) => cleanup());
+      }).catch((error) => console.warn('Could not initialize native job events:', error));
+    }
 
     return () => {
       mounted = false;
@@ -234,11 +285,13 @@ jobsRef.current = jobs;
       cleanups.forEach((cleanup) => cleanup());
     };
   }, [refresh]);
-  const enqueueLinks = useCallback(async (urls: string[]) => {
+  const enqueueLinks = useCallback(async (urls: string[]): Promise<SubmitLinksResult> => {
     const uniqueUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))];
+    const accepted: SubmitLinksResult['accepted'] = [];
+    const rejected: SubmitLinksResult['rejected'] = [];
     const now = Date.now();
     const optimistic = uniqueUrls.map((url, index): PendingJob => ({
-      clientId: `${now}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+      clientId: createClientId(now, index),
       url,
       status: 'submitting',
       progress: 0,
@@ -251,13 +304,21 @@ jobsRef.current = jobs;
         setPending((current) => current.map((candidate) => candidate.clientId === item.clientId
           ? { ...candidate, jobId, status: 'pending' }
           : candidate));
-        await refresh();
+        accepted.push({ url: item.url, jobId });
+        // A successful submission must not become a false failure because a
+        // follow-up reconciliation is temporarily unavailable.
+        await refresh().catch((refreshError) => {
+          console.warn('Job refresh after enqueue failed:', refreshError);
+        });
       } catch (error) {
+        const reason = userFacingError(error, 'No se pudo enviar el enlace.');
+        rejected.push({ url: item.url, reason });
         setPending((current) => current.map((candidate) => candidate.clientId === item.clientId
-          ? { ...candidate, status: 'retryable', error: userFacingError(error, 'No se pudo enviar el enlace.') }
+          ? { ...candidate, status: 'retryable', error: reason }
           : candidate));
       }
     }
+    return { accepted, rejected };
   }, [refresh]);
 
   const retryJob = useCallback(async (jobId: number) => {
@@ -304,5 +365,18 @@ jobsRef.current = jobs;
     return Math.round(total / active.length);
   }, [active]);
 
-  return { jobs, pending, active, globalProgress, ready, loading, error, refresh, enqueueLinks, retryJob, retryPending };
+  return {
+    jobs,
+    pending,
+    active,
+    globalProgress,
+    ready,
+    loading,
+    error,
+    refresh,
+    enqueueLinks,
+    retryJob,
+    retryPending,
+    getJobActivity: fetchJobActivity,
+  };
 }

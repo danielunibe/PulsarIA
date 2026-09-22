@@ -400,6 +400,25 @@ async fn get_jobs_handler(
     Ok(Json(jobs))
 }
 
+async fn get_job_activity_handler(
+    State(state): State<ApiState>,
+    Path(job_id): Path<i64>,
+) -> Result<Json<Vec<crate::db::JobActivityEvent>>, (StatusCode, String)> {
+    let connection = state
+        .job_repo
+        .get_connection()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
+    let connection = connection.lock().map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database mutex poisoned".to_string(),
+        )
+    })?;
+    let activity = crate::db::get_job_activity(&connection, job_id)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(Json(activity))
+}
+
 async fn retry_job_handler(
     State(state): State<ApiState>,
     Path(job_id): Path<i64>,
@@ -658,6 +677,10 @@ pub async fn start_api_server(port: u16, state: ApiState) {
 
     let read_routes = Router::new()
         .route("/api/v1/jobs", get(get_jobs_handler))
+        .route(
+            "/api/v1/jobs/:job_id/activity",
+            get(get_job_activity_handler),
+        )
         .route(
             "/api/v1/jobs/:job_id/transcript",
             get(get_transcript_handler),

@@ -32,6 +32,33 @@ export interface WhisperModelStatus {
   message?: string | null;
 }
 
+export type LocalModelPhase = 'idle' | 'downloading' | 'verifying' | 'preparing' | 'validating' | 'ready' | 'error' | 'cancelled';
+
+export type LocalModelErrorCode =
+  | 'network_error' | 'timeout' | 'insufficient_space' | 'permission_denied'
+  | 'invalid_path' | 'download_failed' | 'verification_failed' | 'corrupt_model'
+  | 'preparation_failed' | 'validation_failed' | 'model_already_preparing'
+  | 'process_crashed' | 'cancelled' | 'unknown';
+
+export interface LocalModelError {
+  code: LocalModelErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+export interface LocalModelSetupState {
+  phase: LocalModelPhase;
+  model: 'tiny' | 'small' | 'medium';
+  progress: number | null;
+  downloadedBytes?: number | null;
+  totalBytes?: number | null;
+  etaSeconds?: number | null;
+  subphase?: string | null;
+  message?: string | null;
+  failedPhase?: LocalModelPhase | null;
+  error?: LocalModelError | null;
+}
+
 export interface SetupSaveOptions {
   downloadDir?: string;
   retention?: 'keep' | 'online';
@@ -63,6 +90,7 @@ export function useProcessingSettings() {
   const [runtimeReady, setRuntimeReady] = useState(false);
   const [setupCompleted, setSetupCompleted] = useState(false);
   const [setupPreferencesReady, setSetupPreferencesReady] = useState(false);
+  const [modelSetupState, setModelSetupState] = useState<LocalModelSetupState | null>(null);
   const preparationRequestRef = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -88,6 +116,10 @@ export function useProcessingSettings() {
       setHardware(detectedHardware);
       setProcessing(persistedSettings);
       setModelStatus(detectedModel);
+      const reconciledState = await invoke<LocalModelSetupState>('get_local_model_state', {
+        model: persistedSettings.whisper_model,
+      });
+      setModelSetupState(reconciledState);
       setRuntimeReady(true);
       updateSettings({
         processingQuality: persistedSettings.quality,
@@ -113,6 +145,15 @@ export function useProcessingSettings() {
       void refresh();
     });
   }, [refresh]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    void import('@tauri-apps/api/event').then(({ listen }) => listen<LocalModelSetupState>('local-model-state', (event) => {
+      setModelSetupState(event.payload);
+    })).then((dispose) => { unlisten = dispose; });
+    return () => { unlisten?.(); };
+  }, []);
 
   const prepareForQuality = useCallback(async (quality: number) => {
     if (!isTauriRuntime()) return null;
@@ -253,10 +294,26 @@ export function useProcessingSettings() {
     }
   }, []);
 
+  const recoverModel = useCallback(async (mode: 'retry' | 'repair') => {
+    if (!isTauriRuntime() || !processing?.whisper_model) return null;
+    const { invoke } = await import('@tauri-apps/api/core');
+    setPreparationError(null);
+    const command = mode === 'repair' ? 'repair_local_model' : 'retry_local_model_setup';
+    try {
+      const result = await invoke<WhisperModelStatus>(command, { model: processing.whisper_model });
+      setModelStatus(result);
+      return result;
+    } catch (error) {
+      setPreparationError(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }, [processing?.whisper_model]);
+
   return {
     hardware,
     processing,
     modelStatus,
+    modelSetupState,
     preparing,
     preparationError,
     initializationError,
@@ -277,5 +334,7 @@ export function useProcessingSettings() {
     save,
     prepareForQuality,
     cancelPreparation,
+    retryModel: () => recoverModel('retry'),
+    repairModel: () => recoverModel('repair'),
   };
 }

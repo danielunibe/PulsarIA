@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { FaPlus, FaListUl } from 'react-icons/fa6';
+import { FaPlus, FaFolder } from '@/components/icon-library';
 import { PlaylistCard } from './PlaylistCard';
 import { usePlaylists } from '@/hooks/usePlaylists';
 
@@ -29,7 +29,7 @@ interface PlaylistsPanelProps {
  */
 export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: PlaylistsPanelProps) {
   const {
-    playlists, loading, error, createPlaylist, deletePlaylist, selectPlaylist
+    playlists, loading, ready, error, createPlaylist, deletePlaylist, selectPlaylist
   } = usePlaylists();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -63,19 +63,18 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
 
   return (
     <div 
-      className="flex flex-col gap-3.5 p-4 rounded-[20px] border transition-all"
+      className="flex flex-col gap-3.5 p-4 rounded-[20px] transition-all border-0"
       style={{
         background: 'rgba(14, 16, 22, 0.75)',
         backdropFilter: 'blur(20px)',
-        borderColor: 'rgba(255, 255, 255, 0.08)',
-        boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+        boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)'
       }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded-[6px] bg-[#8a5cff]/20 flex items-center justify-center text-[#8a5cff]">
-            <FaListUl size={10} />
+          <div className="w-5 h-5 rounded-[6px] bg-white/10 flex items-center justify-center text-white/80">
+            <FaFolder size={10} />
           </div>
           <span className="text-[10px] font-black tracking-[0.2em] uppercase text-white/50">Playlists</span>
         </div>
@@ -83,7 +82,7 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
           type="button"
           aria-expanded={isCreating}
           onClick={() => setIsCreating(!isCreating)}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[10px] font-bold tracking-wider uppercase text-[#8a5cff] bg-[#8a5cff]/10 hover:bg-[#8a5cff]/20 border border-[#8a5cff]/30 transition-all cursor-pointer"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[10px] font-bold tracking-wider uppercase text-white/90 bg-white/10 hover:bg-white/20 transition-all cursor-pointer border-0"
         >
           <FaPlus size={9} />
           <span>Nueva</span>
@@ -91,7 +90,7 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
       </div>
 
       {error && (
-        <div role="alert" className="rounded-xl border border-[#fe2c55]/30 bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-[#fe2c55]">
+        <div role="alert" className="rounded-xl border-0 bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-[#fe2c55]">
           No se pudo completar la operación de playlist: {error}
         </div>
       )}
@@ -103,21 +102,23 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="flex flex-col gap-2.5 p-3 rounded-[16px] bg-white/[0.03] border border-white/10 overflow-hidden"
+            className="flex flex-col gap-2.5 p-3 rounded-[16px] bg-white/[0.03] border-0 overflow-hidden"
           >
             <input
               type="text"
+              aria-label="Nombre de la playlist"
               placeholder="Nombre de la playlist..."
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg bg-black/40 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-[#8a5cff]/60"
+              className="w-full px-3 py-2 text-xs rounded-lg bg-black/40 border-0 text-white placeholder-white/30 focus:outline-none"
             />
             <input
               type="text"
+              aria-label="Descripción de la playlist"
               placeholder="Descripcion..."
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
-              className="w-full px-3 py-2 text-xs rounded-lg bg-black/40 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-[#8a5cff]/60"
+              className="w-full px-3 py-2 text-xs rounded-lg bg-black/40 border-0 text-white placeholder-white/30 focus:outline-none"
             />
             {/* Color picker */}
             <div className="flex items-center gap-2">
@@ -170,9 +171,9 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
           />
         ))}
 
-        {!loading && playlists.length === 0 && !isCreating && (
+        {!loading && ready && !error && playlists.length === 0 && !isCreating && (
           <div className="text-center py-6 px-3 rounded-[16px] border border-dashed border-white/10 bg-white/[0.01]">
-            <FaListUl size={20} className="mx-auto text-white/20 mb-2" />
+            <FaFolder size={20} className="mx-auto text-white/20 mb-2" />
             <p className="text-xs text-white/40 font-medium">No hay playlists creadas</p>
             <p className="text-[10px] text-white/25 mt-1">Crea una para organizar tus videos por temas</p>
           </div>
@@ -181,7 +182,7 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
       {pendingDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
              role="dialog" aria-modal="true" aria-label="Confirmar eliminación">
-          <div className="rounded-2xl p-6 bg-[#0e1017] border border-white/10 shadow-2xl flex flex-col gap-4 max-w-xs w-full mx-4">
+          <div className="rounded-2xl p-6 bg-[#141416] border border-white/10 shadow-2xl flex flex-col gap-4 max-w-xs w-full mx-4">
             <p className="text-white text-sm font-medium">
               ¿Eliminar la playlist «{pendingDelete.name}»?
             </p>

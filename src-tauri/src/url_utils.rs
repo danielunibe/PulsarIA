@@ -34,6 +34,80 @@ pub fn canonicalize_tiktok_url(input: &str) -> String {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TikTokProfileIdentity {
+    pub canonical_url: String,
+    pub username: String,
+    pub handle: String,
+}
+
+fn valid_profile_username(username: &str) -> bool {
+    !username.is_empty()
+        && username.len() <= 24
+        && username
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || matches!(value, '.' | '_'))
+}
+
+/// Normalizes the profile-only input accepted by the registration flow.
+/// Activity paths and video URLs are intentionally rejected here; they belong
+/// to the existing collection scanner contract, not to profile identity.
+pub fn normalize_tiktok_profile_input(input: &str) -> Option<TikTokProfileIdentity> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let username = if let Some(handle) = trimmed.strip_prefix('@') {
+        if handle.contains('/') || handle.contains('?') || handle.contains('#') {
+            return None;
+        }
+        handle.to_string()
+    } else {
+        let canonical = canonicalize_tiktok_url(trimmed);
+        let username_with_marker = canonical.strip_prefix("https://www.tiktok.com/@")?;
+        if username_with_marker.contains('/') {
+            return None;
+        }
+        username_with_marker.to_string()
+    };
+
+    if !valid_profile_username(&username) {
+        return None;
+    }
+
+    let handle = format!("@{username}");
+    Some(TikTokProfileIdentity {
+        canonical_url: format!("https://www.tiktok.com/{handle}"),
+        username,
+        handle,
+    })
+}
+
+/// Returns the canonical profile URL for a TikTok profile or one of the
+/// activity collections attached to it.
+pub fn tiktok_profile_url(input: &str) -> Option<String> {
+    let canonical = canonicalize_tiktok_url(input);
+    let marker = "https://www.tiktok.com/@";
+    let username_with_path = canonical.strip_prefix(marker)?;
+    let username = username_with_path
+        .split('/')
+        .next()
+        .filter(|value| !value.is_empty())?;
+    if !valid_profile_username(username) {
+        return None;
+    }
+    Some(format!("{marker}{username}"))
+}
+
+pub fn tiktok_username(input: &str) -> Option<String> {
+    tiktok_profile_url(input).and_then(|profile| {
+        profile
+            .strip_prefix("https://www.tiktok.com/")
+            .map(str::to_string)
+    })
+}
+
 /// Returns `true` if the URL is a TikTok collection source
 /// (profile page, playlist, liked videos, etc.) rather than a single video.
 ///
@@ -49,6 +123,8 @@ pub fn is_collection_source(url: &str) -> bool {
     let is_collection_path = normalized.contains("/playlist")
         || normalized.contains("/playlists/")
         || normalized.contains("/liked")
+        || normalized.contains("/saved")
+        || normalized.contains("/reposts")
         || normalized.contains("/favorite")
         || (normalized.contains("tiktok.com/@") && normalized.matches('/').count() <= 4);
     is_tiktok && !is_video && is_collection_path
@@ -56,7 +132,31 @@ pub fn is_collection_source(url: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonicalize_tiktok_url, is_collection_source};
+    use super::{
+        canonicalize_tiktok_url, is_collection_source, normalize_tiktok_profile_input,
+        tiktok_profile_url, tiktok_username,
+    };
+
+    #[test]
+    fn normalizes_profile_handles_and_www_variants() {
+        let handle = normalize_tiktok_profile_input(" @usuario ").unwrap();
+        let www = normalize_tiktok_profile_input("https://www.tiktok.com/@usuario/").unwrap();
+        let bare = normalize_tiktok_profile_input("https://tiktok.com/@usuario?lang=es").unwrap();
+
+        assert_eq!(handle.canonical_url, "https://www.tiktok.com/@usuario");
+        assert_eq!(handle, www);
+        assert_eq!(www, bare);
+    }
+
+    #[test]
+    fn rejects_non_profile_inputs() {
+        assert!(
+            normalize_tiktok_profile_input("https://www.tiktok.com/@usuario/video/1").is_none()
+        );
+        assert!(normalize_tiktok_profile_input("https://example.com/@usuario").is_none());
+        assert!(normalize_tiktok_profile_input("usuario").is_none());
+        assert!(normalize_tiktok_profile_input("@").is_none());
+    }
 
     #[test]
     fn canonicalizes_tracking_variants_for_deduplication() {
@@ -93,5 +193,17 @@ mod tests {
     #[test]
     fn rejects_non_tiktok() {
         assert!(!is_collection_source("https://www.instagram.com/reel/abc"));
+    }
+
+    #[test]
+    fn derives_profile_from_supported_activity_urls() {
+        assert_eq!(
+            tiktok_profile_url("https://tiktok.com/@creator/liked?lang=es"),
+            Some("https://www.tiktok.com/@creator".to_string())
+        );
+        assert_eq!(
+            tiktok_username("https://www.tiktok.com/@creator"),
+            Some("@creator".into())
+        );
     }
 }

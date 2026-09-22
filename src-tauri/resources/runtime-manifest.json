@@ -2,7 +2,7 @@
     "schemaVersion":  1,
     "manifestKind":  "pulsaria-runtime-resources",
     "productName":  "Pulsaria",
-    "version":  "0.1.0",
+    "version":  "0.1.0-beta.2",
     "platform":  "windows-x86_64",
     "resourceRoot":  "resources",
     "generatedBy":  "scripts/generate-runtime-manifest.ps1",
@@ -252,8 +252,8 @@
                                              "sourcePath":  "python-workers/downloader.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  14645,
-                                             "sha256":  "87406612D0740F263A803BC984528D21C646B9D2816683632811D21F0A768555"
+                                             "sizeBytes":  15261,
+                                             "sha256":  "63AA0A4909826BE09FB82275273A4B0A724BC16BFD7B867085F4028D1FC9DDAC"
                                          },
                                          {
                                              "path":  "python-workers/embed_query.py",
@@ -292,8 +292,8 @@
                                              "sourcePath":  "python-workers/main.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  13157,
-                                             "sha256":  "751BBC7CFCEB2D23154CC8CBC65A5BDCF2ED8F2871241DF0A75880C54170F2C9"
+                                             "sizeBytes":  14585,
+                                             "sha256":  "B10054060113EB684102C2FDB4CB11DFD42CB5BA712689E921E2AB1D3F2AA147"
                                          },
                                          {
                                              "path":  "python-workers/models.py",
@@ -308,16 +308,24 @@
                                              "sourcePath":  "python-workers/output_generator.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  8087,
-                                             "sha256":  "F30C1548042FC0271A68D47C48687D1225E3F3B4A0193074C3FA38CC95264049"
+                                             "sizeBytes":  8488,
+                                             "sha256":  "B3CC8DF89D5CC52B78289A52E7E6D0BD75C2398D75E4A9BFE900845420B1C28C"
                                          },
                                          {
                                              "path":  "python-workers/prepare_whisper_model.py",
                                              "sourcePath":  "python-workers/prepare_whisper_model.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  4477,
-                                             "sha256":  "9A7B109DA7AD629723A562D7D92AA66E1040584155449252754958D8695AA18E"
+                                             "sizeBytes":  9446,
+                                             "sha256":  "76A3A0F6B56F979D2FA8572E0A3B48E49AEFF2C997F7093EEC74CFBFD9B87A04"
+                                         },
+                                         {
+                                             "path":  "python-workers/source_scanner.py",
+                                             "sourcePath":  "python-workers/source_scanner.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  4754,
+                                             "sha256":  "41DEDAAC7506E6E7C22B100EB09EDE2B5FCBE3F8CF456397CC5917BC2DC24F2A"
                                          },
                                          {
                                              "path":  "python-workers/transcriber.py",
@@ -332,8 +340,8 @@
                                              "sourcePath":  "python-workers/visual_analyzer.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  20942,
-                                             "sha256":  "8EF43240951C078D5DFD900457B7C1C8B3B94B1064CC2773FC4BCA81C2EB7232"
+                                             "sizeBytes":  22380,
+                                             "sha256":  "AA8498F3F53A1DF67B37B0347E5263FEFB6ACECC4876D99FA555D632ED274B46"
                                          }
                                      ]
                        },

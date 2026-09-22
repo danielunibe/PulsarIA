@@ -58,6 +58,7 @@ export default defineConfig([
     globalIgnores([
         "node_modules/**",
         ".next/**",
+        ".next-*/**",
         "out/**",
         "target/**",
         "target-*/**",

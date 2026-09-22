@@ -1,6 +1,6 @@
 'use client';
 import { ModelStatus } from '../../types/semanticConfig';
-import { FaBrain, FaRotate, FaCube } from 'react-icons/fa6';
+import { FaBrain, FaRotate, FaCube } from '@/components/icon-library';
 
 interface Props {
   status: ModelStatus | null;

@@ -1,11 +1,11 @@
 {
     "$schema": "https://schema.tauri.app/config/2",
     "productName": "Pulsaria",
-    "version": "0.1.0",
+    "version": "0.1.0-beta.2",
     "identifier": "com.pulsaria.app",
     "build": {
         "beforeDevCommand": "npm run dev",
-        "devUrl": "http://localhost:3000",
+        "devUrl": "http://127.0.0.1:3000",
         "beforeBuildCommand": "npm run build",
         "frontendDist": "../out"
     },
@@ -20,7 +20,13 @@
             "msi"
         ],
         "icon": [
-            "icons/icon.ico"
+            "icons/icon.ico",
+            "icons/icon.icns",
+            "icons/icon.png",
+            "icons/32x32.png",
+            "icons/64x64.png",
+            "icons/128x128.png",
+            "icons/128x128@2x.png"
         ],
         "resources": {
             "resources/python": "resources/python",
@@ -36,8 +42,9 @@
             "../python-workers/embed_query.py": "resources/python-workers/embed_query.py",
             "../python-workers/export_onnx.py": "resources/python-workers/export_onnx.py",
             "../python-workers/export_onnx_embeddings.py": "resources/python-workers/export_onnx_embeddings.py",
-            "../python-workers/prepare_whisper_model.py": "resources/python-workers/prepare_whisper_model.py",
-            "resources/assets": "resources/assets",
+    "../python-workers/prepare_whisper_model.py": "resources/python-workers/prepare_whisper_model.py",
+    "../python-workers/source_scanner.py": "resources/python-workers/source_scanner.py",
+    "resources/assets": "resources/assets",
             "resources/bin": "resources/bin",
             "resources/runtime-manifest.json": "resources/runtime-manifest.json",
             "resources/local-llm-manifest.json": "resources/local-llm-manifest.json"
@@ -65,6 +72,7 @@
         },
         "windows": [
             {
+                "label": "main",
                 "title": "Pulsaria",
                 "width": 1280,
                 "height": 800,
@@ -74,7 +82,9 @@
                 "fullscreen": false,
                 "decorations": false,
                 "transparent": false,
-                "center": true
+                "center": true,
+                "visible": true,
+                "focus": true
             }
         ]
     },

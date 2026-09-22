@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -25,6 +25,40 @@ const DEFAULT_WORKER_LIMIT: usize = 4;
 const MAX_WORKER_LIMIT: usize = 8;
 
 const BACKPRESSURE_ERROR: &str = "System is saturated: backpressure applied";
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SourceScanItem {
+    pub url: String,
+    pub id: Option<String>,
+    pub upload_date: Option<String>,
+    pub timestamp: Option<f64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SourceScanCategory {
+    pub available: bool,
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub auth_required: bool,
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(default)]
+    pub items: Vec<SourceScanItem>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SourceScanProfile {
+    pub profile_url: String,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SourceScanResult {
+    pub profile: SourceScanProfile,
+    pub categories: HashMap<String, SourceScanCategory>,
+}
 
 fn worker_count_for(cpu_count: usize, configured: Option<usize>) -> usize {
     let automatic = cpu_count.saturating_sub(1).clamp(1, DEFAULT_WORKER_LIMIT);
@@ -57,6 +91,8 @@ pub struct QueueService {
     circuit_breaker: Arc<CircuitBreaker>,
     worker_capacity: usize,
     idle_workers: Arc<tokio::sync::Mutex<Vec<PythonWorker>>>,
+    processing_paused: Arc<AtomicBool>,
+    background_admission_paused: Arc<AtomicBool>,
     /// Serializes maintenance rebuilds with the moment a job is admitted.
     /// The guard is intentionally held only while claiming a job or while
     /// performing the complete rebuild, never while downloading media.
@@ -462,6 +498,22 @@ fn persist_worker_result(
     }
 
     persist.map_err(|error| format!("worker result persistence failed: {}", error))?;
+    let word_timestamps = result
+        .segments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, segment)| {
+            let words = segment.get("words")?.as_array()?;
+            if words.is_empty() {
+                return None;
+            }
+            Some((index as i64, serde_json::to_string(words).ok()?))
+        })
+        .collect::<Vec<_>>();
+    if !word_timestamps.is_empty() {
+        crate::db::update_transcript_words(&connection, job.job_id, &word_timestamps)
+            .map_err(|error| format!("word timestamp persistence failed: {}", error))?;
+    }
     // A successful job has already promoted the video/audio and copied every
     // durable knowledge artifact. Remove only its staging directory so audio
     // intermediates and the adjacent compatibility transcript cannot consume
@@ -520,6 +572,11 @@ impl QueueService {
             .ok()
             .and_then(|value| value.parse::<usize>().ok());
         let worker_count = worker_count_for(num_cpus::get(), configured_worker_count);
+        let worker_count = match std::env::var("PULSAR_PERFORMANCE_MODE").as_deref() {
+            Ok("efficient") => 1,
+            Ok("intelligent") if configured_worker_count.is_none() => worker_count.min(2),
+            _ => worker_count,
+        };
         let semaphore = Arc::new(Semaphore::new(worker_count));
         let idle_workers = Arc::new(tokio::sync::Mutex::new(Vec::<PythonWorker>::with_capacity(
             worker_count,
@@ -528,6 +585,8 @@ impl QueueService {
         let backpressure_active = Arc::new(AtomicBool::new(false));
         let circuit_breaker = Arc::new(CircuitBreaker::new());
         let active_jobs = Arc::new(tokio::sync::Mutex::new(HashSet::<i64>::new()));
+        let processing_paused = Arc::new(AtomicBool::new(false));
+        let background_admission_paused = Arc::new(AtomicBool::new(false));
 
         info!("Initializing worker pool with {} workers", worker_count);
 
@@ -538,9 +597,13 @@ impl QueueService {
         let breaker_clone = circuit_breaker.clone();
         let idle_workers_for_health = idle_workers.clone();
         let active_jobs_clone = active_jobs.clone();
+        let processing_paused_clone = processing_paused.clone();
 
         tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
+                while processing_paused_clone.load(Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
                 let permit = match semaphore.clone().acquire_owned().await {
                     Ok(permit) => permit,
                     Err(error) => {
@@ -575,6 +638,8 @@ impl QueueService {
             circuit_breaker,
             worker_capacity: worker_count,
             idle_workers: idle_workers_for_health,
+            processing_paused,
+            background_admission_paused,
             maintenance_lock,
         }
     }
@@ -598,6 +663,23 @@ impl QueueService {
     /// currently running job stale.
     pub async fn active_job_ids(&self) -> Vec<i64> {
         self.active_jobs.lock().await.iter().copied().collect()
+    }
+
+    pub fn is_processing_paused(&self) -> bool {
+        self.processing_paused.load(Ordering::SeqCst)
+    }
+
+    pub fn set_processing_paused(&self, paused: bool) {
+        self.processing_paused.store(paused, Ordering::SeqCst);
+    }
+
+    pub fn is_background_admission_paused(&self) -> bool {
+        self.background_admission_paused.load(Ordering::SeqCst)
+    }
+
+    pub fn set_background_admission_paused(&self, paused: bool) {
+        self.background_admission_paused
+            .store(paused, Ordering::SeqCst);
     }
 
     /// Re-enqueues work that survived a previous process shutdown. SQLite is
@@ -746,6 +828,73 @@ impl QueueService {
         Ok(urls)
     }
 
+    pub async fn scan_source_with_browser(
+        &self,
+        profile_url: &str,
+        categories: &[String],
+        browser: Option<&str>,
+        limit: usize,
+        history_from: Option<&str>,
+    ) -> Result<SourceScanResult, String> {
+        let python_exe = resolve_python_exe();
+        let script = resolve_worker_script();
+        let worker_dir = script
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let categories_json = serde_json::to_string(categories)
+            .map_err(|error| format!("Could not encode source categories: {error}"))?;
+
+        let mut command = Command::new(python_exe);
+        command
+            .arg(&script)
+            .arg("--scan-source")
+            .arg("--profile-url")
+            .arg(profile_url)
+            .arg("--categories")
+            .arg(categories_json)
+            .arg("--limit")
+            .arg(limit.clamp(1, 1000).to_string())
+            .current_dir(&worker_dir)
+            .env("PYTHONPATH", &worker_dir)
+            .env("PYTHONUNBUFFERED", "1");
+        if let Some(history_from) = history_from.filter(|value| !value.trim().is_empty()) {
+            command.arg("--from-date").arg(history_from);
+        }
+        if let Some(browser) =
+            browser.filter(|value| matches!(*value, "chrome" | "edge" | "firefox"))
+        {
+            command.env("PULSAR_COOKIES_FROM_BROWSER", browser);
+        }
+        #[cfg(windows)]
+        command.creation_flags(0x08000000);
+
+        let output = tokio::time::timeout(Duration::from_secs(180), command.output())
+            .await
+            .map_err(|_| "Timed out inspecting TikTok source".to_string())?
+            .map_err(|error| format!("Failed to start source scanner: {error}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&stdout).map_err(|error| {
+            format!(
+                "Invalid source scanner response: {error}; stderr: {}",
+                if stderr.is_empty() { "none" } else { &stderr }
+            )
+        })?;
+        if let Some(error) = parsed.get("error").and_then(|value| value.as_str()) {
+            return Err(error.to_string());
+        }
+        if !output.status.success() {
+            return Err(if stderr.is_empty() {
+                format!("Source scanner exited with status {}", output.status)
+            } else {
+                stderr
+            });
+        }
+        serde_json::from_value(parsed)
+            .map_err(|error| format!("Invalid structured source scanner response: {error}"))
+    }
+
     #[instrument(skip(self))]
     pub async fn dispatch(&self, job_id: i64, url: String) -> Result<(), String> {
         let env_browser = std::env::var("PULSAR_COOKIES_FROM_BROWSER")
@@ -816,6 +965,13 @@ impl QueueService {
             crate::db::get_all_embedding_rows(&connection)
                 .map_err(|error| format!("Could not read embeddings for index rebuild: {error}"))?
         };
+
+        if rows.is_empty() {
+            tracing::warn!(
+                "Skipping HNSW rebuild: no persisted embeddings found. Index unchanged."
+            );
+            return Ok(Some(0));
+        }
 
         search_service.rebuild_index(&rows).map(Some)
     }
