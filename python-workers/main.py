@@ -1,4 +1,4 @@
-﻿"""
+"""
 Pulsaria — Worker Orchestrator (main.py)
 =============================================
 
@@ -272,8 +272,21 @@ def main() -> None:
     parser.add_argument("--categories", type=str, default="", help="JSON array de categorías para --scan-source")
     parser.add_argument("--limit", type=int, default=200, help="Límite de elementos para --scan-source")
     parser.add_argument("--from-date", type=str, default="", help="Fecha YYYY-MM-DD para filtrar --scan-source")
+    parser.add_argument("--resolve-profile-metadata", action="store_true", help="Resolver metadatos de perfil TikTok sin descargar")
 
     args, unknown = parser.parse_known_args()
+
+    if getattr(args, "resolve_profile_metadata", False):
+        if not args.profile_url:
+            print(json.dumps({"error": "--profile-url es obligatorio para --resolve-profile-metadata"}), flush=True)
+            raise SystemExit(2)
+        try:
+            from profile_metadata import resolve_profile_metadata
+            print(json.dumps(resolve_profile_metadata(args.profile_url)), flush=True)
+        except Exception as error:
+            print(json.dumps({"error": str(error)}), flush=True)
+            raise SystemExit(1)
+        return
 
     if args.expand_url:
         try:

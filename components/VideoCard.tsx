@@ -139,10 +139,15 @@ export function VideoCard({
 
             {/* Tarjeta de video con expansión hover estable */}
             <div
+                role={canOpenStaticPreview ? 'button' : undefined}
+                tabIndex={canOpenStaticPreview ? 0 : undefined}
+                aria-label={canOpenStaticPreview ? `Abrir ficha de ${title || 'muestra'}` : undefined}
+                aria-haspopup={canOpenStaticPreview ? 'dialog' : undefined}
                 className={cn(
                     'w-full relative overflow-hidden flex-shrink-0 group video-slot-premium video-card-levitate',
                     layout === 'list' ? 'aspect-[16/7] min-h-[190px] sm:min-h-[220px]' : layout === 'compact' ? 'aspect-[3/4]' : 'aspect-[9/16]',
-                    canInteract ? 'cursor-pointer' : 'cursor-default'
+                    canInteract || canOpenStaticPreview ? 'cursor-pointer' : 'cursor-default',
+                    canOpenStaticPreview ? 'demo-preview-card' : ''
                 )}
                 style={{
                     borderRadius: '18px',
@@ -151,14 +156,12 @@ export function VideoCard({
                         : 'rgba(18, 18, 22, 0.62)',
                     backdropFilter: 'blur(30px) saturate(150%)',
                     WebkitBackdropFilter: 'blur(30px) saturate(150%)',
-                    border: isElevated
-                        ? '1px solid rgba(255, 255, 255, 0.24)'
-                        : '1px solid rgba(255, 255, 255, 0.09)',
+                    border: 0,
                     boxShadow: isElevated
-                        ? '0 24px 50px -10px rgba(0, 0, 0, 0.82), 0 10px 22px -5px rgba(0, 0, 0, 0.55), inset 0 1px 1px 0 rgba(255, 255, 255, 0.25)'
-                        : '0 8px 24px -6px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.12)',
+                        ? '0 24px 50px -10px rgba(0, 0, 0, 0.82), 0 10px 22px -5px rgba(0, 0, 0, 0.55)'
+                        : '0 8px 24px -6px rgba(0, 0, 0, 0.55)',
                     transform: isElevated ? 'translateY(-6px) scale(1.025)' : 'translateY(0) scale(1)',
-                    transition: 'transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease',
+                    transition: 'transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s ease, background 0.25s ease',
                     transformOrigin: 'center center',
                     willChange: 'transform, box-shadow',
                 }}
@@ -170,7 +173,13 @@ export function VideoCard({
                     handleCardClick(e);
                 } : canOpenStaticPreview ? (e) => {
                     e.stopPropagation();
-                    onPreviewClick?.();
+                    onPreviewClick?.(e.currentTarget);
+                } : undefined}
+                onKeyDown={canOpenStaticPreview ? (event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onPreviewClick?.(event.currentTarget);
                 } : undefined}
             >
                 {/* Thumbnail Image con transición suave en hover */}
@@ -234,7 +243,7 @@ export function VideoCard({
 
                 {/* Active card TikTok overlay (author, play, tags, sidebar icons) */}
                 {isStaticDemo && (
-                    <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 rounded-2xl border border-white/15 bg-black/55 px-3 py-2 backdrop-blur-xl">
+                    <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 rounded-2xl bg-black/55 px-3 py-2 backdrop-blur-xl">
                         <span className="block text-[10px] font-black uppercase tracking-[0.18em] text-white/90">{demoLabel}</span>
                         <span className="mt-1 block text-[11px] text-white/60">Imagen temporal · preview estático</span>
                     </div>

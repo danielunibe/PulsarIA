@@ -28,7 +28,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex as StdMutex};
-use tauri::{Emitter, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::Mutex;
@@ -36,6 +36,12 @@ use tokio::sync::Mutex;
 use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
 #[cfg(windows)]
 use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+
+fn hidden_std_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
+    let mut command = Command::new(program);
+    crate::process_control::hide_std_command(&mut command);
+    command
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkerConfig {
@@ -1191,7 +1197,7 @@ pub fn load_persisted_processing_settings() -> ProcessingSettings {
 }
 
 fn gpu_probe() -> (Option<String>, Option<u64>) {
-    let output = Command::new("nvidia-smi")
+    let output = hidden_std_command("nvidia-smi")
         .args([
             "--query-gpu=name,memory.total",
             "--format=csv,noheader,nounits",
@@ -1249,7 +1255,7 @@ fn ctranslate2_cuda_device_count() -> Option<u32> {
     if !python.is_file() {
         return None;
     }
-    let output = Command::new(python)
+    let output = hidden_std_command(python)
         .args([
             "-c",
             "import ctranslate2; print(ctranslate2.get_cuda_device_count())",
@@ -1743,21 +1749,21 @@ fn runtime_executable_check(
     }
 
     let executable = PathBuf::from(&check.path);
-    match Command::new(&executable).args(probe_args).output() {
+    match hidden_std_command(&executable).args(probe_args).output() {
         Ok(output) if output.status.success() => {
             check.message = format!("Ejecutable disponible y responde a {:?}", probe_args);
         }
         Ok(output) => {
             check.available = false;
             check.message = format!(
-                "El ejecutable terminó con código {:?}; reinstala el runtime o corrige la ruta",
+                "El ejecutable terminó con código {:?}; revisa la ruta empaquetada y la salida del runtime",
                 output.status.code()
             );
         }
         Err(error) => {
             check.available = false;
             check.message = format!(
-                "No se pudo ejecutar {}: {}; reinstala el runtime o corrige la ruta",
+                "No se pudo ejecutar {}: {}; revisa la ruta y los permisos del recurso",
                 executable.display(),
                 error
             );
@@ -1766,22 +1772,27 @@ fn runtime_executable_check(
     check
 }
 
+const REQUIRED_PYTHON_WORKERS: &[&str] = &[
+    "main.py",
+    "downloader.py",
+    "events.py",
+    "models.py",
+    "transcriber.py",
+    "visual_analyzer.py",
+    "audio_extractor.py",
+    "daemon.py",
+    "embed_query.py",
+    "export_onnx.py",
+    "export_onnx_embeddings.py",
+    "prepare_whisper_model.py",
+    "output_generator.py",
+    "source_scanner.py",
+    "profile_metadata.py",
+    "process_utils.py",
+];
+
 fn runtime_worker_check() -> RuntimeResourceCheck {
-    const WORKERS: &[&str] = &[
-        "main.py",
-        "downloader.py",
-        "events.py",
-        "models.py",
-        "transcriber.py",
-        "visual_analyzer.py",
-        "audio_extractor.py",
-        "daemon.py",
-        "embed_query.py",
-        "export_onnx.py",
-        "export_onnx_embeddings.py",
-        "prepare_whisper_model.py",
-    ];
-    let missing = WORKERS
+    let missing = REQUIRED_PYTHON_WORKERS
         .iter()
         .filter(|name| !crate::runtime::worker_script(name).is_file())
         .copied()
@@ -1794,11 +1805,103 @@ fn runtime_worker_check() -> RuntimeResourceCheck {
         required: true,
         available: missing.is_empty(),
         message: if missing.is_empty() {
-            format!("{} workers encontrados", WORKERS.len())
+            format!(
+                "{} archivos de worker encontrados",
+                REQUIRED_PYTHON_WORKERS.len()
+            )
         } else {
-            format!("Faltan workers Python: {}", missing.join(", "))
+            format!("Faltan archivos Workers Python: {}", missing.join(", "))
         },
     }
+}
+
+fn runtime_manifest_check() -> RuntimeResourceCheck {
+    let path = crate::runtime::path("runtime-manifest.json");
+    let mut check = RuntimeResourceCheck {
+        name: "Manifiesto de runtime".to_string(),
+        path: path.to_string_lossy().to_string(),
+        required: true,
+        available: path.is_file(),
+        message: if path.is_file() {
+            "Manifiesto encontrado".to_string()
+        } else {
+            "Falta runtime-manifest.json en la raíz de recursos instalada".to_string()
+        },
+    };
+    if !check.available {
+        return check;
+    }
+
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            check.available = false;
+            check.message = format!("No se pudo leer el manifiesto: {error}");
+            return check;
+        }
+    };
+    let manifest: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            check.available = false;
+            check.message = format!("Manifiesto JSON incorrecto: {error}");
+            return check;
+        }
+    };
+
+    if manifest
+        .get("manifestKind")
+        .and_then(serde_json::Value::as_str)
+        != Some("pulsaria-runtime-resources")
+        || manifest.get("platform").and_then(serde_json::Value::as_str) != Some("windows-x86_64")
+        || manifest.get("version").and_then(serde_json::Value::as_str)
+            != Some(env!("CARGO_PKG_VERSION"))
+        || manifest
+            .pointer("/contract/status")
+            .and_then(serde_json::Value::as_str)
+            != Some("PASS")
+    {
+        check.available = false;
+        check.message = "Manifiesto incorrecto: tipo, plataforma, versión o estado de contrato no coincide con este paquete"
+            .to_string();
+        return check;
+    }
+
+    let records = manifest
+        .get("components")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|component| component.get("files").and_then(serde_json::Value::as_array))
+        .flatten()
+        .collect::<Vec<_>>();
+    let undeclared = REQUIRED_PYTHON_WORKERS
+        .iter()
+        .filter(|worker| {
+            let expected_path = format!("python-workers/{worker}");
+            !records.iter().any(|record| {
+                record.get("path").and_then(serde_json::Value::as_str)
+                    == Some(expected_path.as_str())
+                    && record.get("required").and_then(serde_json::Value::as_bool) == Some(true)
+                    && record.get("status").and_then(serde_json::Value::as_str) == Some("present")
+            })
+        })
+        .copied()
+        .collect::<Vec<_>>();
+    if !undeclared.is_empty() {
+        check.available = false;
+        check.message = format!(
+            "Manifiesto incorrecto: faltan las declaraciones requeridas para Workers Python: {}",
+            undeclared.join(", ")
+        );
+    } else {
+        check.message = format!(
+            "Manifiesto válido para Pulsaria {} y {} workers",
+            env!("CARGO_PKG_VERSION"),
+            REQUIRED_PYTHON_WORKERS.len()
+        );
+    }
+    check
 }
 
 fn probe_worker_imports(check: &mut RuntimeResourceCheck) {
@@ -1807,14 +1910,15 @@ fn probe_worker_imports(check: &mut RuntimeResourceCheck) {
     }
     let Some(python) = first_resource_path(&["python/python.exe"]) else {
         check.available = false;
-        check.message = "No se encontró python.exe para probar los workers".to_string();
+        check.message = "No se encontró python.exe dentro de la raíz canónica del runtime para probar los workers"
+            .to_string();
         return;
     };
     let worker_dir = crate::runtime::worker_script("main.py")
         .parent()
         .map(PathBuf::from)
         .unwrap_or_else(|| crate::runtime::root().join("python-workers"));
-    let probe = Command::new(&python)
+    let probe = hidden_std_command(&python)
         .current_dir(worker_dir)
         .args(["-c", "import main"])
         .output();
@@ -1859,7 +1963,7 @@ pub fn get_runtime_preflight() -> RuntimePreflight {
             &["assets/models/models--Systran--faster-whisper-tiny"],
             true,
         ),
-        runtime_check("Manifiesto de runtime", &["runtime-manifest.json"], true),
+        runtime_manifest_check(),
     ];
     if let Some(workers) = resources
         .iter_mut()
@@ -1894,7 +1998,7 @@ pub fn get_runtime_preflight() -> RuntimePreflight {
             .to_string()
     } else {
         format!(
-            "Runtime incompleto. Reinstala el paquete o corrige estos recursos: {}.",
+            "Runtime local incompleto; revisa el detalle de estos recursos: {}.",
             missing.join(", ")
         )
     };
@@ -2598,8 +2702,7 @@ async fn run_prepare_whisper_model(
         .arg(initial_phase)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
+    crate::process_control::hide_tokio_command(&mut command);
     let child = command
         .spawn()
         .map_err(|error| format!("No se pudo iniciar la preparaci├│n: {}", error))?;
@@ -2812,7 +2915,7 @@ pub async fn cancel_whisper_model_preparation(state: State<'_, AppState>) -> Res
     if let Some(pid) = pid {
         #[cfg(windows)]
         {
-            let status = Command::new("taskkill")
+            let status = hidden_std_command("taskkill")
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
                 .status()
                 .map_err(|error| error.to_string())?;
@@ -2822,6 +2925,35 @@ pub async fn cancel_whisper_model_preparation(state: State<'_, AppState>) -> Res
         }
         *state.model_prepare_pid.lock().await = None;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn quit_onboarding(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    exit_signal: State<'_, crate::ExitSignal>,
+) -> Result<(), String> {
+    let mut prepare_pid = state.model_prepare_pid.lock().await;
+    if let Some(pid) = *prepare_pid {
+        #[cfg(windows)]
+        {
+            // Best effort: always allow the onboarding close button to exit,
+            // even if the child already ended or Windows cannot signal it.
+            if let Err(error) = hidden_std_command("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status()
+            {
+                eprintln!("Could not stop model preparation process {pid}: {error}");
+            }
+        }
+        *prepare_pid = None;
+    }
+    drop(prepare_pid);
+    exit_signal
+        .0
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    app_handle.exit(0);
     Ok(())
 }
 
@@ -3208,6 +3340,20 @@ impl crate::domain::ports::EmbeddingEngine for SharedEmbeddingEngine {
     }
 }
 
+impl crate::domain::ports::EmbeddingProvider for SharedEmbeddingEngine {
+    fn provider_id(&self) -> &str {
+        "onnx"
+    }
+
+    fn model_version(&self) -> &str {
+        crate::db::EMBEDDING_MODEL_ID
+    }
+
+    fn dimensions(&self) -> usize {
+        crate::domain::models::EMBEDDING_DIMS
+    }
+}
+
 #[tauri::command]
 pub async fn add_job(
     url: String,
@@ -3493,16 +3639,46 @@ pub async fn connect_tiktok_source(
 pub async fn register_profile_source(
     input: RegisterProfileSourceInput,
     state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<RegisterProfileSourceResult, String> {
-    let connection = state
-        .db
-        .lock()
-        .map_err(|_| "Database mutex poisoned".to_string())?;
-    crate::application::collection_service::register_profile_source(
-        &connection,
-        &input.profile_url,
-        &input.selected_sources,
-    )
+    let result = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        crate::application::collection_service::register_profile_source(
+            &connection,
+            &input.profile_url,
+            &input.selected_sources,
+        )?
+    };
+
+    // Ensure channels exist in database
+    {
+        if let Ok(connection) = state.db.lock() {
+            let _ = db::ensure_profile_channels(
+                &connection,
+                result.source.id,
+                &result.source.watch_config_json,
+            );
+        }
+    }
+
+    // Trigger initial discovery in background
+    let discovery_service =
+        crate::application::profile_discovery_service::ProfileDiscoveryService::new(
+            state.db.clone(),
+            state.queue.clone(),
+            app_handle,
+        );
+    let source_id = result.source.id;
+    tokio::spawn(async move {
+        if let Err(err) = discovery_service.discover_profile(source_id, false).await {
+            tracing::warn!("Initial profile discovery error for source {source_id}: {err}");
+        }
+    });
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -3515,7 +3691,10 @@ pub async fn update_profile_source_settings(
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    update_profile_source_settings_service(&connection, source_id, &input.selected_sources)
+    let source =
+        update_profile_source_settings_service(&connection, source_id, &input.selected_sources)?;
+    let _ = db::ensure_profile_channels(&connection, source_id, &source.watch_config_json);
+    Ok(source)
 }
 
 #[tauri::command]
@@ -3621,15 +3800,109 @@ pub async fn sync_collection_source_now(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<crate::application::collection_service::SourceSyncSummary, String> {
-    {
+    let source_type = {
         let connection = state
             .db
             .lock()
             .map_err(|_| "Database mutex poisoned".to_string())?;
         db::force_collection_source_due(&connection, source_id)
             .map_err(|error| error.to_string())?;
+        let src = db::get_collection_source(&connection, source_id).map_err(|e| e.to_string())?;
+        src.source_type
+    };
+
+    if source_type == "profile" {
+        let discovery_service =
+            crate::application::profile_discovery_service::ProfileDiscoveryService::new(
+                state.db.clone(),
+                state.queue.clone(),
+                app_handle,
+            );
+        let report = discovery_service.discover_profile(source_id, true).await?;
+        let mut summary = crate::application::collection_service::SourceSyncSummary {
+            source_id,
+            found_count: report.total_discovered,
+            queued_count: report.total_queued,
+            duplicate_count: report.total_duplicates,
+            ignored_count: 0,
+            error_count: 0,
+            unavailable_categories: Vec::new(),
+            partial: false,
+            message: "Sincronización de perfil completada".into(),
+            categories: std::collections::HashMap::new(),
+        };
+        for ch in report.channels {
+            summary.categories.insert(
+                ch.channel_kind.clone(),
+                crate::application::collection_service::SourceCategorySummary {
+                    available: ch.status != "unsupported" && ch.status != "requires_auth",
+                    enabled: true,
+                    discovered: ch.discovered_count,
+                    queued: ch.queued_count,
+                    state: ch.status,
+                },
+            );
+        }
+        return Ok(summary);
     }
+
     sync_collection_source_by_id(state.db.clone(), state.queue.clone(), source_id, app_handle).await
+}
+
+#[tauri::command]
+pub async fn refresh_profile_metadata(
+    source_id: i64,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::application::profile_discovery_service::ProfileMetadataSnapshot, String> {
+    let service = crate::application::profile_discovery_service::ProfileDiscoveryService::new(
+        state.db.clone(),
+        state.queue.clone(),
+        app_handle,
+    );
+    service.refresh_profile_metadata(source_id).await
+}
+
+#[tauri::command]
+pub async fn get_profile_channels(
+    source_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ProfileChannelRecord>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_profile_channels(&connection, source_id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_channel_content_items(
+    source_id: i64,
+    channel_kind: String,
+    limit: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ContentItemRecord>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_channel_content_items(&connection, source_id, &channel_kind, limit.unwrap_or(50))
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_source_collection_content_items(
+    source_id: i64,
+    channel_kind: String,
+    limit: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ContentViewRecord>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_channel_content_views(&connection, source_id, &channel_kind, limit.unwrap_or(50))
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -4005,11 +4278,41 @@ pub async fn search_literal_transcripts(
     limit: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<Vec<db::SearchResult>, String> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::search_literal_transcripts(&db, &query, limit.unwrap_or(10)).map_err(|e| e.to_string())
+    let response = state
+        .search
+        .unified_search(crate::domain::models::UnifiedSearchRequest {
+            query,
+            mode: crate::domain::models::SearchMode::Exact,
+            limit: limit.unwrap_or(10),
+            context: None,
+        })
+        .await?;
+    Ok(flatten_unified_results(response))
+}
+
+fn flatten_unified_results(
+    response: crate::domain::models::UnifiedSearchResponse,
+) -> Vec<db::SearchResult> {
+    response
+        .results
+        .into_iter()
+        .map(|group| db::SearchResult {
+            job_id: group.job_id,
+            title: group.title,
+            thumbnail: group.thumbnail,
+            chunk_text: group.primary_moment.excerpt,
+            chunk_index: group.primary_moment.unit_id,
+            similarity_score: group.score,
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn search_library(
+    request: crate::domain::models::UnifiedSearchRequest,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::models::UnifiedSearchResponse, String> {
+    state.search.unified_search(request).await
 }
 
 #[tauri::command]
@@ -4025,25 +4328,20 @@ pub async fn search_transcripts(
         format!("Search requested for query: '{}'", query),
     );
 
-    let mut onnx_lock = state.onnx.lock().await;
-    let onnx = onnx_lock
-        .as_mut()
-        .ok_or("Embedding model is not loaded. Semantic search is disabled.")?;
-
-    let query_vec = onnx
-        .generate_embedding(&query)
-        .map_err(|e| format!("Failed to generate native embedding: {}", e))?;
-
     let config = state.config.lock().await;
     let final_limit = limit.unwrap_or(config.max_results);
-    let final_min_score = min_score.unwrap_or(config.min_score);
     drop(config);
-
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::search_embeddings(&db, &query_vec, final_limit, final_min_score).map_err(|e| e.to_string())
+    let response = state
+        .search
+        .unified_search(crate::domain::models::UnifiedSearchRequest {
+            query,
+            mode: crate::domain::models::SearchMode::Conceptual,
+            limit: final_limit,
+            context: None,
+        })
+        .await?;
+    let _ = min_score;
+    Ok(flatten_unified_results(response))
 }
 
 #[tauri::command]
@@ -4567,6 +4865,17 @@ pub async fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::Playlis
 }
 
 #[tauri::command]
+pub async fn get_source_collections(
+    state: State<'_, AppState>,
+) -> Result<Vec<db::SourceCollectionRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_source_collections(&db).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn create_playlist(
     name: String,
     description: Option<String>,
@@ -4584,27 +4893,45 @@ pub async fn create_playlist(
 #[tauri::command]
 pub async fn add_to_playlist(
     playlist_id: i64,
-    job_id: i64,
+    job_id: Option<i64>,
+    content_id: Option<i64>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::add_job_to_playlist(&db, playlist_id, job_id).map_err(|e| e.to_string())
+    match (job_id, content_id) {
+        (Some(job_id), _) => db::add_job_to_playlist(&db, playlist_id, job_id),
+        (None, Some(content_id)) => {
+            db::add_content_to_playlist(&db, playlist_id, content_id, "user")
+        }
+        (None, None) => Err(rusqlite::Error::InvalidParameterName(
+            "playlist item requires job_id or content_id".to_string(),
+        )),
+    }
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn remove_from_playlist(
     playlist_id: i64,
-    job_id: i64,
+    job_id: Option<i64>,
+    content_id: Option<i64>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::remove_job_from_playlist(&db, playlist_id, job_id).map_err(|e| e.to_string())
+    match (job_id, content_id) {
+        (Some(job_id), _) => db::remove_job_from_playlist(&db, playlist_id, job_id),
+        (None, Some(content_id)) => db::remove_content_from_playlist(&db, playlist_id, content_id),
+        (None, None) => Err(rusqlite::Error::InvalidParameterName(
+            "playlist item requires job_id or content_id".to_string(),
+        )),
+    }
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -4628,6 +4955,34 @@ pub async fn get_playlist_items(
         }
     }
     Ok(jobs)
+}
+
+#[tauri::command]
+pub async fn get_playlist_content_items(
+    playlist_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ContentViewRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    let mut views =
+        db::get_playlist_content_views(&db, playlist_id).map_err(|error| error.to_string())?;
+    for view in &mut views {
+        if view
+            .job
+            .video_path
+            .as_deref()
+            .map(PathBuf::from)
+            .is_some_and(|path| !path.is_file())
+        {
+            view.job.video_path = None;
+            if view.availability == "available" {
+                view.job.source_state = "online".to_string();
+            }
+        }
+    }
+    Ok(views)
 }
 
 #[tauri::command]

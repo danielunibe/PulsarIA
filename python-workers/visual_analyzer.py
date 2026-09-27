@@ -20,6 +20,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from process_utils import hidden_process_kwargs
+
 
 _WORKERS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _WORKERS_DIR.parent
@@ -145,6 +147,7 @@ def _probe_duration(ffprobe_path: str, video_path: Path) -> float:
             capture_output=True,
             text=True,
             timeout=30,
+            **hidden_process_kwargs(),
         )
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or str(error)).strip()
@@ -207,7 +210,14 @@ def _extract_frame(
         str(output_path),
     ]
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True, timeout=45)
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=45,
+            **hidden_process_kwargs(),
+        )
         return "NVDEC" if hardware_args else "CPU"
     except subprocess.CalledProcessError as error:
         if hardware_args:
@@ -216,7 +226,14 @@ def _extract_frame(
             # reason visible to the caller through the fallback label.
             cpu_command = [item for item in command if item not in hardware_args]
             try:
-                subprocess.run(cpu_command, check=True, capture_output=True, text=True, timeout=45)
+                subprocess.run(
+                    cpu_command,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=45,
+                    **hidden_process_kwargs(),
+                )
                 return "CPU-fallback-from-NVDEC"
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as cpu_error:
                 detail = (getattr(cpu_error, "stderr", None) or str(cpu_error)).strip()
@@ -268,6 +285,7 @@ def _ocr_text(tesseract_path: str | None, image_path: Path) -> str:
             capture_output=True,
             text=True,
             timeout=20,
+            **hidden_process_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""

@@ -677,13 +677,118 @@
 .stepRail {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr));
   gap: .75rem;
   row-gap: .9rem;
   margin: 0;
   padding: .8rem 0 0;
   border-top: 1px solid rgba(255, 255, 255, .1);
   list-style: none;
+}
+
+.runtimeFailures {
+  display: grid;
+  gap: .65rem;
+  max-height: min(14rem, 30vh);
+  overflow: auto;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.runtimeFailures li {
+  min-width: 0;
+  border-radius: .85rem;
+  background: linear-gradient(120deg, rgba(254, 44, 85, .12), rgba(138, 92, 255, .08));
+  padding: .8rem 1rem;
+  color: rgba(255, 255, 255, .72);
+  font-size: .7rem;
+  line-height: 1.5;
+}
+
+.runtimeFailures strong {
+  color: rgba(255, 255, 255, .94);
+}
+
+.runtimeFailures p {
+  margin: .35rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.runtimeFailures small {
+  display: block;
+  margin-top: .3rem;
+  color: rgba(255, 255, 255, .42);
+  overflow-wrap: anywhere;
+}
+
+.runtimeFailures .runtimeAction {
+  color: rgba(37, 244, 238, .82);
+}
+
+.runtimeTimeout {
+  margin: 1rem 0 0;
+  border-radius: .8rem;
+  background: rgba(37, 244, 238, .08);
+  padding: .8rem 1rem;
+  color: rgba(255, 255, 255, .7);
+  font-size: .72rem;
+  line-height: 1.6;
+}
+
+.storageCheckError {
+  margin-top: .75rem;
+  border-radius: .8rem;
+  background: rgba(254, 44, 85, .1);
+  padding: .75rem;
+  color: rgba(255, 255, 255, .75);
+  font-size: .68rem;
+  line-height: 1.5;
+}
+
+.storageCheckError p {
+  margin: 0;
+}
+
+.storageCheckError button,
+.postponeRow button {
+  margin-top: .55rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .075);
+  padding: .55rem .85rem;
+  color: rgba(255, 255, 255, .76);
+  cursor: pointer;
+  font-size: .62rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+.storageCheckError button:hover,
+.postponeRow button:hover {
+  background: rgba(37, 244, 238, .13);
+  color: white;
+  box-shadow: 0 0 22px rgba(37, 244, 238, .12);
+}
+
+.postponeRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: .5rem;
+}
+
+.postponeRow button {
+  margin-top: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, .55);
+}
+
+.postponeRow button:focus-visible,
+.storageCheckError button:focus-visible {
+  outline: 2px solid #25f4ee;
+  outline-offset: 3px;
 }
 
 .stepItem {

@@ -2,7 +2,7 @@
 
 import type { ComponentType } from 'react';
 import Image from 'next/image';
-import { FaFolder, FaGear, FaHouse, FaLayerGroup, FaMagnifyingGlass, FaPlay, FaUser, FaWaveSquare } from '@/components/icon-library';
+import { FaMagnifyingGlass } from '@/components/icon-library';
 
 export type GlobalSection = 'home' | 'profiles' | 'activity' | 'library' | 'settings';
 
@@ -13,7 +13,8 @@ interface RailButtonProps {
     label: string;
     activeSection: GlobalSection;
     onNavigate: (section: GlobalSection) => void;
-    Icon: RailIcon;
+    Icon?: RailIcon;
+    artwork?: string;
     activityCount?: number;
 }
 
@@ -30,6 +31,7 @@ function RailButton({
     activeSection,
     onNavigate,
     Icon,
+    artwork,
     activityCount = 0,
 }: RailButtonProps) {
     const isActive = activeSection === section;
@@ -40,16 +42,42 @@ function RailButton({
             className={`pulsaria-nav-item${isActive ? ' pulsaria-nav-item--active' : ''}`}
             aria-label={label}
             aria-current={isActive ? 'page' : undefined}
-            title={label}
-            data-tooltip={label}
             onClick={() => onNavigate(section)}
         >
-            <Icon size={16} className="pulsaria-nav-item__icon" />
+            {artwork ? (
+                <Image src={artwork} alt="" aria-hidden="true" width={24} height={24} unoptimized draggable={false} className="pulsaria-nav-item__artwork" />
+            ) : Icon ? (
+                <Icon size={16} className="pulsaria-nav-item__icon" />
+            ) : null}
             {section === 'activity' && activityCount > 0 && (
                 <span className="pulsaria-nav-item__badge" aria-label={`${activityCount} actividades pendientes`}>
                     {activityCount > 99 ? '99+' : activityCount}
                 </span>
             )}
+        </button>
+    );
+}
+
+function HomeRailButton({
+    label,
+    activeSection,
+    onNavigate,
+}: {
+    label: string;
+    activeSection: GlobalSection;
+    onNavigate: (section: GlobalSection) => void;
+}) {
+    const isActive = activeSection === 'home';
+
+    return (
+        <button
+            type="button"
+            className={`pulsaria-nav-item${isActive ? ' pulsaria-nav-item--active' : ''}`}
+            aria-label={label}
+            aria-current={isActive ? 'page' : undefined}
+            onClick={() => onNavigate('home')}
+        >
+            <Image src="/icons/menu/home.webp" alt="" aria-hidden="true" width={24} height={24} unoptimized draggable={false} className="pulsaria-nav-item__artwork" />
         </button>
     );
 }
@@ -61,8 +89,6 @@ function RailAction({ label, Icon, onClick, pressed }: RailActionProps) {
             className={`pulsaria-nav-item${pressed ? ' pulsaria-nav-item--active' : ''}`}
             aria-label={label}
             aria-pressed={pressed}
-            title={label}
-            data-tooltip={label}
             onClick={onClick}
         >
             <Icon size={16} className="pulsaria-nav-item__icon" />
@@ -77,8 +103,6 @@ export interface SidebarProps {
     onOpenSearch: () => void;
     onOpenCinema: () => void;
     canOpenCinema: boolean;
-    layersVisible: boolean;
-    onToggleLayers: () => void;
 }
 
 /**
@@ -94,8 +118,6 @@ export function Sidebar({
     onOpenSearch,
     onOpenCinema,
     canOpenCinema,
-    layersVisible,
-    onToggleLayers,
 }: SidebarProps) {
     return (
         <aside className="cinema-shell-panel pulsaria-nav-rail" aria-label="Navegación principal">
@@ -113,36 +135,40 @@ export function Sidebar({
             </div>
             <nav className="pulsaria-nav-rail__nav" aria-label="Secciones globales">
                 <RailAction label="Buscar en la biblioteca" onClick={onOpenSearch} Icon={FaMagnifyingGlass} />
-                <span className="pulsaria-nav-rail__divider" aria-hidden="true" />
-                <RailButton section="home" label="Inicio" activeSection={activeSection} onNavigate={onNavigate} Icon={FaHouse} />
-                <RailButton section="profiles" label="Perfiles" activeSection={activeSection} onNavigate={onNavigate} Icon={FaUser} />
+                <HomeRailButton label="Inicio · Kiosco" activeSection={activeSection} onNavigate={onNavigate} />
                 <RailButton
-                    section="activity"
-                    label="Actividad"
+                    section="profiles"
+                    label="Perfiles TikTok"
                     activeSection={activeSection}
                     onNavigate={onNavigate}
-                    Icon={FaWaveSquare}
+                    artwork="/icons/menu/profiles.webp"
+                />
+                <RailButton
+                    section="activity"
+                    label="Actividad · Historial"
+                    activeSection={activeSection}
+                    onNavigate={onNavigate}
+                    artwork="/icons/menu/activity.webp"
                     activityCount={activityCount}
                 />
-                <RailButton section="library" label="Biblioteca" activeSection={activeSection} onNavigate={onNavigate} Icon={FaFolder} />
-                <span className="pulsaria-nav-rail__divider" aria-hidden="true" />
-                <RailAction label="Visualización: alternar capas auxiliares" onClick={onToggleLayers} pressed={layersVisible} Icon={FaLayerGroup} />
-                <RailButton section="settings" label="Ajustes" activeSection={activeSection} onNavigate={onNavigate} Icon={FaGear} />
+                <RailButton
+                    section="library"
+                    label="Playlists"
+                    activeSection={activeSection}
+                    onNavigate={onNavigate}
+                    artwork="/icons/menu/playlist.webp"
+                />
+                <RailButton section="settings" label="Ajustes" activeSection={activeSection} onNavigate={onNavigate} artwork="/icons/menu/settings.webp" />
             </nav>
             <div className="pulsaria-nav-rail__footer">
                 <button
                     type="button"
                     className="pulsaria-nav-cinema"
-                    aria-label="Abrir modo Cinema"
-                    title={canOpenCinema ? 'Abrir modo Cinema' : 'No hay videos disponibles para Cinema'}
-                    data-tooltip="Abrir modo Cinema"
+                    aria-label={canOpenCinema ? 'Abrir Cinema a pantalla completa' : 'Cinema no disponible: agrega un video primero'}
                     onClick={onOpenCinema}
                     disabled={!canOpenCinema}
                 >
-                    <span className="pulsaria-nav-cinema__play" aria-hidden="true">
-                        <FaPlay size={13} />
-                    </span>
-                    <span className="pulsaria-nav-cinema__label">Cinema</span>
+                    <Image src="/icons/menu/cinema.webp" alt="" aria-hidden="true" width={40} height={40} unoptimized draggable={false} className="pulsaria-nav-cinema__artwork" />
                 </button>
             </div>
         </aside>

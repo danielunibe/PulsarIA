@@ -23,6 +23,8 @@ import subprocess
 import importlib.util
 from pathlib import Path
 
+from process_utils import hidden_process_kwargs
+
 
 DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 2 * 60 * 60
 
@@ -200,6 +202,7 @@ def _has_audio_stream(video_path: str) -> bool:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                **hidden_process_kwargs(),
             )
             return result.returncode == 0
         except (subprocess.SubprocessError, FileNotFoundError, OSError):
@@ -209,7 +212,7 @@ def _has_audio_stream(video_path: str) -> bool:
         result = subprocess.run(
             [ffprobe_path, "-v", "error", "-select_streams", "a",
              "-show_entries", "stream=codec_type", "-of", "csv=p=0", video_path],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=30, **hidden_process_kwargs()
         )
         return bool(result.stdout.strip())
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
@@ -239,6 +242,7 @@ def download_video(url: str, job_id: int, base_dir: Path) -> str:
             capture_output=True,
             text=True,
             timeout=_download_timeout_seconds(),
+            **hidden_process_kwargs(),
         )
         # Bug #26 FIX: Find actual downloaded file — yt-dlp may rename on conflict
         if not output_path.exists():
@@ -269,6 +273,7 @@ def download_video(url: str, job_id: int, base_dir: Path) -> str:
                     capture_output=True,
                     text=True,
                     timeout=_download_timeout_seconds(),
+                    **hidden_process_kwargs(),
                 )
                 if not output_path.exists():
                     mp4_files = sorted(output_dir.glob('*.mp4'), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -308,7 +313,12 @@ def extract_metadata(url: str) -> dict:
     ]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=60
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+            **hidden_process_kwargs(),
         )
         info = json.loads(result.stdout)
         if not isinstance(info, dict):
@@ -353,7 +363,12 @@ def extract_playlist_entries(url: str, playlist_end: int = 200) -> list[dict]:
     ]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=60
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+            **hidden_process_kwargs(),
         )
         entries = []
         seen = set()

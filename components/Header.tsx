@@ -1,16 +1,12 @@
 'use client';
 
-import { useEffect, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { motion } from 'motion/react';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { TIKTOK_LOGO_PATH } from '@/lib/design-tokens';
-import {
-    FaMinus,
-    FaSquare,
-    FaClone,
-    FaXmark as FaClose,
-} from '@/components/icon-library';
+import { FaEye, FaEyeSlash, FaFilter } from '@/components/icon-library';
+import { PagePanel, type PageConfig } from '@/components/PagePanel';
 import { toast } from 'sonner';
 import { useI18n } from '@/lib/i18n';
 
@@ -40,27 +36,16 @@ export const PulsariaIcon = ({ size = 28, className = '' }: { size?: number; cla
     />
 );
 
-const MinimizeIcon = () => <FaMinus size={14} />;
-const MaximizeIcon = () => <FaSquare size={13} />;
-const RestoreIcon = () => <FaClone size={14} />;
-const CloseIcon = () => <FaClose size={14} />;
+const WindowGlyph = ({ kind }: { kind: 'minimize' | 'maximize' | 'restore' | 'close' }) => (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {kind === 'minimize' && <path d="M4 10h12" />}
+        {kind === 'maximize' && <rect x="4.5" y="4.5" width="11" height="11" rx="1.5" />}
+        {kind === 'restore' && <path d="M7 5h8v8M5 8v7h8" />}
+        {kind === 'close' && <path d="m5 5 10 10M15 5 5 15" />}
+    </svg>
+);
 
-const btnBase: CSSProperties = {
-    height: '40px',
-    borderRadius: '14px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
-    border: 'none',
-    background: 'rgba(0,0,0,0.4)',
-    backdropFilter: 'blur(30px)',
-    boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.08), 0 6px 14px rgba(0,0,0,0.28)',
-    cursor: 'pointer',
-    transform: 'scale(1)',
-};
-
-export type SearchMode = 'literal' | 'semantic';
+export type { SearchMode } from '@/lib/unified-search';
 
 interface HeaderProps {
     activeCount?: number;
@@ -68,9 +53,24 @@ interface HeaderProps {
     onOpenSearch?: () => void;
     showTikTokPill?: boolean;
     onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void;
+    backgroundVisible: boolean;
+    onToggleBackground: () => void;
+    showDemoVideos: boolean;
+    onToggleDemoVideos: () => void;
+    onToggleTikTokPill: () => void;
+    pageConfig: PageConfig;
+    onPageConfigChange: (config: PageConfig) => void;
 }
 
-function useWindowControls() {
+export interface WindowControlsApi {
+    isMaximized: boolean;
+    minimize: () => Promise<void>;
+    maximize: () => Promise<void>;
+    close: () => Promise<void>;
+    windowAction: 'minimize' | 'maximize' | 'close' | null;
+}
+
+export function useWindowControls(onClose?: () => Promise<void> | void): WindowControlsApi {
     const [isMaximized, setIsMaximized] = useState(false);
     const [windowAction, setWindowAction] = useState<'minimize' | 'maximize' | 'close' | null>(null);
 
@@ -112,6 +112,10 @@ function useWindowControls() {
     const close = async () => {
         markWindowAction('close');
         try {
+            if (onClose) {
+                await onClose();
+                return;
+            }
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             await getCurrentWindow().close();
         } catch (error) {
@@ -143,6 +147,60 @@ function useWindowControls() {
     return { isMaximized, minimize, maximize, close, windowAction };
 }
 
+export function WindowControls({ controls }: { controls: WindowControlsApi }) {
+    const { isMaximized, minimize, maximize, close, windowAction } = controls;
+
+    return (
+        <div className="pulsaria-window-header__window-controls flex shrink-0 items-center gap-1 pointer-events-auto app-no-drag">
+            <motion.button
+                type="button"
+                onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
+                onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void minimize(); }}
+                title="Minimizar"
+                aria-label="Minimizar"
+                style={{ width: '36px', height: '36px', borderRadius: 0, border: 0, background: 'transparent', boxShadow: 'none', padding: 0 }}
+                animate={windowAction === 'minimize' ? { scale: [1, 0.82, 1] } : { scale: 1 }}
+                transition={{ duration: 0.28 }}
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.95 }}
+                className="pulsaria-window-control flex items-center justify-center text-white/55 transition-colors hover:text-white cursor-pointer app-no-drag"
+            >
+                <WindowGlyph kind="minimize" />
+            </motion.button>
+            <motion.button
+                type="button"
+                onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
+                onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void maximize(); }}
+                title={isMaximized ? 'Restaurar' : 'Maximizar'}
+                aria-label={isMaximized ? 'Restaurar ventana' : 'Maximizar ventana'}
+                style={{ width: '36px', height: '36px', borderRadius: 0, border: 0, background: 'transparent', boxShadow: 'none', padding: 0 }}
+                animate={windowAction === 'maximize' ? { scale: [1, 1.16, 1] } : { scale: 1 }}
+                transition={{ duration: 0.28 }}
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.95 }}
+                className="pulsaria-window-control flex items-center justify-center text-white/55 transition-colors hover:text-white cursor-pointer app-no-drag"
+            >
+                <WindowGlyph kind={isMaximized ? 'restore' : 'maximize'} />
+            </motion.button>
+            <motion.button
+                type="button"
+                onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
+                onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void close(); }}
+                title="Cerrar"
+                aria-label="Cerrar"
+                style={{ width: '36px', height: '36px', borderRadius: 0, border: 0, background: 'transparent', boxShadow: 'none', padding: 0 }}
+                animate={windowAction === 'close' ? { scale: [1, 0.82, 1] } : { scale: 1 }}
+                transition={{ duration: 0.28 }}
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.95 }}
+                className="pulsaria-window-control flex items-center justify-center text-white/55 transition-colors hover:text-rose-200 cursor-pointer app-no-drag"
+            >
+                <WindowGlyph kind="close" />
+            </motion.button>
+        </div>
+    );
+}
+
 function startWindowDrag(event: ReactMouseEvent<HTMLElement>) {
     if (event.button !== 0) return;
     const target = event.target;
@@ -163,9 +221,36 @@ export function Header({
     isLoading = false,
     showTikTokPill = true,
     onContextMenu,
+    backgroundVisible,
+    onToggleBackground,
+    showDemoVideos,
+    onToggleDemoVideos,
+    onToggleTikTokPill,
+    pageConfig,
+    onPageConfigChange,
 }: HeaderProps) {
     const { t } = useI18n();
-    const { isMaximized, minimize, maximize, close, windowAction } = useWindowControls();
+    const windowControls = useWindowControls();
+    const [openHeaderPanel, setOpenHeaderPanel] = useState<'visibility' | 'filters' | null>(null);
+    const headerToolsRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!openHeaderPanel) return;
+        const onPointerDown = (event: PointerEvent) => {
+            if (event.target instanceof Node && !headerToolsRef.current?.contains(event.target)) {
+                setOpenHeaderPanel(null);
+            }
+        };
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setOpenHeaderPanel(null);
+        };
+        document.addEventListener('pointerdown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', onPointerDown);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [openHeaderPanel]);
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -185,7 +270,7 @@ export function Header({
             onMouseDown={startWindowDrag}
             onDoubleClick={(event) => {
                 const target = event.target;
-                if (!(target instanceof Element) || !target.closest('button, input, a, [data-no-drag], .app-no-drag')) void maximize();
+                if (!(target instanceof Element) || !target.closest('button, input, a, [data-no-drag], .app-no-drag')) void windowControls.maximize();
             }}
             onContextMenu={(event) => {
                 const target = event.target;
@@ -196,22 +281,39 @@ export function Header({
                 onContextMenu(event);
             }}
         >
-            <div aria-hidden="true" className="absolute inset-x-0 top-0 pointer-events-none select-none overflow-hidden" style={{ height: '96px', zIndex: 0 }}>
-                <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, rgba(8, 10, 15, 0.88) 0%, rgba(8, 10, 15, 0.68) 34%, rgba(8, 10, 15, 0.22) 76%, transparent 100%)' }} />
-                <div className="absolute inset-0" style={{ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', maskImage: 'linear-gradient(to bottom, black 0%, black 48%, rgba(0, 0, 0, 0.6) 74%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 48%, rgba(0, 0, 0, 0.6) 74%, transparent 100%)' }} />
-                <div className="absolute inset-0" style={{ backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', maskImage: 'linear-gradient(to bottom, black 0%, black 34%, rgba(0, 0, 0, 0.5) 62%, transparent 88%)', WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 34%, rgba(0, 0, 0, 0.5) 62%, transparent 88%)' }} />
-                <div className="absolute inset-0" style={{ backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', maskImage: 'linear-gradient(to bottom, black 0%, black 20%, rgba(0, 0, 0, 0.4) 46%, transparent 74%)', WebkitMaskImage: 'linear-gradient(to bottom, black 0%, black 20%, rgba(0, 0, 0, 0.4) 46%, transparent 74%)' }} />
-                <div className="absolute inset-0" style={{ backdropFilter: 'blur(36px)', WebkitBackdropFilter: 'blur(36px)', maskImage: 'linear-gradient(to bottom, black 0%, rgba(0, 0, 0, 0.7) 18%, transparent 48%)', WebkitMaskImage: 'linear-gradient(to bottom, black 0%, rgba(0, 0, 0, 0.7) 18%, transparent 48%)' }} />
-            </div>
+            <div aria-hidden="true" className="pulsaria-window-header__wash absolute inset-x-0 top-0 pointer-events-none select-none overflow-hidden" style={{ zIndex: 0 }} />
 
-            <div className="w-full min-w-0 px-6 pt-3 pb-3 flex items-center justify-between relative z-10 self-start pointer-events-none">
-                <div className="min-w-0 flex flex-1 items-center gap-2.5 overflow-visible pointer-events-auto">
+            <div className="pulsaria-window-header__topbar w-full min-w-0 relative z-10 self-start pointer-events-none">
+                <div className="pulsaria-window-header__brand min-w-0 flex items-center gap-2.5 overflow-visible pointer-events-auto">
                     <div className="flex items-center gap-2.5" aria-label="Pulsaria">
                         <span className="text-sm font-black tracking-[0.18em] text-white/90">Pulsaria</span>
                     </div>
                 </div>
 
-                {showTikTokPill && (
+                <div className="pulsaria-window-header__center-tools app-no-drag" ref={headerToolsRef}>
+                    <div className="pulsaria-header-tool-buttons">
+                        <button
+                            type="button"
+                            className="pulsaria-header-tool"
+                            aria-expanded={openHeaderPanel === 'visibility'}
+                            aria-controls="pulsaria-visibility-popover"
+                            onClick={() => setOpenHeaderPanel((current) => current === 'visibility' ? null : 'visibility')}
+                        >
+                            {backgroundVisible || showDemoVideos || showTikTokPill ? <FaEye size={16} /> : <FaEyeSlash size={16} />}
+                            <span>Vista</span>
+                        </button>
+                        <button
+                            type="button"
+                            className="pulsaria-header-tool"
+                            aria-expanded={openHeaderPanel === 'filters'}
+                            aria-controls="pulsaria-filter-popover"
+                            onClick={() => setOpenHeaderPanel((current) => current === 'filters' ? null : 'filters')}
+                        >
+                            <FaFilter size={15} />
+                            <span>Filtros</span>
+                        </button>
+                    </div>
+                    {showTikTokPill && (
                     <button
                         type="button"
                         onClick={() => {
@@ -222,65 +324,39 @@ export function Header({
                             }
                         }}
                         aria-label={`${activeCount} TikToks en la biblioteca`}
-                        className="group header-control header-control--pill absolute left-1/2 top-3 flex h-[38px] -translate-x-1/2 items-center gap-2 rounded-[13px] px-3.5 pointer-events-auto select-none"
-                        style={{ ...btnBase, height: '38px', borderRadius: '13px', background: 'linear-gradient(135deg, rgba(254,44,85,0.2) 0%, rgba(37,244,238,0.2) 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), 0 8px 18px rgba(0,0,0,0.28)' }}
+                        className="pulsaria-window-header__library-pill group header-control header-control--pill flex h-[38px] items-center gap-2 rounded-[13px] px-3.5 pointer-events-auto select-none"
+                        style={{ height: '38px', borderRadius: '13px', background: 'linear-gradient(135deg, rgba(254,44,85,0.2) 0%, rgba(37,244,238,0.2) 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), 0 8px 18px rgba(0,0,0,0.28)' }}
                     >
                         <span className="flex items-center justify-center"><TikTokIcon size={19} /></span>
                         <span className="font-black tracking-[0.16em] uppercase text-white/90 relative z-10 text-[11px] whitespace-nowrap">
                             {isLoading ? 'TIKTOKS...' : `${activeCount} TIKTOKS`}
                         </span>
                     </button>
-                )}
-
-                <div className="absolute right-6 top-3 flex shrink-0 items-center gap-2 pointer-events-auto app-no-drag">
-                    <div className="mx-0.5 h-4 w-px bg-white/10" aria-hidden="true" />
-                    <motion.button
-                        type="button"
-                        onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
-                        onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void minimize(); }}
-                        title="Minimizar"
-                        aria-label="Minimizar"
-                        style={{ width: '38px', height: '38px', borderRadius: '13px', border: 0, background: 'linear-gradient(145deg, rgba(74,222,128,0.14), rgba(20,43,32,0.28))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(0,0,0,0.28)', padding: 0 }}
-                        animate={windowAction === 'minimize' ? { scale: [1, 0.82, 1] } : { scale: 1 }}
-                        transition={{ duration: 0.28 }}
-                        whileHover={{ scale: 1.04 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="group header-control header-control--green flex items-center justify-center text-emerald-300/75 transition-colors hover:text-emerald-100 cursor-pointer app-no-drag header-tone-button"
-                    >
-                        <MinimizeIcon />
-                    </motion.button>
-                    <motion.button
-                        type="button"
-                        onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
-                        onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void maximize(); }}
-                        title={isMaximized ? 'Restaurar' : 'Maximizar'}
-                        aria-label={isMaximized ? 'Restaurar ventana' : 'Maximizar ventana'}
-                        style={{ width: '38px', height: '38px', borderRadius: '13px', border: 0, background: 'linear-gradient(145deg, rgba(74,222,128,0.14), rgba(20,43,32,0.28))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(0,0,0,0.28)', padding: 0 }}
-                        animate={windowAction === 'maximize' ? { scale: [1, 1.16, 1] } : { scale: 1 }}
-                        transition={{ duration: 0.28 }}
-                        whileHover={{ scale: 1.04 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="group header-control header-control--green flex items-center justify-center text-emerald-300/75 transition-colors hover:text-emerald-100 cursor-pointer app-no-drag header-tone-button"
-                    >
-                        {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
-                    </motion.button>
-                    <motion.button
-                        type="button"
-                        onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
-                        onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void close(); }}
-                        title="Cerrar"
-                        aria-label="Cerrar"
-                        style={{ width: '38px', height: '38px', borderRadius: '13px', border: 0, background: 'linear-gradient(145deg, rgba(74,222,128,0.14), rgba(20,43,32,0.28))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(0,0,0,0.28)', padding: 0 }}
-                        animate={windowAction === 'close' ? { scale: [1, 0.82, 1] } : { scale: 1 }}
-                        transition={{ duration: 0.28 }}
-                        whileHover={{ scale: 1.04 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="group header-control header-control--green flex items-center justify-center text-emerald-300/75 transition-colors hover:text-emerald-100 cursor-pointer app-no-drag header-tone-button"
-                    >
-                        <CloseIcon />
-                    </motion.button>
+                    )}
+                    {openHeaderPanel === 'visibility' && (
+                        <div id="pulsaria-visibility-popover" className="pulsaria-header-popover pulsaria-header-visibility-popover" role="group" aria-label="Visibilidad de la interfaz">
+                            <span className="pulsaria-header-popover__title">VISIBILIDAD</span>
+                            <button type="button" aria-pressed={backgroundVisible} onClick={onToggleBackground} className="pulsaria-header-toggle">
+                                <span>Fondo ambiental</span><span className={`pulsaria-header-switch${backgroundVisible ? ' is-on' : ''}`} aria-hidden="true" />
+                            </button>
+                            <button type="button" aria-pressed={showDemoVideos} onClick={onToggleDemoVideos} className="pulsaria-header-toggle">
+                                <span>Videos de ejemplo</span><span className={`pulsaria-header-switch${showDemoVideos ? ' is-on' : ''}`} aria-hidden="true" />
+                            </button>
+                            <button type="button" aria-pressed={showTikTokPill} onClick={onToggleTikTokPill} className="pulsaria-header-toggle">
+                                <span>Contador de TikToks</span><span className={`pulsaria-header-switch${showTikTokPill ? ' is-on' : ''}`} aria-hidden="true" />
+                            </button>
+                        </div>
+                    )}
+                    {openHeaderPanel === 'filters' && (
+                        <div id="pulsaria-filter-popover" className="pulsaria-header-popover pulsaria-header-filter-popover" aria-label="Filtros de videos">
+                            <PagePanel config={pageConfig} onChange={onPageConfigChange} />
+                        </div>
+                    )}
                 </div>
+
+                <WindowControls controls={windowControls} />
             </div>
+
         </div>
     );
 }

@@ -272,3 +272,13 @@ resultados.
 La base de datos, medios, runtime y modelos existentes no se reinicializaron ni
 se eliminaron. No se hizo `git reset`, `git clean`, stash global, commit ni
 push durante esta integración.
+
+## Auditoría de publicación gratuita — 2026-09-27
+
+La matriz vigente de reparación, los gates repetidos y los bloqueos para
+publicar una descarga del código actual se mantienen en
+[docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md).
+Este seguimiento suplementa las tablas históricas: la descarga GitHub más
+reciente todavía es `v0.1.0-eval.3`; el NSIS Beta 2 actual pasó el smoke
+aislado, el MSI prerelease no es compatible con el identificador
+`0.1.0-beta.2`, y la aprobación/datos legales siguen siendo un gate humano.

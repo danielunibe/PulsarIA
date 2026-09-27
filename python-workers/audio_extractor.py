@@ -17,6 +17,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from process_utils import hidden_process_kwargs
+
 # ========================================================================
 # AUDIO EXTRACTOR: Extracción FFMPEG
 # Responsabilidad: Convertir MP4 -> MP3 optimizado para Whisper (16kHz Mono)
@@ -146,6 +148,7 @@ def extract_audio(video_path: str) -> str:
             capture_output=True,
             text=True,
             timeout=_audio_timeout_seconds(),
+            **hidden_process_kwargs(),
         )
         if not audio_path.exists():
             raise FileNotFoundError(f"FFMPEG no generó la salida esperada: {audio_path}")

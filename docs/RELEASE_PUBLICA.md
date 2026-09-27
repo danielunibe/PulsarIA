@@ -28,6 +28,16 @@ gates externos descritos abajo.
 | Next/PostCSS | PASS parcial aislado | Next 16.3.5 y audit 0 demostrados en el experimento; repetir sobre un checkpoint limpio con la estabilización vigente antes de promover |
 | Firma Authenticode | Pendiente externo | Certificado PFX temporal, timestamp server y verificación válida |
 
+La auditoría del 2026-09-27 reconstruyó el NSIS `0.1.0-beta.2` con SHA-256
+`BC9B38F317A22C6DCE9E2EAFD0C7DC78D47D38AE4DC9234E6D7F908D0B91CD0C`
+(687,312,308 bytes) y pasó el smoke de instalación, reinicio, 54/54 recursos y
+preservación de datos. El mismo comando que intentó empaquetar NSIS y MSI
+terminó con error porque Tauri/WiX no acepta `beta.2` como identificador MSI.
+El workflow ahora usa solo NSIS en versiones prerelease y conserva ambos
+instaladores para versiones estables. Este artefacto local aún no está adjunto
+a GitHub Releases; la evidencia y las fases pendientes están en
+[PLAN_REPARACION_PUBLICACION_GRATUITA.md](PLAN_REPARACION_PUBLICACION_GRATUITA.md).
+
 El workflow de release usa la variable protegida `RELEASE_READY`. Si no vale
 `true`, una etiqueta no arranca un job incompleto y no genera notificaciones de
 fallo por secretos ausentes. Sólo debe cambiarse a `true` después de cargar la

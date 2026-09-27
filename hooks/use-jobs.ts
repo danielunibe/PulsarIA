@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { REST_API_BASE } from '@/lib/api-config';
-import { apiFetch } from '@/lib/api-client';
+import { apiFetch, isNativeShell, localApiErrorMessage } from '@/lib/api-client';
 
 export interface JobRecord {
   id: number;
@@ -106,39 +106,6 @@ export async function resolveAssetUrl(localPath: string | undefined): Promise<st
   }
 }
 
-function isNativeShell(): boolean {
-  if (typeof window === 'undefined') return false;
-  return '__TAURI_INTERNALS__' in window
-    || window.location.protocol === 'tauri:'
-    || window.location.hostname === 'tauri.localhost';
-}
-
-function userFacingError(error: unknown, fallback: string): string {
-  const raw = error instanceof Error ? error.message.trim() : String(error ?? '').trim();
-  const normalized = raw.toLowerCase();
-  if (!raw) return fallback;
-
-  if (/failed to fetch|fetch failed|networkerror|network request failed|load failed|econnrefused|connection refused/.test(normalized)) {
-    return 'No pudimos conectar con la biblioteca local. Comprueba que Pulsaria siga ejecutándose y vuelve a intentarlo.';
-  }
-
-  const status = raw.match(/\b([45]\d{2})\b/)?.[1];
-  if (status === '401' || status === '403') {
-    if (!isNativeShell()) {
-      return 'El modo navegador no tiene acceso a la biblioteca local. Abre Pulsaria en su ventana de escritorio.';
-    }
-    return 'La solicitud no fue autorizada por el motor local. Revisa la configuración e inténtalo de nuevo.';
-  }
-  if (status === '429') {
-    return 'El motor local está ocupado. Espera un momento y vuelve a intentarlo.';
-  }
-  if (status && status.startsWith('5')) {
-    return 'El motor local devolvió un error. Revisa Salud y vuelve a intentarlo.';
-  }
-
-  return raw;
-}
-
 async function invokeTauri<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<T>(command, args);
@@ -214,7 +181,7 @@ export function useJobs(): QueueSnapshot & {
       // demo library and to keep the header count honest.
       setJobs([]);
       setReady(false);
-      setError(userFacingError(error, 'No se pudo actualizar la biblioteca local.'));
+      setError(localApiErrorMessage(error, 'No se pudo actualizar la biblioteca local.'));
       throw error;
     } finally {
       setLoading(false);
@@ -311,7 +278,7 @@ jobsRef.current = jobs;
           console.warn('Job refresh after enqueue failed:', refreshError);
         });
       } catch (error) {
-        const reason = userFacingError(error, 'No se pudo enviar el enlace.');
+        const reason = localApiErrorMessage(error, 'No se pudo enviar el enlace.');
         rejected.push({ url: item.url, reason });
         setPending((current) => current.map((candidate) => candidate.clientId === item.clientId
           ? { ...candidate, status: 'retryable', error: reason }
@@ -346,7 +313,7 @@ jobsRef.current = jobs;
       await refresh();
     } catch (error) {
       setPending((current) => current.map((candidate) => candidate.clientId === clientId
-          ? { ...candidate, status: 'retryable', error: userFacingError(error, 'No se pudo enviar el enlace.') }
+          ? { ...candidate, status: 'retryable', error: localApiErrorMessage(error, 'No se pudo enviar el enlace.') }
         : candidate));
     }
   }, [pending, refresh]);

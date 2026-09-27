@@ -40,3 +40,38 @@ export async function apiFetch(
 
   return fetch(input, { ...init, headers });
 }
+
+/** Identifies the trusted desktop shell without granting browser REST access. */
+export function isNativeShell(): boolean {
+  if (typeof window === 'undefined') return false;
+  return '__TAURI_INTERNALS__' in window
+    || window.location.protocol === 'tauri:'
+    || window.location.hostname === 'tauri.localhost';
+}
+
+/** Turns local API/IPC failures into messages that explain the next action. */
+export function localApiErrorMessage(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message.trim() : String(error ?? '').trim();
+  const normalized = raw.toLowerCase();
+  if (!raw) return fallback;
+
+  if (/failed to fetch|fetch failed|networkerror|network request failed|load failed|econnrefused|connection refused/.test(normalized)) {
+    return 'No pudimos conectar con la biblioteca local. Comprueba que Pulsaria siga ejecutándose y vuelve a intentarlo.';
+  }
+
+  const status = raw.match(/\b([45]\d{2})\b/)?.[1];
+  if (status === '401' || status === '403') {
+    if (!isNativeShell()) {
+      return 'El modo navegador no tiene acceso a la biblioteca local. Abre Pulsaria en su ventana de escritorio.';
+    }
+    return 'La solicitud no fue autorizada por el motor local. Revisa la configuración e inténtalo de nuevo.';
+  }
+  if (status === '429') {
+    return 'El motor local está ocupado. Espera un momento y vuelve a intentarlo.';
+  }
+  if (status?.startsWith('5')) {
+    return 'El motor local devolvió un error. Revisa Salud y vuelve a intentarlo.';
+  }
+
+  return raw;
+}

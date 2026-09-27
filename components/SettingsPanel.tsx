@@ -195,6 +195,8 @@ export interface SettingsPanelProps {
     onPageConfigChange?: (config: PageConfig) => void;
     searchMode?: SearchMode;
     onSearchModeChange?: (mode: SearchMode) => void;
+    setupPending?: boolean;
+    onResumeSetup?: () => void;
 }
 
 interface CollectionSource {
@@ -441,6 +443,8 @@ export function SettingsPanel({
     onPageConfigChange,
     searchMode,
     onSearchModeChange,
+    setupPending = false,
+    onResumeSetup,
 }: SettingsPanelProps) {
     const { settings, updateSettings } = useSettings();
     const { locale, setLocale, t } = useI18n();
@@ -1356,6 +1360,8 @@ export function SettingsPanel({
                         processingQuality={processingQuality}
                         setProcessingQuality={setProcessingQuality}
                         processingSetup={processingSetup}
+                        setupPending={setupPending}
+                        onResumeSetup={onResumeSetup}
                         cookiesBrowser={cookiesBrowser}
                         setCookiesBrowser={setCookiesBrowser}
                         runtimeHealth={runtimeHealth}

@@ -9,10 +9,11 @@ import { Sidebar, type GlobalSection } from '@/components/Sidebar';
 import { Header, type SearchMode } from '@/components/Header';
 import { AddLinks } from '@/components/AddLinks';
 import { QueueSection } from '@/components/QueueSection';
-import { NotificationsPopover } from '@/components/NotificationsPopover';
+import { ActivityCenter } from '@/components/ActivityCenter';
 import { PlaylistsPanel } from '@/components/PlaylistsPanel';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { SpotlightSearch } from '@/components/SpotlightSearch';
+import { LibraryBackdrop } from '@/components/LibraryBackdrop';
 
 import { VideoGrid } from '@/components/VideoGrid';
 import { toast } from 'sonner';
@@ -21,10 +22,10 @@ import { FaMagnifyingGlass, FaArrowLeft, FaBrain } from '@/components/icon-libra
 
 import { useSettings } from '@/lib/settings-context';
 import { useI18n } from '@/lib/i18n';
-import { AuroraBackground } from '@/components/AuroraBackground';
 import { generateChatResponse } from '@/lib/local-llm';
 import { generateGeminiChatResponse } from '@/lib/gemini';
-import { useJobs, type JobRecord, isCompletedJob } from '@/hooks/use-jobs';
+import { useJobs, type JobRecord, type SubmitLinksResult, isCompletedJob, isFailedJob } from '@/hooks/use-jobs';
+import type { SourceCollectionRecord } from '@/hooks/usePlaylists';
 import { isTauriRuntime, useProcessingSettings } from '@/hooks/use-processing-settings';
 import { ProcessingSetupModal } from '@/components/ProcessingSetupModal';
 import { LegalConsentModal } from '@/components/LegalConsentModal';
@@ -36,6 +37,17 @@ import type { CinemaVideo, VideoData } from '@/types';
 import { apiFetch } from '@/lib/api-client';
 import { LocalizedErrorBoundary } from '@/components/ErrorBoundary';
 import { ContextMenu, type PulsariaContextMenuAction, type PulsariaContextMenuKind } from '@/components/ContextMenu';
+import { PlaylistPickerDialog } from '@/components/PlaylistPickerDialog';
+import {
+    formatSearchTimestamp,
+    normalizeSearchMode,
+    normalizeUnifiedResponse,
+    searchModeLabel,
+    type QueryContext,
+    type UnifiedSearchRequest,
+    type UnifiedSearchResponse,
+    type UnifiedSearchResultGroup,
+} from '@/lib/unified-search';
 
 type SearchVideoDetails = VideoData & {
     sourceState?: 'local' | 'online' | 'unavailable';
@@ -44,24 +56,10 @@ type SearchVideoDetails = VideoData & {
     protected?: boolean;
 };
 
-const ColorBends = dynamic(
-    () => import('@/components/ColorBends').then((mod) => mod.ColorBends),
-    { ssr: false }
-);
-
 const ExpandedVideoModal = dynamic(
     () => import('@/components/ExpandedVideoModal').then((mod) => mod.ExpandedVideoModal),
     { ssr: false }
 );
-
-interface SemanticSearchResult {
-
-    video_id: number;
-    title: string | null;
-    thumbnail: string | null;
-    matched_text: string;
-    similarity_score: number;
-}
 
 const DEFAULT_PAGE_CONFIG: PageConfig = {
     layout: 'grid',
@@ -78,6 +76,7 @@ interface ContextMenuState {
     y: number;
     kind: PulsariaContextMenuKind;
     videoId?: number;
+    contentId?: number;
 }
 
 function formatJobDuration(value: unknown): string {
@@ -95,6 +94,15 @@ function loadPageConfig(): PageConfig {
         return { ...DEFAULT_PAGE_CONFIG, ...(JSON.parse(saved) as Partial<PageConfig>) };
     } catch {
         return DEFAULT_PAGE_CONFIG;
+    }
+}
+
+function loadSearchModePreference(): SearchMode {
+    if (typeof window === 'undefined') return 'smart';
+    try {
+        return normalizeSearchMode(window.localStorage.getItem('pulsaria.search-mode'));
+    } catch {
+        return 'smart';
     }
 }
 
@@ -117,7 +125,9 @@ export default function Page() {
     const activeTheme = settings.theme || 'chromatic';
     const [activeSection, setActiveSection] = useState<GlobalSection>('home');
     const [homeResetSignal, setHomeResetSignal] = useState(0);
-    const [layersVisible, setLayersVisible] = useState(true);
+    const [focusAddLinksSignal, setFocusAddLinksSignal] = useState(0);
+    const [firstVideoJobId, setFirstVideoJobId] = useState<number | null>(null);
+    const [backgroundVisible, setBackgroundVisible] = useState(true);
     const [legalReviewOpen, setLegalReviewOpen] = useState(false);
     const [activeVideoId, setActiveVideoId] = useState<number | null>(null);
     const [cinemaOpen, setCinemaOpen] = useState(false);
@@ -174,6 +184,8 @@ export default function Page() {
             || j.thumbnail
         );
     });
+    const firstVideoJob = firstVideoJobId === null ? null : jobs.find((job) => job.id === firstVideoJobId) ?? null;
+    const firstVideoReady = firstVideoJob !== null && completedJobs.some((job) => job.id === firstVideoJob.id);
     // Failed/queued records are not library videos. Counting them here made
     // the header say "1 TikTok" while the gallery had no playable content.
     const jobCount = jobsReady
@@ -181,9 +193,13 @@ export default function Page() {
         : 0;
     const activityCount = pending.length + jobs.filter((job) => !['complete', 'completed', 'done'].includes(job.status.toLowerCase())).length;
 
-        const [searchResults, setSearchResults] = useState<SemanticSearchResult[] | null>(null);
-    const [searchMode, setSearchMode] = useState<SearchMode>('literal');
+    const [searchResults, setSearchResults] = useState<UnifiedSearchResultGroup[] | null>(null);
+    const [searchResponse, setSearchResponse] = useState<UnifiedSearchResponse | null>(null);
+    const [searchContext, setSearchContext] = useState<QueryContext | null>(null);
+    const [searchMode, setSearchMode] = useState<SearchMode>('smart');
+    const [searchModeHydrated, setSearchModeHydrated] = useState(false);
     const [searchModeUsed, setSearchModeUsed] = useState<SearchMode | null>(null);
+    const [searchStartTime, setSearchStartTime] = useState<number | null>(null);
     const [searchError, setSearchError] = useState<string | null>(null);
     const [aiAnswer, setAiAnswer] = useState<string | null>(null);
     const [aiError, setAiError] = useState<string | null>(null);
@@ -197,8 +213,10 @@ export default function Page() {
     const [spotlightQuery, setSpotlightQuery] = useState('');
 
     const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
+    const [selectedSourceCollection, setSelectedSourceCollection] = useState<SourceCollectionRecord | null>(null);
     const [pageConfig, setPageConfig] = useState<PageConfig>(loadPageConfig);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+    const [playlistPickerTarget, setPlaylistPickerTarget] = useState<{ jobId?: number; contentId?: number } | null>(null);
 
     const searchRequestRef = useRef(0);
     const scrollY = useScrollParallax(0.2);
@@ -210,6 +228,20 @@ export default function Page() {
             // El almacenamiento puede estar deshabilitado en una WebView o navegador privado.
         }
     }, [pageConfig]);
+
+    useEffect(() => {
+        setSearchMode(loadSearchModePreference());
+        setSearchModeHydrated(true);
+    }, []);
+
+    useEffect(() => {
+        if (!searchModeHydrated) return;
+        try {
+            window.localStorage.setItem('pulsaria.search-mode', searchMode);
+        } catch {
+            // Search remains usable when preference storage is unavailable.
+        }
+    }, [searchMode, searchModeHydrated]);
 
         useEffect(() => {
         (async () => {
@@ -263,11 +295,37 @@ export default function Page() {
 
     const handlePlaylistSelect = useCallback((id: number | null) => {
         setSelectedPlaylistId(id);
+        setSelectedSourceCollection(null);
         setActiveVideoId(null);
         setCinemaOpen(false);
         setCinemaPhase('idle');
         setCinemaVideos([]);
         setSearchResults(null);
+        setSearchResponse(null);
+        setSearchContext(null);
+        setSearchStartTime(null);
+        setSearchModeUsed(null);
+        setSearchError(null);
+        setAiAnswer(null);
+        setAiError(null);
+        setLastSearchQuery('');
+        setGeminiAnswer(null);
+        setGeminiError(null);
+        setGeminiLoading(false);
+    }, []);
+
+    const handleSourceCollectionSelect = useCallback((collection: SourceCollectionRecord | null) => {
+        setSelectedSourceCollection(collection);
+        setSelectedPlaylistId(null);
+        setActiveVideoId(null);
+        setCinemaOpen(false);
+        setCinemaPhase('idle');
+        setCinemaVideos([]);
+        setSearchResults(null);
+        setSearchResponse(null);
+        setSearchContext(null);
+        setSearchStartTime(null);
+        setSearchModeUsed(null);
         setSearchError(null);
         setAiAnswer(null);
         setAiError(null);
@@ -318,18 +376,19 @@ export default function Page() {
         setCinemaInitialVideoId(videoId ?? null);
         setCinemaPhase('entering');
         setCinemaOpen(true);
+        const transitionDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 760;
         cinemaTransitionTimerRef.current = setTimeout(() => {
             setCinemaPhase('open');
             cinemaTransitionTimerRef.current = null;
-        }, 760);
+        }, transitionDuration);
         void enterCinemaWindowFullscreen();
     }, [canOpenCinema, cinemaOpen, cinemaPhase, enterCinemaWindowFullscreen]);
 
-    const openContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>, kind: PulsariaContextMenuKind, videoId?: number) => {
+    const openContextMenu = useCallback((event: ReactMouseEvent<HTMLElement>, kind: PulsariaContextMenuKind, videoId?: number, contentId?: number) => {
         const target = event.target;
         if (target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return;
         event.preventDefault();
-        setContextMenu({ x: event.clientX, y: event.clientY, kind, videoId });
+        setContextMenu({ x: event.clientX, y: event.clientY, kind, videoId, contentId });
     }, []);
 
     const closeContextMenu = useCallback(() => setContextMenu(null), []);
@@ -344,6 +403,7 @@ export default function Page() {
                 if (selected.videoId !== undefined) {
                     setActiveSection('home');
                     setSelectedPlaylistId(null);
+                    setSelectedSourceCollection(null);
                     setActiveVideoId(selected.videoId);
                 }
                 break;
@@ -362,6 +422,17 @@ export default function Page() {
                     .catch(() => toast.error('No se pudo copiar el enlace'));
                 break;
             }
+            case 'add-to-playlist':
+                if (selected.contentId !== undefined) {
+                    setPlaylistPickerTarget({ contentId: selected.contentId });
+                    break;
+                }
+                if (selected.videoId === undefined || selected.videoId < 0) {
+                    toast.info('Este contenido todavía no tiene una identidad agregable.');
+                    break;
+                }
+                setPlaylistPickerTarget({ jobId: selected.videoId });
+                break;
             case 'hide-demos':
                 updateSettings({ showDemoVideos: false });
                 toast.info('Ejemplos DEMO ocultos');
@@ -382,13 +453,14 @@ export default function Page() {
         if (cinemaPhase === 'exiting') return;
         if (cinemaTransitionTimerRef.current) clearTimeout(cinemaTransitionTimerRef.current);
         setCinemaPhase('exiting');
+        const transitionDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 460;
         cinemaTransitionTimerRef.current = setTimeout(() => {
             setCinemaOpen(false);
             setCinemaPhase('idle');
             setCinemaInitialVideoId(null);
             cinemaTransitionTimerRef.current = null;
             void restoreCinemaWindow();
-        }, 460);
+        }, transitionDuration);
     }, [cinemaPhase, restoreCinemaWindow]);
 
     useEffect(() => () => {
@@ -410,16 +482,19 @@ export default function Page() {
         const normalizedQuery = query.trim();
         if (!normalizedQuery) {
             setSearchResults(null);
+            setSearchResponse(null);
+            setSearchContext(null);
             setAiAnswer(null);
             setAiError(null);
             setLastSearchQuery('');
             setGeminiAnswer(null);
             setGeminiError(null);
             setIsSearching(false);
+            setSearchStartTime(null);
             return;
         }
-                setIsSearching(true);
 
+        setIsSearching(true);
         setSearchError(null);
         setAiAnswer(null);
         setAiError(null);
@@ -428,65 +503,65 @@ export default function Page() {
         setGeminiError(null);
 
         try {
-            let results: SemanticSearchResult[];
-            const isTauri = typeof window !== 'undefined' && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+            const request: UnifiedSearchRequest = {
+                query: normalizedQuery,
+                mode: normalizeSearchMode(requestedMode),
+                limit: 10,
+                context: searchContext,
+            };
+            let response: UnifiedSearchResponse;
+            const isTauri = typeof window !== 'undefined'
+                && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
             if (isTauri) {
                 const { invoke } = await import('@tauri-apps/api/core');
-                results = requestedMode === 'literal'
-                    ? await invoke<SemanticSearchResult[]>('search_literal_transcripts', { query: normalizedQuery, limit: 10 })
-                    : await invoke<SemanticSearchResult[]>('search_transcripts', { query: normalizedQuery, limit: 10 });
+                response = await invoke<UnifiedSearchResponse>('search_library', { request });
             } else {
                 const { REST_API_BASE } = await import('@/lib/api-config');
-                const endpoint = requestedMode === 'literal'
-                    ? `${REST_API_BASE}/search/literal`
-                    : `${REST_API_BASE}/search`;
-                const response = await apiFetch(endpoint, {
+                const rawResponse = await apiFetch(`${REST_API_BASE}/search/unified`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: normalizedQuery, limit: 10 }),
+                    body: JSON.stringify(request),
                 });
-                if (!response.ok) throw new Error(`Search failed with status ${response.status}`);
-                const payload = await response.json() as { results?: SemanticSearchResult[] };
-                results = payload.results ?? [];
+                if (!rawResponse.ok) throw new Error(`Search failed with status ${rawResponse.status}`);
+                response = normalizeUnifiedResponse(await rawResponse.json() as Partial<UnifiedSearchResponse>);
             }
-                        if (requestId !== searchRequestRef.current) return;
-            setSearchResults(results);
-            setSearchModeUsed(requestedMode);
+            const normalizedResponse = normalizeUnifiedResponse(response);
+            if (requestId !== searchRequestRef.current) return;
+            setSearchResponse(normalizedResponse);
+            setSearchResults(normalizedResponse.results);
+            setSearchContext(normalizedResponse.context);
+            setSearchModeUsed(normalizedResponse.mode);
 
-            // Synthesize intelligent response with the local model
+            const results = normalizedResponse.results;
+            const synthesisContext = results.slice(0, 5).map((result) => (
+                `Título: ${result.title || `Video #${result.jobId}`}\nContenido del fragmento: ${result.primaryMoment.excerpt}`
+            ));
+            generateChatResponse(normalizedQuery, synthesisContext).then((answer) => {
+                if (requestId === searchRequestRef.current) applyAiResponse(answer);
+            }).catch((error) => {
+                if (requestId === searchRequestRef.current) setAiError(String(error));
+            });
 
-            if (results && results.length > 0) {
-                const context = results.slice(0, 5).map(r => `Título: ${r.title || 'Video'}\nContenido del fragmento: ${r.matched_text}`);
-                                generateChatResponse(normalizedQuery, context).then(ans => {
-                    if (requestId === searchRequestRef.current) applyAiResponse(ans);
-                }).catch((error) => {
-                    if (requestId === searchRequestRef.current) setAiError(String(error));
+            if (results.length > 0) {
+                const degraded = !normalizedResponse.capabilities.vector && normalizedResponse.mode !== 'exact';
+                toast.success(`Búsqueda ${searchModeLabel(normalizedResponse.mode)} completada: ${results.length} videos`, {
+                    description: degraded
+                        ? 'Coincidencias literales y estructuradas disponibles; el índice conceptual no está activo.'
+                        : 'Resultados agrupados por video con momentos accionables.',
                 });
-
-                                toast.success(`Búsqueda ${requestedMode === 'literal' ? 'literal' : 'semántica'} completada: ${results.length} coincidencias`, {
-                    description: `Similitud máxima: ${(results[0].similarity_score * 100).toFixed(1)}%`
-                });
-
             } else {
-                                    generateChatResponse(normalizedQuery, []).then(ans => {
-                        if (requestId === searchRequestRef.current) applyAiResponse(ans);
-                    }).catch((error) => {
-                        if (requestId === searchRequestRef.current) setAiError(String(error));
-                    });
-
-                toast.info("Sin coincidencias en transcripciones");
+                toast.info('No se encontraron recuerdos con esos criterios');
             }
-                } catch (error) {
-            console.error("Search failed:", error);
+        } catch (error) {
+            console.error('Search failed:', error);
             if (requestId === searchRequestRef.current) {
                 setSearchResults([]);
+                setSearchResponse(null);
                 setSearchError(error instanceof Error ? error.message : String(error));
             }
         } finally {
-
             if (requestId === searchRequestRef.current) setIsSearching(false);
         }
-
     };
 
     const handleGeminiSynthesis = useCallback(async () => {
@@ -496,7 +571,7 @@ export default function Page() {
         setGeminiError(null);
         try {
             const context = (searchResults ?? []).slice(0, 5).map((result) => (
-                `Título: ${result.title || `Video #${result.video_id}`}\nContenido del fragmento: ${result.matched_text}`
+                `Título: ${result.title || `Video #${result.jobId}`}\nContenido del fragmento: ${result.primaryMoment.excerpt}`
             ));
             const answer = await generateGeminiChatResponse(lastSearchQuery, context);
             setGeminiAnswer(answer);
@@ -510,6 +585,8 @@ export default function Page() {
     const handleClearSearch = useCallback(() => {
         searchRequestRef.current += 1;
         setSearchResults(null);
+        setSearchResponse(null);
+        setSearchContext(null);
         setSearchModeUsed(null);
         setSearchError(null);
         setAiAnswer(null);
@@ -521,6 +598,7 @@ export default function Page() {
         setIsSearching(false);
         setSpotlightQuery('');
         setActiveVideoId(null);
+        setSearchStartTime(null);
     }, []);
 
     const handleOpenSpotlight = useCallback(() => {
@@ -529,6 +607,9 @@ export default function Page() {
 
     const handleCloseSpotlight = useCallback(() => {
         setSpotlightOpen(false);
+        // A closed search starts a fresh refinement session. Results can stay
+        // visible in the main view, but the next query must not inherit it.
+        setSearchContext(null);
     }, []);
 
     const handleSpotlightQueryChange = useCallback((query: string) => {
@@ -555,21 +636,38 @@ export default function Page() {
         handleClearSearch();
         if (section !== 'library') {
             setSelectedPlaylistId(null);
+            setSelectedSourceCollection(null);
         }
     }, [handleClearSearch, handleReturnHome]);
 
-    const handleSearchResultClick = useCallback((result: SemanticSearchResult) => {
-        const job = jobs.find((candidate) => Number(candidate.id) === result.video_id);
+    const enqueueHomeLinks = useCallback(async (urls: string[]): Promise<SubmitLinksResult> => {
+        const result = await enqueueLinks(urls);
+        if (firstVideoJobId === null) {
+            const acceptedJobId = result.accepted.find((item) => typeof item.jobId === 'number')?.jobId;
+            if (typeof acceptedJobId === 'number') setFirstVideoJobId(acceptedJobId);
+        }
+        return result;
+    }, [enqueueLinks, firstVideoJobId]);
+
+    const dismissProcessingSetup = processingSetup.dismissSetup;
+    const continueToFirstVideo = useCallback(() => {
+        dismissProcessingSetup();
+        handleGlobalNavigate('home');
+        setFocusAddLinksSignal((current) => current + 1);
+    }, [dismissProcessingSetup, handleGlobalNavigate]);
+
+    const handleSearchResultClick = useCallback((result: UnifiedSearchResultGroup) => {
+        const job = jobs.find((candidate) => Number(candidate.id) === result.jobId);
         if (!job) {
             toast.error('El video ya no está disponible', {
-                description: `No se encontró el job #${result.video_id} en la biblioteca local.`,
+                description: `No se encontró el job #${result.jobId} en la biblioteca local.`,
             });
             return;
         }
         if (isTauriRuntime()) {
             void import('@tauri-apps/api/core')
                 .then(({ invoke }) => invoke('record_media_access', {
-                    jobId: result.video_id,
+                    jobId: result.jobId,
                     accessKind: 'search',
                 }))
                 .catch((error) => {
@@ -578,7 +676,8 @@ export default function Page() {
                     console.warn('Could not record search media access:', error);
                 });
         }
-        setActiveVideoId(result.video_id);
+        setSearchStartTime(result.primaryMoment.startTime ?? null);
+        setActiveVideoId(result.jobId);
     }, [jobs]);
 
     const [resolvedSearchVideo, setResolvedSearchVideo] = useState<SearchVideoDetails | null>(null);
@@ -597,13 +696,13 @@ export default function Page() {
     useEffect(() => {
         let cancelled = false;
         async function resolveVideo() {
-            const result = searchResults?.find((r) => r.video_id === activeVideoId);
+            const result = searchResults?.find((r) => r.jobId === activeVideoId);
             const job = jobs.find((j) => Number(j.id) === activeVideoId);
             if (!result || !job) {
                 if (!cancelled) setResolvedSearchVideo(null);
                 return;
             }
-            const thumb = await toAssetUrl(job.poster_path || job.thumbnail) || result.thumbnail || '';
+            const thumb = await toAssetUrl(job.poster_path || job.thumbnail) || result.primaryMoment.matchThumbnail || result.thumbnail || '';
             const videoSrc = await toAssetUrl(job.video_path) || '';
             if (!cancelled) {
                 setResolvedSearchVideo({
@@ -663,97 +762,6 @@ export default function Page() {
                 minHeight: '640px'
             }}
         >
-            {/* Background Theme Renderer */}
-            {activeTheme === 'chromatic' && (
-                <div
-                    className="fixed inset-[-10%] w-[120%] h-[120%] z-[-10] pointer-events-none bg-[#0a0a0a]"
-                    style={{
-                        transform: `translateY(${-scrollY}px) scale(1.1)`,
-                        transition: 'transform 0.2s cubic-bezier(0.22, 1, 0.36, 1)'
-                    }}
-                >
-                    <ColorBends
-                        colors={["#ff5c7a", "#8a5cff", "#00ffd1"]}
-                        rotation={0}
-                        speed={0.2}
-                        scale={1}
-                        frequency={1}
-                        warpStrength={1}
-                        mouseInfluence={0.5}
-                        parallax={0.25}
-                        noise={0.1}
-                        transparent={true}
-                        autoRotate={0}
-                    />
-                </div>
-            )}
-
-            {activeTheme === 'carbon' && (
-                <div className="fixed inset-0 z-[-10] pointer-events-none overflow-hidden bg-[#09090b]">
-                    {/* Ultra-smooth Luxury Charcoal Gradient Layers */}
-                    <div
-                        className="absolute inset-0"
-                        style={{
-                            backgroundImage: `
-                                radial-gradient(ellipse 120% 80% at 20% 10%, rgba(32, 32, 36, 0.70) 0%, transparent 60%),
-                                radial-gradient(ellipse 100% 70% at 80% 90%, rgba(20, 20, 24, 0.85) 0%, transparent 60%),
-                                radial-gradient(ellipse 80% 80% at 50% 50%, rgba(14, 14, 16, 0.95) 0%, #070708 100%)
-                            `,
-                        }}
-                    />
-                    {/* Deep Atmospheric Vignette */}
-                    <div
-                        className="absolute inset-0"
-                        style={{
-                            background: 'radial-gradient(ellipse 90% 85% at 50% 50%, transparent 40%, rgba(5, 5, 6, 0.88) 100%)'
-                        }}
-                    />
-                </div>
-            )}
-
-            {activeTheme === 'aurora' && <AuroraBackground />}
-
-            {activeTheme === 'oled' && (
-                <div className="fixed inset-0 z-[-10] pointer-events-none bg-[#010103]">
-                    <div
-                        className="absolute inset-0"
-                        style={{
-                            background: 'radial-gradient(ellipse 60% 40% at 50% 0%, rgba(255,255,255,0.02) 0%, transparent 70%)'
-                        }}
-                    />
-                </div>
-            )}
-
-            {activeTheme === 'cyberpunk' && (
-                <div className="fixed inset-0 z-[-10] pointer-events-none bg-[#080512]">
-                    <div
-                        className="absolute inset-0"
-                        style={{
-                            backgroundImage: `
-                                radial-gradient(ellipse 65% 55% at 15% 20%, rgba(168,85,247,0.2) 0%, transparent 55%),
-                                radial-gradient(ellipse 70% 60% at 85% 80%, rgba(236,72,153,0.18) 0%, transparent 55%),
-                                radial-gradient(ellipse 50% 40% at 50% 60%, rgba(37,244,238,0.12) 0%, transparent 60%)
-                            `,
-                        }}
-                    />
-                </div>
-            )}
-
-            {activeTheme === 'solar' && (
-                <div className="fixed inset-0 z-[-10] pointer-events-none bg-[#0d0705]">
-                    <div
-                        className="absolute inset-0"
-                        style={{
-                            backgroundImage: `
-                                radial-gradient(ellipse 70% 60% at 20% 20%, rgba(234, 88, 12, 0.22) 0%, transparent 60%),
-                                radial-gradient(ellipse 65% 55% at 85% 85%, rgba(245, 158, 11, 0.18) 0%, transparent 55%),
-                                radial-gradient(ellipse 80% 70% at 50% 50%, rgba(69, 10, 10, 0.28) 0%, #080403 100%)
-                            `,
-                        }}
-                    />
-                </div>
-            )}
-
             {/* Desenfoque progresivo inferior: difumina el contenido detrás sin
                 dibujar una línea rígida que recorte la última fila. */}
             <div aria-hidden="true" className="library-bottom-blur" />
@@ -769,8 +777,6 @@ export default function Page() {
                     onOpenSearch={handleOpenSpotlight}
                     onOpenCinema={handleOpenCinema}
                     canOpenCinema={canOpenCinema}
-                    layersVisible={layersVisible}
-                    onToggleLayers={() => setLayersVisible((visible) => !visible)}
                 />
 
                 {/* Main Content Area */}
@@ -783,23 +789,15 @@ export default function Page() {
                     isLoading={jobsLoading}
                     onOpenSearch={handleOpenSpotlight}
                     showTikTokPill={settings.showTikTokPill}
+                    backgroundVisible={backgroundVisible}
+                    onToggleBackground={() => setBackgroundVisible((visible) => !visible)}
+                    showDemoVideos={settings.showDemoVideos}
+                    onToggleDemoVideos={() => updateSettings({ showDemoVideos: !settings.showDemoVideos })}
+                    onToggleTikTokPill={() => updateSettings({ showTikTokPill: !settings.showTikTokPill })}
+                    pageConfig={pageConfig}
+                    onPageConfigChange={handlePageConfigChange}
                     onContextMenu={(event) => openContextMenu(event, 'shell')}
                 />
-
-                {!jobsLoading && !jobsReady && (
-                    <div className="flex justify-center px-6 pt-3">
-                        <div role="alert" className="flex w-full max-w-4xl items-center justify-center gap-4 rounded-full border border-[#fe2c55]/25 bg-[#fe2c55]/[0.08] px-5 py-2.5 text-center text-xs text-white/70 shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl max-sm:flex-col max-sm:gap-2">
-                            <span className="min-w-0 truncate">{jobsError || 'La biblioteca local no está disponible en este momento.'}</span>
-                            <button
-                                type="button"
-                                onClick={() => void refreshJobs().catch((error) => console.warn('Manual job refresh failed:', error))}
-                                className="shrink-0 font-bold uppercase tracking-wider text-white/80 transition-colors hover:text-white"
-                            >
-                                Reintentar
-                            </button>
-                        </div>
-                    </div>
-                )}
 
                 {isSearching ? (
                     <div className="w-full h-full flex items-center justify-center p-8">
@@ -920,82 +918,135 @@ export default function Page() {
                             </div>
                         )}
 
-                        {/* Matched Video Fragments List */}
+                        {/* Resultados agrupados por video con provenance y momentos accionables */}
                         <div className="flex flex-col gap-3">
-                            <span className="text-[10px] font-black uppercase tracking-widest text-white/40 px-1">
-                                Coincidencias en Videos ({searchResults?.length || 0})
-                            </span>
+                            <div className="flex items-center justify-between px-1">
+                                <span className="text-[10px] font-black uppercase tracking-widest text-white/40">
+                                    Recuerdos encontrados ({searchResults?.length || 0})
+                                </span>
+                                {searchModeUsed && (
+                                    <span className="rounded-full bg-white/[0.05] px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-white/45">
+                                        {searchModeLabel(searchModeUsed)}
+                                    </span>
+                                )}
+                            </div>
+                            {searchResponse && !searchResponse.capabilities.vector && searchModeUsed !== 'exact' && (
+                                <p className="rounded-xl border border-[#f6c453]/20 bg-[#f6c453]/[0.06] px-3 py-2 text-[10px] leading-relaxed text-[#f5d98c]">
+                                    El índice conceptual no está disponible; mostramos coincidencias literales y estructuradas sin convertirlo en un error global.
+                                </p>
+                            )}
                             {searchResults && searchResults.map((result, idx) => (
-                                                                <button
+                                <button
                                     type="button"
-                                    key={idx}
+                                    key={`${result.jobId}-${idx}`}
                                     onClick={() => handleSearchResultClick(result)}
-                                    className="w-full flex items-start gap-4 p-4 rounded-2xl cursor-pointer group transition-all duration-300 relative overflow-hidden bg-black/40 border border-white/10 hover:border-[#25f4ee]/40 hover:shadow-[0_10px_35px_rgba(37,244,238,0.1)] text-left"
+                                    className="group relative flex w-full items-start gap-4 overflow-hidden rounded-2xl border border-white/10 bg-black/40 p-4 text-left transition-all duration-300 hover:border-[#25f4ee]/40 hover:shadow-[0_10px_35px_rgba(37,244,238,0.1)]"
                                 >
-
-                                    <div className="w-24 h-36 rounded-xl overflow-hidden shrink-0 shadow-lg border border-white/10 relative bg-black">
-                                                                                <Image
-                                            src={result.thumbnail || '/pulsaria-icon.png'}
+                                    <div className="relative h-36 w-24 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-black shadow-lg">
+                                        <Image
+                                            src={result.primaryMoment.matchThumbnail || result.thumbnail || '/pulsaria-icon.png'}
                                             alt={result.title || 'Video'}
                                             fill
                                             unoptimized
                                             sizes="96px"
-                                            className="object-cover group-hover:scale-105 transition-transform duration-500"
+                                            className="object-cover transition-transform duration-500 group-hover:scale-105"
                                         />
-
                                     </div>
-                                    <div className="flex-1 min-w-0 py-1">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <h3 className="font-bold text-white text-base truncate max-w-[70%]">
-                                                {result.title || `Video #${result.video_id}`}
+                                    <div className="min-w-0 flex-1 py-1">
+                                        <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                                            <h3 className="max-w-[70%] truncate text-base font-bold text-white">
+                                                {result.title || `Video #${result.jobId}`}
                                             </h3>
-                                            <span className="text-xs font-black tracking-wider text-[#25f4ee] px-2.5 py-1 rounded-lg bg-[#25f4ee]/10 border border-[#25f4ee]/30 font-mono shadow-[0_0_10px_rgba(37,244,238,0.15)]">
-                                                SIMILITUD {(result.similarity_score * 100).toFixed(1)}%
+                                            <span className="rounded-lg border border-[#25f4ee]/25 bg-[#25f4ee]/[0.08] px-2 py-1 text-[9px] font-black uppercase tracking-wider text-[#7df8ef]">
+                                                {formatSearchTimestamp(result.primaryMoment.startTime) || 'Ficha'}
                                             </span>
                                         </div>
-                                        <div className="mt-2">
-                                            <p className="text-xs text-white/70 leading-relaxed font-medium line-clamp-3 bg-white/[0.02] p-2.5 rounded-xl border border-white/5">
-                                                                                                «... {result.matched_text} ...»
-
-                                            </p>
+                                        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                                            {result.provenance.map((source) => (
+                                                <span key={source.representation} className="rounded-md border border-white/[0.10] bg-white/[0.04] px-1.5 py-1 text-[9px] font-bold text-white/55">
+                                                    {source.label}
+                                                </span>
+                                            ))}
+                                            {result.relationshipBadges.map((badge) => (
+                                                <span key={badge} className="rounded-md border border-[#8a5cff]/25 bg-[#8a5cff]/[0.08] px-1.5 py-1 text-[9px] font-bold text-[#c5b4ff]">
+                                                    {badge}
+                                                </span>
+                                            ))}
                                         </div>
+                                        <p className="line-clamp-3 rounded-xl border border-white/5 bg-white/[0.02] p-2.5 text-xs font-medium leading-relaxed text-white/70">
+                                            «… {result.primaryMoment.excerpt} …»
+                                        </p>
+                                        {result.moments.length > 1 && (
+                                            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[9px] font-mono font-bold text-white/45">
+                                                <span className="mr-1 uppercase tracking-wider text-white/30">Otros momentos</span>
+                                                {result.moments.slice(0, 3).map((moment) => (
+                                                    <span key={moment.unitId} className="rounded-md bg-white/[0.06] px-1.5 py-1">
+                                                        {formatSearchTimestamp(moment.startTime) || '—'}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
-                                                                </button>
+                                </button>
                             ))}
 
-                                                        {searchResults && searchResults.length === 0 && !searchError && !aiAnswer && !aiError && (
-
-                                <div className="text-center py-20 text-white/40 bg-black/30 rounded-3xl border border-white/5 flex flex-col items-center gap-3">
+                            {searchResults && searchResults.length === 0 && !searchError && !aiAnswer && !aiError && (
+                                <div className="flex flex-col items-center gap-3 rounded-3xl border border-white/5 bg-black/30 py-20 text-center text-white/40">
                                     <FaMagnifyingGlass size={32} className="text-white/20" />
-                                    <span>No se encontraron fragmentos semánticos para esta consulta.</span>
-                                                                        <button
-                                        type="button"
-                                        onClick={handleClearSearch}
-                                        className="text-xs text-[#25f4ee] hover:underline"
-
-                                    >
+                                    <span>No se encontraron recuerdos con esos criterios.</span>
+                                    <button type="button" onClick={handleClearSearch} className="text-xs text-[#25f4ee] hover:underline">
                                         Limpiar búsqueda
                                     </button>
                                 </div>
                             )}
-                                                </div>
+                        </div>
                         {resolvedSearchVideo && (
                             <ExpandedVideoModal
                                 key={`search-expanded-video-modal-${resolvedSearchVideo.id}`}
                                 video={resolvedSearchVideo}
+                                initialTime={searchStartTime ?? undefined}
                                 onClose={() => setActiveVideoId(null)}
                             />
                         )}
                     </div>
                 ) : (
-                    <div className="pulsaria-workspace">
+                    <div className={`pulsaria-workspace${activeSection === 'settings' ? ' pulsaria-workspace--settings' : ''}`}>
                         <aside className="pulsaria-context-pane" aria-label="Panel contextual">
                             {activeSection === 'home' && (
                                 <div className="pulsaria-context-pane__scroll custom-scrollbar">
+                                    {runtimeResolved && nativeShell && processingSetup.needsSetup && (
+                                        <div className="mx-3 mt-3 rounded-2xl bg-white/[0.045] px-4 py-3 shadow-[0_12px_32px_rgba(0,0,0,0.18)] backdrop-blur-xl">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0">
+                                                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#25f4ee]">{t('onboardingResume')}</p>
+                                                    <p className="mt-1 text-[11px] leading-relaxed text-white/55">{t('onboardingResumeDescription')}</p>
+                                                </div>
+                                                <button type="button" onClick={processingSetup.resumeSetup} className="shrink-0 rounded-full bg-[#25f4ee]/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[#25f4ee] transition hover:bg-[#25f4ee]/16 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#25f4ee]">
+                                                    {t('onboardingResume')}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {firstVideoJobId !== null && (
+                                        <p role="status" className="mx-3 mt-3 rounded-2xl bg-[#8a5cff]/[0.08] px-4 py-3 text-[11px] leading-relaxed text-white/70 shadow-[0_12px_32px_rgba(0,0,0,0.16)] backdrop-blur-xl">
+                                            {firstVideoReady
+                                                ? t('onboardingFirstVideoReady')
+                                                : firstVideoJob && isFailedJob(firstVideoJob)
+                                                    ? t('onboardingFirstVideoFailed')
+                                                    : firstVideoJob && isCompletedJob(firstVideoJob)
+                                                        ? t('onboardingFirstVideoAwaitLibrary')
+                                                        : firstVideoJob
+                                                            ? t('onboardingFirstVideoProcessing')
+                                                            : t('onboardingFirstVideoAccepted')}
+                                        </p>
+                                    )}
                                     <AddLinks
                                         mode="ingest"
-                                        onSubmitLinks={enqueueLinks}
+                                        onSubmitLinks={enqueueHomeLinks}
                                         homeResetSignal={homeResetSignal}
+                                        focusSignal={focusAddLinksSignal}
+                                        runtimeReady={!nativeShell || processingSetup.runtimeReady}
+                                        runtimeIssue={!nativeShell || processingSetup.runtimeReady ? null : t('onboardingIngestUnavailable')}
                                     />
                                     <QueueSection
                                         jobs={jobs}
@@ -1015,15 +1066,21 @@ export default function Page() {
 
                             {activeSection === 'activity' && (
                                 <div id="pulsaria-activity" className="pulsaria-context-pane__scroll custom-scrollbar">
-                                    <NotificationsPopover
+                                    <ActivityCenter
                                         jobs={jobs}
                                         pending={pending}
+                                        loading={jobsLoading}
+                                        ready={jobsReady}
+                                        error={jobsError}
                                         onRetryJob={retryJob}
                                         onRetryPending={retryPending}
+                                        onRefresh={() => void refreshJobs()}
+                                        globalProgress={globalProgress}
                                         onOpenLibrary={(jobId) => {
                                             handleClearSearch();
                                             setActiveSection('home');
                                             setSelectedPlaylistId(null);
+                                            setSelectedSourceCollection(null);
                                             setActiveVideoId(jobId);
                                         }}
                                     />
@@ -1035,6 +1092,8 @@ export default function Page() {
                                     <PlaylistsPanel
                                         onPlaylistSelect={handlePlaylistSelect}
                                         selectedPlaylistId={selectedPlaylistId}
+                                        onSourceCollectionSelect={handleSourceCollectionSelect}
+                                        selectedSourceCollection={selectedSourceCollection}
                                     />
                                 </div>
                             )}
@@ -1051,27 +1110,55 @@ export default function Page() {
                                         onSearchModeChange={setSearchMode}
                                         onClose={() => handleGlobalNavigate('home')}
                                         onReviewConsent={() => setLegalReviewOpen(true)}
+                                        setupPending={nativeShell && processingSetup.needsSetup}
+                                        onResumeSetup={processingSetup.resumeSetup}
                                     />
                                 </div>
                             )}
                         </aside>
 
                         <section className="pulsaria-library-stage" aria-label="Biblioteca de videos">
-                            {selectedPlaylistId !== null && (
+                            <div className="pulsaria-library-stage__content">
+                            {!jobsLoading && !jobsReady && (
+                                <div className="pulsaria-window-header__status-row" role="alert">
+                                    <div className="pulsaria-window-header__status">
+                                        <span className="pulsaria-window-header__status-message">
+                                            {jobsError || 'No pudimos conectar con la biblioteca local. Comprueba que Pulsaria siga ejecutándose y vuelve a intentarlo.'}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => void refreshJobs().catch((error) => console.warn('Manual job refresh failed:', error))}
+                                            className="pulsaria-window-header__status-action"
+                                        >
+                                            Reintentar
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            {(selectedPlaylistId !== null || selectedSourceCollection !== null) && (
                                 <div className="mx-8 mt-2 mb-1 px-4 py-3 rounded-2xl border border-[#8a5cff]/25 bg-[#8a5cff]/10 flex items-center justify-between gap-4">
                                     <div className="flex items-center gap-3 min-w-0">
                                         <span className="w-2 h-2 rounded-full bg-[#8a5cff] shadow-[0_0_10px_#8a5cff] shrink-0" />
-                                        <span className="text-xs text-white/80 truncate">Mostrando los videos de la playlist seleccionada</span>
+                                        <span className="text-xs text-white/80 truncate">
+                                            {selectedSourceCollection
+                                                ? `Mostrando ${selectedSourceCollection.name} · ${selectedSourceCollection.channel_kind}`
+                                                : 'Mostrando los videos de la playlist seleccionada'}
+                                        </span>
                                     </div>
                                     <button
                                         type="button"
-                                        onClick={() => handlePlaylistSelect(null)}
+                                        onClick={() => {
+                                            handlePlaylistSelect(null);
+                                            handleSourceCollectionSelect(null);
+                                        }}
                                         className="text-[10px] font-bold uppercase tracking-wider text-[#25f4ee] hover:text-white transition-colors shrink-0"
                                     >
                                         Ver biblioteca completa
                                     </button>
                                 </div>
                             )}
+                            <div className="pulsaria-library-card-field">
+                            {backgroundVisible && <LibraryBackdrop theme={activeTheme} scrollY={scrollY} />}
                             <LocalizedErrorBoundary>
                                 <VideoGrid
                                     activeVideoId={activeVideoId}
@@ -1079,6 +1166,10 @@ export default function Page() {
                                     onVideoPlayStop={handlePlayStop}
                                     sortKey={pageConfig.sortKey}
                                     playlistId={selectedPlaylistId ?? undefined}
+                                    sourceCollection={selectedSourceCollection ? {
+                                        sourceId: selectedSourceCollection.profile_source_id,
+                                        channelKind: selectedSourceCollection.channel_kind,
+                                    } : undefined}
                                     layout={pageConfig.layout}
                                     columns={pageConfig.columns}
                                     showOnlyCompleted={pageConfig.showOnlyCompleted}
@@ -1092,9 +1183,16 @@ export default function Page() {
                                     onOpenCinemaAt={handleOpenCinema}
                                     showDemoVideos={settings.showDemoVideos}
                                     hoverAutoplay={settings.hoverAutoplay}
-                                    onContextMenu={(event, video) => openContextMenu(event, 'isDemo' in video && video.isDemo ? 'demo-card' : 'real-card', video.id)}
+                                    onContextMenu={(event, video) => openContextMenu(
+                                        event,
+                                        'isDemo' in video && video.isDemo ? 'demo-card' : 'real-card',
+                                        video.id,
+                                        'content_id' in video ? video.content_id : undefined,
+                                    )}
                                 />
                             </LocalizedErrorBoundary>
+                            </div>
+                            </div>
                         </section>
                     </div>
                 )}
@@ -1153,6 +1251,8 @@ export default function Page() {
                     processing={processingSetup.processing}
                     modelStatus={processingSetup.modelStatus}
                     modelSetupState={processingSetup.modelSetupState}
+                    runtimePreflight={processingSetup.runtimePreflight}
+                    runtimeTimedOut={processingSetup.runtimeTimedOut}
                     loading={processingSetup.loading}
                     initializationError={processingSetup.initializationError}
                     preparationError={processingSetup.preparationError}
@@ -1166,6 +1266,8 @@ export default function Page() {
                     onRetryModel={processingSetup.retryModel}
                     onRepairModel={processingSetup.repairModel}
                     onDismiss={processingSetup.dismissSetup}
+                    onPostpone={processingSetup.postponeSetup}
+                    onContinueFirstVideo={continueToFirstVideo}
                 />
             )}
 
@@ -1176,6 +1278,13 @@ export default function Page() {
                     kind={contextMenu.kind}
                     onAction={handleContextMenuAction}
                     onClose={closeContextMenu}
+                />
+            )}
+            {playlistPickerTarget !== null && (
+                <PlaylistPickerDialog
+                    jobId={playlistPickerTarget.jobId}
+                    contentId={playlistPickerTarget.contentId}
+                    onClose={() => setPlaylistPickerTarget(null)}
                 />
             )}
 

@@ -22,7 +22,7 @@ export interface PageConfig {
   sortKey: SortKey;
   /** Si es true, oculta jobs que no están en estado 'complete' */
   showOnlyCompleted: boolean;
-  /** Si es true, muestra solo jobs con errores */
+  /** Si es true, añade al grid los registros que terminaron con error */
   showErrors: boolean;
   /** Filtrar por estado de retención: 'keep', 'online', o 'all' */
   keepStatusFilter?: string;

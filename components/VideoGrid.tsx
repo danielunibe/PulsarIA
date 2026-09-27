@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { motion } from 'motion/react';
 import { VideoCard } from '@/components/VideoCard';
 import type { JobRecord as SharedJobRecord } from '@/hooks/use-jobs';
+import type { PlaylistContentView, SourceContentView } from '@/hooks/usePlaylists';
 import type { CinemaVideo, VideoData } from '@/types';
 import { apiFetch } from '@/lib/api-client';
 import { useDemoMedia } from '@/hooks/use-demo-media';
@@ -12,6 +13,10 @@ const INACTIVE_SLOTS_COUNT = 12;
 
 const ExpandedVideoModal = dynamic(
     () => import('@/components/ExpandedVideoModal').then((mod) => mod.ExpandedVideoModal),
+    { ssr: false }
+);
+const DemoVideoDetailModal = dynamic(
+    () => import('@/components/DemoVideoDetailModal').then((mod) => mod.DemoVideoDetailModal),
     { ssr: false }
 );
 
@@ -34,6 +39,11 @@ interface VideoGridProps {
     sortKey?: string;
     /** ID de playlist para filtrar videos (si se muestra una playlist específica) */
     playlistId?: number;
+    /** Agrupación confirmada de perfil/canal para filtrar contenido remoto. */
+    sourceCollection?: {
+        sourceId: number;
+        channelKind: string;
+    };
     /** Modo de visualización: 'grid' (auto-columnas), 'list' (una columna), 'compact' (cards pequeñas) */
     layout?: 'grid' | 'list' | 'compact';
     /** Número fijo de columnas (0 = auto basado en ancho de ventana) */
@@ -63,7 +73,7 @@ interface VideoGridProps {
     /** Reproduce videos reales al mantener el cursor encima. */
     hoverAutoplay?: boolean;
     /** Abre el menú contextual correspondiente a una tarjeta real o DEMO. */
-    onContextMenu?: (event: ReactMouseEvent<HTMLElement>, video: SharedJobRecord | VideoData) => void;
+    onContextMenu?: (event: ReactMouseEvent<HTMLElement>, video: (SharedJobRecord & { content_id?: number }) | VideoData) => void;
 }
 
 // Gap y padding exterior idénticos — espaciado simétrico en todas las direcciones
@@ -93,6 +103,7 @@ async function toAssetUrl(localPath: string | undefined): Promise<string | undef
 type SourceState = 'local' | 'online' | 'unavailable';
 
 type UiJobRecord = SharedJobRecord & {
+    content_id?: number;
     audio_path?: string;
     transcript_path?: string;
     poster_path?: string;
@@ -100,6 +111,7 @@ type UiJobRecord = SharedJobRecord & {
     favorite?: boolean;
     pinned?: boolean;
     protected?: boolean;
+    source_availability?: string;
 };
 
 type UiVideoData = VideoData & {
@@ -141,7 +153,11 @@ function OnlineLibraryCard({
     onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void;
 }) {
     const [isHovered, setIsHovered] = useState(false);
-    const stateLabel = sourceState === 'unavailable' ? 'Fuente no disponible' : 'Online · ficha conservada';
+    const stateLabel = job.source_availability === 'pending'
+        ? 'Pendiente de ingestión'
+        : sourceState === 'unavailable'
+            ? 'Fuente no disponible'
+            : 'Online · ficha conservada';
     return (
         <div
             onMouseEnter={() => setIsHovered(true)}
@@ -178,14 +194,12 @@ function OnlineLibraryCard({
                         : 'rgba(20, 20, 24, 0.58)',
                     backdropFilter: 'blur(32px) saturate(180%) contrast(105%)',
                     WebkitBackdropFilter: 'blur(32px) saturate(180%) contrast(105%)',
-                    border: isHovered
-                        ? '1px solid rgba(255, 255, 255, 0.24)'
-                        : '1px solid rgba(255, 255, 255, 0.10)',
+                    border: 0,
                     boxShadow: isHovered
-                        ? '0 24px 50px -10px rgba(0, 0, 0, 0.82), 0 10px 22px -5px rgba(0, 0, 0, 0.55), inset 0 1px 1px 0 rgba(255, 255, 255, 0.25)'
-                        : '0 8px 24px -6px rgba(0, 0, 0, 0.5), inset 0 1px 1px 0 rgba(255, 255, 255, 0.18)',
+                        ? '0 24px 50px -10px rgba(0, 0, 0, 0.82), 0 10px 22px -5px rgba(0, 0, 0, 0.55)'
+                        : '0 8px 24px -6px rgba(0, 0, 0, 0.5)',
                     transform: isHovered ? 'translateY(-6px) scale(1.025)' : 'translateY(0) scale(1)',
-                    transition: 'transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease',
+                    transition: 'transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s ease, background 0.25s ease',
                     transformOrigin: 'center center',
                     willChange: 'transform, box-shadow',
                 }}
@@ -259,14 +273,26 @@ function stableDemoId(slotId: string): number {
     return 100000 + (hash % 899999);
 }
 
+function playlistContentViewToJob(item: PlaylistContentView): SharedJobRecord {
+    const completed = ['complete', 'completed', 'done'].includes(item.status.toLowerCase());
+    return {
+        ...item,
+        content_id: item.content_id,
+        source_availability: completed ? item.availability : 'pending',
+    } as SharedJobRecord & { source_availability?: string };
+}
+
 export function VideoGrid({
     activeVideoId,
     onVideoPlayStart,
     onVideoPlayStop,
     sortKey,
     playlistId,
+    sourceCollection,
     layout = 'grid',
     columns = 0,
+    showOnlyCompleted = true,
+    showErrors = false,
     onJobsChange,
     keepStatusFilter,
     platformFilter,
@@ -281,28 +307,33 @@ export function VideoGrid({
 }: VideoGridProps) {
 
     const [isInitialLoad, setIsInitialLoad] = useState(true);
+    const [activeDemoDetail, setActiveDemoDetail] = useState<VideoData | null>(null);
+    const demoDetailTriggerRef = useRef<HTMLElement | null>(null);
     const [localJobs, setLocalJobs] = useState<SharedJobRecord[]>([]);
     const [playlistJobs, setPlaylistJobs] = useState<SharedJobRecord[]>([]);
     const [resolvedAssets, setResolvedAssets] = useState<Record<number, { thumb?: string; video?: string }>>({});
     const [containerWidth, setContainerWidth] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
-    const { items: demoMedia } = useDemoMedia(showDemoVideos && !playlistId);
+    const collectionSelected = playlistId !== undefined || sourceCollection !== undefined;
+    const { items: demoMedia } = useDemoMedia(showDemoVideos && !collectionSelected);
 
     const jobs = controlledJobs ?? localJobs;
-    const sourceJobs = playlistId ? playlistJobs : jobs;
+    const sourceJobs = collectionSelected ? playlistJobs : jobs;
     const isCompleted = (job: SharedJobRecord) => ['complete', 'completed'].includes(job.status.toLowerCase());
     const isError = (job: SharedJobRecord) => ['error', 'failed', 'failure', 'cancelled', 'canceled'].includes(job.status.toLowerCase());
     const normalizedPlatformFilter = (platformFilter ?? 'all').toLowerCase();
 
     // PagePanel controla qué estados aparecen en la biblioteca; la cola sigue mostrando el progreso completo.
-    // Bug #5 FIX: Error jobs are ALWAYS visible in the grid
     const visibleJobs = sourceJobs
         .filter((job) => {
             const uiJob = job as UiJobRecord;
             const isJobError = isError(job);
             const sourceState = sourceStateForJob(uiJob);
             // La galería solo contiene medios terminados; el pipeline vive en la cola.
-            const statusVisible = isCompleted(job) && !isJobError;
+            const nonErrorVisible = showOnlyCompleted
+                ? isCompleted(job)
+                : isCompleted(job) || uiJob.source_availability === 'pending';
+            const statusVisible = isJobError ? showErrors : nonErrorVisible;
             const effectiveKeepStatus = job.keep_status || (sourceState === 'online' ? 'online' : undefined);
             const keepVisible = (keepStatusFilter ?? 'all') === 'all'
                 || effectiveKeepStatus === (keepStatusFilter ?? 'all');
@@ -326,19 +357,56 @@ export function VideoGrid({
 
     // -- Fetching de jobs: primero Tauri IPC, si falla usa la REST API --
     const fetchJobs = useCallback(async () => {
-                if (playlistId) {
+        if (collectionSelected) {
             try {
-                let items: SharedJobRecord[];
-                try {
-                    const { invoke } = await import('@tauri-apps/api/core');
-                    items = await invoke<SharedJobRecord[]>('get_playlist_items', { playlistId });
-                } catch {
-                    const { REST_API_BASE } = await import('@/lib/api-config');
-                    const response = await apiFetch(`${REST_API_BASE}/playlists/${playlistId}/items`);
-                    if (!response.ok) throw new Error(`Playlist request failed with status ${response.status}`);
-                    items = await response.json() as SharedJobRecord[];
+                if (playlistId !== undefined) {
+                    try {
+                        let views: PlaylistContentView[];
+                        try {
+                            const { invoke } = await import('@tauri-apps/api/core');
+                            views = await invoke<PlaylistContentView[]>('get_playlist_content_items', { playlistId });
+                        } catch {
+                            const { REST_API_BASE } = await import('@/lib/api-config');
+                            const response = await apiFetch(`${REST_API_BASE}/playlists/${playlistId}/content`);
+                            if (!response.ok) throw new Error(`Playlist content request failed with status ${response.status}`);
+                            views = await response.json() as PlaylistContentView[];
+                        }
+                        setPlaylistJobs(views.map(playlistContentViewToJob));
+                    } catch {
+                        // Keep the historical route as a compatibility
+                        // adapter for a backend that predates the canonical
+                        // content projection.
+                        let items: SharedJobRecord[];
+                        try {
+                            const { invoke } = await import('@tauri-apps/api/core');
+                            items = await invoke<SharedJobRecord[]>('get_playlist_items', { playlistId });
+                        } catch {
+                            const { REST_API_BASE } = await import('@/lib/api-config');
+                            const response = await apiFetch(`${REST_API_BASE}/playlists/${playlistId}/items`);
+                            if (!response.ok) throw new Error(`Playlist request failed with status ${response.status}`);
+                            items = await response.json() as SharedJobRecord[];
+                        }
+                        setPlaylistJobs(items);
+                    }
+                } else if (sourceCollection) {
+                    let items: SourceContentView[];
+                    try {
+                        const { invoke } = await import('@tauri-apps/api/core');
+                        items = await invoke<SourceContentView[]>('get_source_collection_content_items', {
+                            sourceId: sourceCollection.sourceId,
+                            channelKind: sourceCollection.channelKind,
+                            limit: 500,
+                        });
+                    } catch {
+                        const { REST_API_BASE } = await import('@/lib/api-config');
+                        const response = await apiFetch(
+                            `${REST_API_BASE}/source-collections/${sourceCollection.sourceId}/${encodeURIComponent(sourceCollection.channelKind)}/items`,
+                        );
+                        if (!response.ok) throw new Error(`Source collection request failed with status ${response.status}`);
+                        items = await response.json() as SourceContentView[];
+                    }
+                    setPlaylistJobs(items.map(playlistContentViewToJob));
                 }
-                setPlaylistJobs(items);
             } catch {
                 setPlaylistJobs([]);
             }
@@ -361,7 +429,7 @@ export function VideoGrid({
         setLocalJobs(data);
         if (onJobsChange) onJobsChange(data);
         setPlaylistJobs([]);
-    }, [controlledJobs, onJobsChange, playlistId]);
+    }, [collectionSelected, controlledJobs, onJobsChange, playlistId, sourceCollection]);
 
     // -- Resolver rutas locales de assets de manera asíncrona
     const resolveAssets = useCallback(async (list: SharedJobRecord[]) => {
@@ -380,7 +448,7 @@ export function VideoGrid({
         useEffect(() => {
         const timer = setTimeout(() => setIsInitialLoad(false), 2000);
         let active = true;
-        if (playlistId || !controlledJobs) {
+        if (collectionSelected || !controlledJobs) {
             queueMicrotask(() => {
                 if (active) void fetchJobs();
             });
@@ -401,7 +469,7 @@ export function VideoGrid({
         // The main library is reconciled by useJobs. A selected playlist only
         // needs one derived membership fetch; it must not create a second
         // polling loop or duplicate Tauri event listeners.
-        if (!controlledJobs && !playlistId) {
+        if (!controlledJobs && !collectionSelected) {
             (async () => {
                 try {
                     const { listen } = await import('@tauri-apps/api/event');
@@ -413,7 +481,7 @@ export function VideoGrid({
             })();
         }
 
-        const fallbackInterval = (!controlledJobs && !playlistId) ? setInterval(fetchJobs, 3000) : undefined;
+        const fallbackInterval = (!controlledJobs && !collectionSelected) ? setInterval(fetchJobs, 3000) : undefined;
 
         return () => {
                         active = false;
@@ -424,11 +492,11 @@ export function VideoGrid({
             unlistenProgress?.();
             unlistenIndexed?.();
         };
-    }, [controlledJobs, fetchJobs, playlistId]);
+    }, [collectionSelected, controlledJobs, fetchJobs]);
 
     // Resolver assets cada vez que cambian los jobs
     useEffect(() => {
-        const sourceJobs = playlistId ? playlistJobs : jobs;
+        const sourceJobs = collectionSelected ? playlistJobs : jobs;
         let active = true;
         queueMicrotask(() => {
             if (active && sourceJobs.length > 0) void resolveAssets(sourceJobs);
@@ -436,7 +504,7 @@ export function VideoGrid({
         return () => {
             active = false;
         };
-    }, [jobs, playlistId, playlistJobs, resolveAssets]);
+    }, [collectionSelected, jobs, playlistJobs, resolveAssets]);
 
     const formatDuration = (seconds?: number) => {
         if (!seconds) return '00:00';
@@ -475,9 +543,9 @@ export function VideoGrid({
     })), [demoMedia]);
     // Demo assets are deliberately appended outside the jobs collection. They
     // never enter SQLite, playlists, search results, counters, or queue state.
-    const renderList = useMemo<Array<SharedJobRecord | VideoData>>(() => playlistId
+    const renderList = useMemo<Array<SharedJobRecord | VideoData>>(() => collectionSelected
         ? sortedJobs
-        : [...sortedJobs, ...demoVideos], [demoVideos, playlistId, sortedJobs]);
+        : [...sortedJobs, ...demoVideos], [collectionSelected, demoVideos, sortedJobs]);
     // The empty cards are a permanent part of the library composition. They
     // fill the visual skeleton around real media, but never become media
     // records and never receive the active-video overlay.
@@ -587,7 +655,7 @@ export function VideoGrid({
                                     sourceState={sourceState}
                                     layout={layout}
                                     onOpen={() => onVideoPlayStart(job.id)}
-                                    onContextMenu={(event) => onContextMenu?.(event, job)}
+                                    onContextMenu={(event) => onContextMenu?.(event, job as SharedJobRecord & { content_id?: number })}
                                 />
                             </motion.div>
                         );
@@ -625,8 +693,11 @@ export function VideoGrid({
                                 isDemo={!isRealJob && job.isDemo === true}
                                 demoLabel={!isRealJob ? job.demoLabel : undefined}
                                 hoverAutoplay={hoverAutoplay}
-                                onPreviewClick={isStaticDemo ? () => onOpenCinemaAt?.(job.id) : undefined}
-                                onContextMenu={(event) => onContextMenu?.(event, job)}
+                                onPreviewClick={isStaticDemo ? (trigger) => {
+                                    demoDetailTriggerRef.current = trigger;
+                                    setActiveDemoDetail(job as VideoData);
+                                } : undefined}
+                                onContextMenu={(event) => onContextMenu?.(event, job as SharedJobRecord & { content_id?: number })}
                             />
 
                         </motion.div>
@@ -653,7 +724,7 @@ export function VideoGrid({
 
             {/* -- Modal expandido -- */}
             {activeVideoId !== null && (() => {
-                const allAvailableJobs = playlistId ? [...playlistJobs, ...jobs] : jobs;
+                const allAvailableJobs = collectionSelected ? [...playlistJobs, ...jobs] : jobs;
                 const activeJob = allAvailableJobs.find(j => j.id === activeVideoId);
                 if (!activeJob) return null;
 
@@ -688,6 +759,13 @@ export function VideoGrid({
                     />
                 );
             })()}
+            {activeDemoDetail && (
+                <DemoVideoDetailModal
+                    video={activeDemoDetail}
+                    onClose={() => setActiveDemoDetail(null)}
+                    returnFocusRef={demoDetailTriggerRef}
+                />
+            )}
         </motion.div>
     );
 }

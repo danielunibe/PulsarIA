@@ -14,9 +14,7 @@ import {
   ArrowLeftIcon,
   ArrowSquareOutIcon,
   BookmarkIcon,
-  BellIcon,
   BrainIcon,
-  CalendarIcon,
   CameraIcon,
   CaretLeftIcon,
   CaretRightIcon,
@@ -44,7 +42,6 @@ import {
   HardDriveIcon,
   HardDrivesIcon,
   HeartIcon,
-  HouseIcon,
   ImagesIcon,
   InfoIcon,
   LightningIcon,
@@ -56,6 +53,7 @@ import {
   PaletteIcon,
   PaperPlaneTiltIcon,
   PauseIcon,
+  PlaylistIcon,
   PlayIcon,
   PlusIcon,
   PushPinIcon,
@@ -64,7 +62,6 @@ import {
   ShareIcon,
   ShareNetworkIcon,
   ShieldCheckIcon,
-  SortAscendingIcon,
   SortDescendingIcon,
   SpeakerHighIcon,
   SpeakerSlashIcon,
@@ -75,7 +72,6 @@ import {
   SlidersHorizontalIcon,
   SubtitlesIcon,
   TerminalIcon,
-  TimerIcon,
   TrashIcon,
   TranslateIcon,
   UserCircleGearIcon,
@@ -116,9 +112,7 @@ export const FaArrowLeft = withDreamcoreWeight(ArrowLeftIcon);
 export const FaArrowUpRightFromSquare = withDreamcoreWeight(ArrowSquareOutIcon);
 export const FaBolt = withDreamcoreWeight(LightningIcon);
 export const FaBookmark = withDreamcoreWeight(BookmarkIcon);
-export const FaBell = withDreamcoreWeight(BellIcon);
 export const FaBrain = withDreamcoreWeight(BrainIcon);
-export const FaCalendarDay = withDreamcoreWeight(CalendarIcon);
 export const FaCamera = withDreamcoreWeight(CameraIcon);
 export const FaChartSimple = withDreamcoreWeight(ChartBarIcon);
 export const FaChevronLeft = withDreamcoreWeight(CaretLeftIcon);
@@ -143,7 +137,6 @@ export const FaFilter = withDreamcoreWeight(FunnelIcon);
 export const FaFolder = withDreamcoreWeight(FolderIcon);
 export const FaGaugeHigh = withDreamcoreWeight(GaugeIcon);
 export const FaHeart = withDreamcoreWeight(HeartIcon);
-export const FaHouse = withDreamcoreWeight(HouseIcon);
 export const FaInfo = withDreamcoreWeight(InfoIcon);
 export const FaLanguage = withDreamcoreWeight(TranslateIcon);
 export const FaTableList = withDreamcoreWeight(ListIcon);
@@ -155,6 +148,7 @@ export const FaMusic = withDreamcoreWeight(MusicNoteIcon);
 export const FaPalette = withDreamcoreWeight(PaletteIcon);
 export const FaPhotoFilm = withDreamcoreWeight(ImagesIcon);
 export const FaThumbtack = withDreamcoreWeight(PushPinIcon);
+export const FaPlaylist = withDreamcoreWeight(PlaylistIcon);
 export const FaPlay = withDreamcoreWeight(PlayIcon);
 export const FaPause = withDreamcoreWeight(PauseIcon);
 export const FaPlus = withDreamcoreWeight(PlusIcon);
@@ -173,7 +167,6 @@ export const FaShieldHalved = withDreamcoreWeight(ShieldCheckIcon);
 export const FaSquare = withDreamcoreWeight(SquareIcon);
 export const FaStar = withDreamcoreWeight(StarIcon);
 export const FaLayerGroup = withDreamcoreWeight(StackIcon);
-export const FaStopwatch = withDreamcoreWeight(TimerIcon);
 export const FaClosedCaptioning = withDreamcoreWeight(SubtitlesIcon);
 export const FaTableCells = withDreamcoreWeight(SquaresFourIcon);
 export const FaTerminal = withDreamcoreWeight(TerminalIcon);
@@ -191,5 +184,4 @@ export const FaClose = withDreamcoreWeight(XIcon);
 export const FaXmark = withDreamcoreWeight(XIcon);
 export const FaSliders = withDreamcoreWeight(SlidersHorizontalIcon);
 export const FaGrip = withDreamcoreWeight(DotsSixVerticalIcon);
-export const FaArrowDownAZ = withDreamcoreWeight(SortAscendingIcon);
 export const FaArrowDownWideShort = withDreamcoreWeight(SortDescendingIcon);

@@ -236,8 +236,8 @@
                                              "sourcePath":  "python-workers/audio_extractor.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  5781,
-                                             "sha256":  "7B8AFAD996BD2F08E0D65C08999D27C82D3BAF7B4F19B55300FC68848F9271D5"
+                                             "sizeBytes":  5868,
+                                             "sha256":  "8D3F4E865F93811B365C1D4F670055E7B7C6EA885176D26B30BDE7385AA9B22E"
                                          },
                                          {
                                              "path":  "python-workers/daemon.py",
@@ -252,8 +252,8 @@
                                              "sourcePath":  "python-workers/downloader.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  15261,
-                                             "sha256":  "63AA0A4909826BE09FB82275273A4B0A724BC16BFD7B867085F4028D1FC9DDAC"
+                                             "sizeBytes":  15641,
+                                             "sha256":  "01A0DEC5ADDF8BDA076A2932AB4234902E0D5744EBAB21B301525EBFE575E9C7"
                                          },
                                          {
                                              "path":  "python-workers/embed_query.py",
@@ -292,8 +292,8 @@
                                              "sourcePath":  "python-workers/main.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  14585,
-                                             "sha256":  "B10054060113EB684102C2FDB4CB11DFD42CB5BA712689E921E2AB1D3F2AA147"
+                                             "sizeBytes":  15267,
+                                             "sha256":  "1E5C15E7FF1627468DDD9FE1672C5A271A588D8754FB6D6D954CB3D5D0C8ACB2"
                                          },
                                          {
                                              "path":  "python-workers/models.py",
@@ -308,8 +308,8 @@
                                              "sourcePath":  "python-workers/output_generator.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  8488,
-                                             "sha256":  "B3CC8DF89D5CC52B78289A52E7E6D0BD75C2398D75E4A9BFE900845420B1C28C"
+                                             "sizeBytes":  8575,
+                                             "sha256":  "5D96825E3AAF296865FEEF34FB4768AADA5995D15893024BB644F79A2B786FD2"
                                          },
                                          {
                                              "path":  "python-workers/prepare_whisper_model.py",
@@ -320,12 +320,28 @@
                                              "sha256":  "76A3A0F6B56F979D2FA8572E0A3B48E49AEFF2C997F7093EEC74CFBFD9B87A04"
                                          },
                                          {
+                                             "path":  "python-workers/process_utils.py",
+                                             "sourcePath":  "python-workers/process_utils.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  413,
+                                             "sha256":  "964E1F7A592FC24C7D76BC7A714F32C46936F84D2B1216222C542FB5D4DB965F"
+                                         },
+                                         {
+                                             "path":  "python-workers/profile_metadata.py",
+                                             "sourcePath":  "python-workers/profile_metadata.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  8040,
+                                             "sha256":  "465EFC30E5DDA598D9FBD754DC40DD8CE3B02CCD9CCD1E2EBA26EDA0CE19960A"
+                                         },
+                                         {
                                              "path":  "python-workers/source_scanner.py",
                                              "sourcePath":  "python-workers/source_scanner.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  4754,
-                                             "sha256":  "41DEDAAC7506E6E7C22B100EB09EDE2B5FCBE3F8CF456397CC5917BC2DC24F2A"
+                                             "sizeBytes":  7668,
+                                             "sha256":  "D1D573206C64E17EDD3A6E2F9A75B976EDE0EE8BE04D1C8E2ECE02AFAAF321F9"
                                          },
                                          {
                                              "path":  "python-workers/transcriber.py",
@@ -340,8 +356,8 @@
                                              "sourcePath":  "python-workers/visual_analyzer.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  22380,
-                                             "sha256":  "AA8498F3F53A1DF67B37B0347E5263FEFB6ACECC4876D99FA555D632ED274B46"
+                                             "sizeBytes":  22783,
+                                             "sha256":  "56C729699B59AE45EDD20EEE48D7992201841856E749B1882BF6DEEAEE39930A"
                                          }
                                      ]
                        },

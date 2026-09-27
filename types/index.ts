@@ -117,7 +117,7 @@ export interface VideoCardProps {
     isDemo?: boolean;
     demoLabel?: string;
     hoverAutoplay?: boolean;
-    onPreviewClick?: () => void;
+    onPreviewClick?: (trigger: HTMLElement) => void;
     onContextMenu?: (event: React.MouseEvent<HTMLElement>) => void;
 }
 

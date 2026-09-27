@@ -34,12 +34,14 @@
 //! - La base de datos se accede exclusivamente a través de mutex
 //! - Rate limiting configurable por RPS en la API REST
 
-// Prevents additional console window on Windows in release
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// The app is a GUI process in every Windows build; worker consoles are
+// hidden separately through process_control.rs.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod commands;
 mod db;
 mod embedding;
+mod process_control;
 mod runtime;
 mod storage;
 mod url_utils;
@@ -73,7 +75,7 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
-struct ExitSignal(Arc<AtomicBool>);
+pub(crate) struct ExitSignal(pub(crate) Arc<AtomicBool>);
 #[derive(Clone)]
 struct SyncPause(Arc<AtomicBool>);
 
@@ -254,6 +256,7 @@ async fn main() {
         query_coordinator.clone(),
         reranker.clone(),
         semantic_cache.clone(),
+        std_db.clone(),
     ));
 
     let maintenance_lock = Arc::new(tokio::sync::Mutex::new(()));
@@ -663,6 +666,10 @@ async fn main() {
             commands::update_collection_source_config,
             commands::delete_collection_source,
             commands::sync_collection_source_now,
+            commands::refresh_profile_metadata,
+            commands::get_profile_channels,
+            commands::get_channel_content_items,
+            commands::get_source_collection_content_items,
             commands::get_collection_source_activity,
             commands::get_health_events,
             commands::get_api_session_token,
@@ -679,6 +686,7 @@ async fn main() {
             commands::reconcile_storage,
             commands::get_base_path,
             commands::search_literal_transcripts,
+            commands::search_library,
             commands::search_transcripts,
             commands::get_model_status,
             commands::reload_model,
@@ -715,15 +723,18 @@ async fn main() {
             commands::retry_local_model_setup,
             commands::repair_local_model,
             commands::cancel_whisper_model_preparation,
+            commands::quit_onboarding,
             commands::rebuild_index,
             commands::reindex_sqlite_indexes,
             commands::vacuum_db,
             commands::recompute_embeddings,
             commands::get_playlists,
+            commands::get_source_collections,
             commands::create_playlist,
             commands::add_to_playlist,
             commands::remove_from_playlist,
             commands::get_playlist_items,
+            commands::get_playlist_content_items,
             commands::delete_playlist,
             commands::get_transcript,
             commands::auto_cluster_videos,

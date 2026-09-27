@@ -3,6 +3,7 @@ use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +13,18 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+
+fn hidden_tokio_command<S: AsRef<OsStr>>(program: S) -> Command {
+    let mut command = Command::new(program);
+    crate::process_control::hide_tokio_command(&mut command);
+    command
+}
+
+fn hidden_std_command<S: AsRef<OsStr>>(program: S) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    crate::process_control::hide_std_command(&mut command);
+    command
+}
 
 const MANIFEST_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -538,7 +551,7 @@ impl LocalLlmManager {
         let port = reserve_local_port()?;
         let api_key = random_api_key();
         let model_path = self.model_path();
-        let mut command = Command::new(&executable);
+        let mut command = hidden_tokio_command(&executable);
         command
             .arg("--model")
             .arg(model_path)
@@ -703,7 +716,7 @@ fn validate_request(request: &LocalLlmRequest) -> Result<(), String> {
 fn sidecar_reports_cuda(executable: &Path) -> bool {
     // This probe is synchronous and intentionally runs before the async
     // sidecar lifecycle starts; do not call tokio::process::Command here.
-    let output = std::process::Command::new(executable)
+    let output = hidden_std_command(executable)
         .arg("--list-devices")
         .output();
     let Ok(output) = output else {

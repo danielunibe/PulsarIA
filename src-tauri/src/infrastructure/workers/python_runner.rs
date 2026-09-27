@@ -133,8 +133,7 @@ impl PythonWorker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         command.kill_on_drop(true);
-        #[cfg(windows)]
-        command.creation_flags(0x08000000);
+        crate::process_control::hide_tokio_command(&mut command);
         let mut child = command
             .spawn()
             .map_err(|error| PythonRunnerError::ProcessSpawnError(error.to_string()))?;

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from audio_extractor import resolve_ffmpeg_path
+from process_utils import hidden_process_kwargs
 
 
 VIDEO_FORMATS = ("mp4", "mkv", "webm", "mov")
@@ -53,6 +54,7 @@ def _run_ffmpeg(command: list[str], output: Path) -> None:
             capture_output=True,
             text=True,
             timeout=max(30.0, min(float(os.environ.get("PULSAR_OUTPUT_TIMEOUT_SECONDS", "900")), 3600.0)),
+            **hidden_process_kwargs(),
         )
     except subprocess.CalledProcessError as error:
         detail = error.stderr.strip() if error.stderr else str(error)

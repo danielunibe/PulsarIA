@@ -58,6 +58,25 @@ pub struct SearchResponse {
     pub results: Vec<crate::domain::models::SearchResult>,
 }
 
+fn flatten_unified_response(
+    response: crate::domain::models::UnifiedSearchResponse,
+) -> SearchResponse {
+    SearchResponse {
+        results: response
+            .results
+            .into_iter()
+            .map(|group| crate::domain::models::SearchResult {
+                job_id: group.job_id,
+                title: group.title,
+                thumbnail: group.thumbnail,
+                chunk_text: group.primary_moment.excerpt,
+                chunk_index: group.primary_moment.unit_id,
+                similarity_score: group.score,
+            })
+            .collect(),
+    }
+}
+
 #[derive(Deserialize)]
 pub struct CreatePlaylistRequest {
     pub name: String,
@@ -72,7 +91,8 @@ pub struct CreatePlaylistResponse {
 
 #[derive(Deserialize)]
 pub struct PlaylistItemRequest {
-    pub job_id: i64,
+    pub job_id: Option<i64>,
+    pub content_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -283,33 +303,17 @@ async fn literal_search_handler(
             "Search query must contain between 1 and 500 characters".to_string(),
         ));
     }
-    let connection = state
-        .job_repo
-        .get_connection()
+    let response = state
+        .search_service
+        .unified_search(crate::domain::models::UnifiedSearchRequest {
+            query: query.to_string(),
+            mode: crate::domain::models::SearchMode::Exact,
+            limit: payload.limit.unwrap_or(10).clamp(1, 100),
+            context: None,
+        })
+        .await
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
-    let connection = connection.lock().map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Database mutex poisoned".to_string(),
-        )
-    })?;
-    let results = crate::db::search_literal_transcripts(
-        &connection,
-        query,
-        payload.limit.unwrap_or(10).clamp(1, 100),
-    )
-    .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-    .into_iter()
-    .map(|result| crate::domain::models::SearchResult {
-        job_id: result.job_id,
-        title: result.title,
-        thumbnail: result.thumbnail,
-        chunk_text: result.chunk_text,
-        chunk_index: result.chunk_index,
-        similarity_score: result.similarity_score,
-    })
-    .collect();
-    Ok(Json(SearchResponse { results }))
+    Ok(Json(flatten_unified_response(response)))
 }
 
 async fn search_handler(
@@ -323,20 +327,44 @@ async fn search_handler(
             "Search query must contain between 1 and 500 characters".to_string(),
         ));
     }
-    let results = state.search_service.search(query).await.map_err(|e| {
-        warn!("API Search failed: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, e)
-    })?;
+    let response = state
+        .search_service
+        .unified_search(crate::domain::models::UnifiedSearchRequest {
+            query: query.to_string(),
+            mode: crate::domain::models::SearchMode::Conceptual,
+            limit: payload.limit.unwrap_or(10).clamp(1, 100),
+            context: None,
+        })
+        .await
+        .map_err(|e| {
+            warn!("API Search failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, e)
+        })?;
+    Ok(Json(flatten_unified_response(response)))
+}
 
-    // Note: Future Phases 11 & 12 (Reranker and Semantic Cache) will intercept here
-    let final_results = results
-        .into_iter()
-        .take(payload.limit.unwrap_or(10).clamp(1, 100))
-        .collect();
-
-    Ok(Json(SearchResponse {
-        results: final_results,
-    }))
+async fn unified_search_handler(
+    State(state): State<ApiState>,
+    Json(mut payload): Json<crate::domain::models::UnifiedSearchRequest>,
+) -> Result<Json<crate::domain::models::UnifiedSearchResponse>, (StatusCode, String)> {
+    let query = payload.query.trim().to_string();
+    if query.is_empty() || query.len() > 500 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Search query must contain between 1 and 500 characters".to_string(),
+        ));
+    }
+    payload.query = query;
+    payload.limit = payload.limit.clamp(1, 100);
+    state
+        .search_service
+        .unified_search(payload)
+        .await
+        .map(Json)
+        .map_err(|error| {
+            warn!("Unified API search failed: {}", error);
+            (StatusCode::INTERNAL_SERVER_ERROR, error)
+        })
 }
 
 /// Compatibilidad para clientes que solicitan transcripción directa: usa la
@@ -507,6 +535,43 @@ async fn get_playlists_handler(
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
 }
 
+async fn get_source_collections_handler(
+    State(state): State<ApiState>,
+) -> Result<Json<Vec<crate::db::SourceCollectionRecord>>, (StatusCode, String)> {
+    let connection = state
+        .job_repo
+        .get_connection()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
+    let connection = connection.lock().map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database mutex poisoned".to_string(),
+        )
+    })?;
+    crate::db::get_source_collections(&connection)
+        .map(Json)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
+async fn get_source_collection_items_handler(
+    State(state): State<ApiState>,
+    Path((source_id, channel_kind)): Path<(i64, String)>,
+) -> Result<Json<Vec<crate::db::ContentViewRecord>>, (StatusCode, String)> {
+    let connection = state
+        .job_repo
+        .get_connection()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
+    let connection = connection.lock().map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database mutex poisoned".to_string(),
+        )
+    })?;
+    crate::db::get_channel_content_views(&connection, source_id, &channel_kind, 500)
+        .map(Json)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
 async fn create_playlist_handler(
     State(state): State<ApiState>,
     Json(payload): Json<CreatePlaylistRequest>,
@@ -570,6 +635,39 @@ async fn get_playlist_items_handler(
     Ok(Json(jobs))
 }
 
+async fn get_playlist_content_items_handler(
+    State(state): State<ApiState>,
+    Path(playlist_id): Path<i64>,
+) -> Result<Json<Vec<crate::db::ContentViewRecord>>, (StatusCode, String)> {
+    let connection = state
+        .job_repo
+        .get_connection()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
+    let connection = connection.lock().map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database mutex poisoned".to_string(),
+        )
+    })?;
+    let mut views = crate::db::get_playlist_content_views(&connection, playlist_id)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    for view in &mut views {
+        if view
+            .job
+            .video_path
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .is_some_and(|path| !path.is_file())
+        {
+            view.job.video_path = None;
+            if view.availability == "available" {
+                view.job.source_state = "online".to_string();
+            }
+        }
+    }
+    Ok(Json(views))
+}
+
 async fn add_playlist_item_handler(
     State(state): State<ApiState>,
     Path(playlist_id): Path<i64>,
@@ -585,8 +683,19 @@ async fn add_playlist_item_handler(
             "Database mutex poisoned".to_string(),
         )
     })?;
-    crate::db::add_job_to_playlist(&connection, playlist_id, payload.job_id)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    match (payload.job_id, payload.content_id) {
+        (Some(job_id), _) => crate::db::add_job_to_playlist(&connection, playlist_id, job_id),
+        (None, Some(content_id)) => {
+            crate::db::add_content_to_playlist(&connection, playlist_id, content_id, "user")
+        }
+        (None, None) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Playlist item requires job_id or content_id".to_string(),
+            ));
+        }
+    }
+    .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     Ok(Json(()))
 }
 
@@ -605,6 +714,25 @@ async fn remove_playlist_item_handler(
         )
     })?;
     crate::db::remove_job_from_playlist(&connection, playlist_id, job_id)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(Json(()))
+}
+
+async fn remove_playlist_content_item_handler(
+    State(state): State<ApiState>,
+    Path((playlist_id, content_id)): Path<(i64, i64)>,
+) -> Result<Json<()>, (StatusCode, String)> {
+    let connection = state
+        .job_repo
+        .get_connection()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
+    let connection = connection.lock().map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database mutex poisoned".to_string(),
+        )
+    })?;
+    crate::db::remove_content_from_playlist(&connection, playlist_id, content_id)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     Ok(Json(()))
 }
@@ -666,6 +794,10 @@ pub async fn start_api_server(port: u16, state: ApiState) {
             "/api/v1/playlists/:playlist_id/items/:job_id",
             delete(remove_playlist_item_handler),
         )
+        .route(
+            "/api/v1/playlists/:playlist_id/content/:content_id",
+            delete(remove_playlist_content_item_handler),
+        )
         .route("/api/v1/transcribe", post(transcribe_handler))
         .route("/api/v1/jobs/:job_id/retry", post(retry_job_handler))
         // Every non-health route requires the process-scoped bearer token.
@@ -687,10 +819,23 @@ pub async fn start_api_server(port: u16, state: ApiState) {
         )
         .route("/api/v1/playlists", get(get_playlists_handler))
         .route(
+            "/api/v1/source-collections",
+            get(get_source_collections_handler),
+        )
+        .route(
+            "/api/v1/source-collections/:source_id/:channel_kind/items",
+            get(get_source_collection_items_handler),
+        )
+        .route(
             "/api/v1/playlists/:playlist_id/items",
             get(get_playlist_items_handler),
         )
+        .route(
+            "/api/v1/playlists/:playlist_id/content",
+            get(get_playlist_content_items_handler),
+        )
         .route("/api/v1/search/literal", post(literal_search_handler))
+        .route("/api/v1/search/unified", post(unified_search_handler))
         .route("/api/v1/search", post(search_handler))
         .layer(middleware::from_fn_with_state(
             state.security.clone(),

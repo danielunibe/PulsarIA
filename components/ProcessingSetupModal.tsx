@@ -10,11 +10,13 @@ import {
   FaMicrochip,
   FaShieldHalved,
 } from '@/components/icon-library';
-import type { HardwareProfile, LocalModelSetupState, ProcessingSettings, SetupSaveOptions, WhisperModelStatus } from '@/hooks/use-processing-settings';
+import type { HardwareProfile, LocalModelSetupState, ProcessingSettings, RuntimePreflight, RuntimeResourceCheck, SetupSaveOptions, WhisperModelStatus } from '@/hooks/use-processing-settings';
 import { isTauriRuntime } from '@/hooks/use-processing-settings';
 import { useSettings, type ProcessingQuality } from '@/lib/settings-context';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type TranslationKey } from '@/lib/i18n';
+import { readOnboardingDraft, writeOnboardingDraft, type OnboardingDraft, type OnboardingStep } from '@/lib/onboarding-draft';
 import { AuroraBackground } from '@/components/AuroraBackground';
+import { useWindowControls, WindowControls } from '@/components/Header';
 import styles from './ProcessingSetupModal.module.css';
 
 interface ProcessingSetupModalProps {
@@ -22,6 +24,8 @@ interface ProcessingSetupModalProps {
   processing?: ProcessingSettings | null;
   modelStatus?: WhisperModelStatus | null;
   modelSetupState?: LocalModelSetupState | null;
+  runtimePreflight?: RuntimePreflight | null;
+  runtimeTimedOut?: boolean;
   loading?: boolean;
   initializationError?: string | null;
   onSave: (quality: number, setup?: SetupSaveOptions) => Promise<ProcessingSettings | null>;
@@ -30,6 +34,8 @@ interface ProcessingSetupModalProps {
   onRetryModel?: () => Promise<unknown>;
   onRepairModel?: () => Promise<unknown>;
   onDismiss?: () => void;
+  onPostpone?: (progress: Pick<OnboardingDraft, 'answers' | 'step' | 'intentQuestion'>) => void;
+  onContinueFirstVideo?: () => void;
   preparationError?: string | null;
 }
 
@@ -49,14 +55,6 @@ interface SetupAnswers {
   intent: SetupIntent;
   mediaRoot: string;
   quotaGiB: number;
-}
-
-interface RuntimePreflight {
-  ok?: boolean;
-  ready?: boolean;
-  message?: string | null;
-  missing?: string[];
-  checks?: Record<string, boolean>;
 }
 
 interface StorageStatus {
@@ -82,15 +80,13 @@ interface StorageRecommendation {
 const GIB = 1024 ** 3;
 const DEFAULT_MEDIA_ROOT = '%USERPROFILE%\\Downloads\\Pulsaria';
 
-const SETUP_STEPS: Array<{ id: Exclude<SetupStep, 'runtime' | 'success'>; label: string }> = [
-  { id: 'welcome', label: 'Bienvenida' },
-  { id: 'hardware', label: 'Equipo' },
-  { id: 'language', label: 'Idioma' },
-  { id: 'intent', label: 'Intención 1' },
-  { id: 'intent', label: 'Intención 2' },
-  { id: 'intent', label: 'Intención 3' },
-  { id: 'storage', label: 'Almacenamiento' },
-  { id: 'model', label: 'Modelo local' },
+const SETUP_STEP_LABELS: Array<{ id: Exclude<SetupStep, 'runtime' | 'success'>; label: TranslationKey }> = [
+  { id: 'welcome', label: 'onboardingStageWelcome' },
+  { id: 'hardware', label: 'onboardingStageEquipment' },
+  { id: 'language', label: 'onboardingStageLanguage' },
+  { id: 'intent', label: 'onboardingStagePreferences' },
+  { id: 'storage', label: 'onboardingStageStorage' },
+  { id: 'model', label: 'onboardingStageModel' },
 ];
 
 function formatMemory(bytes: number | null | undefined) {
@@ -145,25 +141,6 @@ function stringList(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : [];
-}
-
-function normalizePreflight(value: unknown): RuntimePreflight | null {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as Record<string, unknown>;
-  const checksValue = raw.checks;
-  const checks = checksValue && typeof checksValue === 'object'
-    ? Object.fromEntries(
-      Object.entries(checksValue as Record<string, unknown>)
-        .filter(([, check]) => typeof check === 'boolean'),
-    ) as Record<string, boolean>
-    : undefined;
-  return {
-    ok: typeof raw.ok === 'boolean' ? raw.ok : undefined,
-    ready: typeof raw.ready === 'boolean' ? raw.ready : undefined,
-    message: typeof raw.message === 'string' ? raw.message : null,
-    missing: stringList(raw.missing ?? raw.missing_resources),
-    checks,
-  };
 }
 
 function normalizeStorageStatus(value: unknown): StorageStatus | null {
@@ -263,6 +240,8 @@ export function ProcessingSetupModal({
   processing,
   modelStatus,
   modelSetupState,
+  runtimePreflight = null,
+  runtimeTimedOut = false,
   loading = false,
   initializationError,
   onSave,
@@ -271,6 +250,8 @@ export function ProcessingSetupModal({
   onRetryModel,
   onRepairModel,
   onDismiss,
+  onPostpone,
+  onContinueFirstVideo,
   preparationError,
 }: ProcessingSetupModalProps) {
   const { settingsInitialized, localeSelected } = useSettings();
@@ -284,17 +265,21 @@ export function ProcessingSetupModal({
       : 25
   ));
   const [saving, setSaving] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [savedProcessing, setSavedProcessing] = useState<ProcessingSettings | null>(null);
   const [step, setStep] = useState<SetupStep>('runtime');
   const [intentQuestion, setIntentQuestion] = useState<IntentQuestionIndex>(0);
   const [answers, setAnswers] = useState<SetupAnswers>(defaultAnswers);
-  const [preflight, setPreflight] = useState<RuntimePreflight | null>(null);
+  const [draftHydrated, setDraftHydrated] = useState(false);
   const [storageStatus, setStorageStatus] = useState<StorageStatus | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [storageRetrySignal, setStorageRetrySignal] = useState(0);
   const [nativeRecommendation, setNativeRecommendation] = useState<StorageRecommendation | null>(null);
   const [optionalLoading, setOptionalLoading] = useState(false);
   const [hardwareDetailsOpen, setHardwareDetailsOpen] = useState(false);
+  const [includeLanguageStep] = useState(() => !localeSelected);
   const userAdjustedQuality = useRef(false);
   const userAdjustedQuota = useRef(false);
   const intentOverridden = useRef(false);
@@ -303,9 +288,15 @@ export function ProcessingSetupModal({
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const previousFocusKeyRef = useRef<string | null>(null);
+  const storageAttemptRef = useRef(0);
   const savingRef = useRef(false);
   const cancelRef = useRef(onCancelPreparation);
-  const dismissRef = useRef(onDismiss);
+  const setupSteps = useMemo(
+    () => SETUP_STEP_LABELS
+      .filter((item) => includeLanguageStep || item.id !== 'language')
+      .map((item) => ({ ...item, label: t(item.label) })),
+    [includeLanguageStep, t],
+  );
 
   const hasSetupData = Boolean(hardware && processing);
   const fallbackRecommendation = useMemo(
@@ -322,12 +313,12 @@ export function ProcessingSetupModal({
     || (availableSafeBytes !== null && availableSafeBytes < GIB);
   const mediaRootInvalid = !answers.mediaRoot.trim() || storageStatus?.state === 'path-error';
   const quotaInvalid = lowDisk || quotaGiB < 1;
-  const missingResources = preflight?.missing ?? [];
-  const preflightPending = isTauriRuntime() && hasSetupData && (optionalLoading || preflight === null);
+  const missingResources = runtimePreflight?.missing ?? [];
+  const preflightPending = isTauriRuntime() && hasSetupData && !initializationError && !runtimePreflight;
   const preflightBlocked = preflightPending
     || missingResources.length > 0
-    || preflight?.ok === false
-    || preflight?.ready === false;
+    || runtimePreflight?.ready === false;
+  const storageBlocked = optionalLoading || storageError !== null || storageStatus === null;
   const profile = profileForQuality(quality);
   const displayProfile = savedProcessing?.profile ?? profile;
   const selectedProfileLabel = profileLabel(displayProfile);
@@ -356,14 +347,12 @@ export function ProcessingSetupModal({
         : backendPhase === 'verifying' || backendPhase === 'preparing' || backendPhase === 'validating' || saving
           ? 'prepare'
         : 'configure';
-  const effectiveStep: SetupStep = !hasSetupData || loading || initializationError
+  const effectiveStep: SetupStep = !hasSetupData || loading || initializationError || runtimeTimedOut
     ? 'runtime'
     : step === 'runtime'
       ? !localeSelected ? 'welcome' : processing?.configured ? 'model' : 'welcome'
       : step;
-  const stepIndex = effectiveStep === 'intent'
-    ? 3 + Math.min(intentQuestion, 2)
-    : Math.max(0, SETUP_STEPS.findIndex((item) => item.id === effectiveStep));
+  const stepIndex = Math.max(0, setupSteps.findIndex((item) => item.id === effectiveStep));
   const suggestedIntent = deriveIntent(answers);
 
   useEffect(() => {
@@ -373,16 +362,6 @@ export function ProcessingSetupModal({
   useEffect(() => {
     cancelRef.current = onCancelPreparation;
   }, [onCancelPreparation]);
-
-  useEffect(() => {
-    dismissRef.current = onDismiss;
-  }, [onDismiss]);
-
-  useEffect(() => {
-    if (!completed) return;
-    const timer = window.setTimeout(() => dismissRef.current?.(), 1500);
-    return () => window.clearTimeout(timer);
-  }, [completed]);
 
   useEffect(() => {
     if (!hardware || userAdjustedQuality.current || completed) return;
@@ -406,9 +385,9 @@ export function ProcessingSetupModal({
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('pulsaria-mvp-setup');
-      if (!saved) return;
-      const parsed = JSON.parse(saved) as Partial<SetupAnswers>;
+      const saved = readOnboardingDraft();
+      if (saved) {
+      const parsed = saved.answers;
       setAnswers((current) => ({
         ...current,
         offlinePlayback: parsed.offlinePlayback === 'yes' || parsed.offlinePlayback === 'not-needed'
@@ -430,47 +409,74 @@ export function ProcessingSetupModal({
         intentOverridden.current = true;
       }
       if (typeof parsed.quotaGiB === 'number') userAdjustedQuota.current = true;
+        if (!saved.preferencesSaved || saved.postponed) {
+          const savedStep = saved.step === 'runtime' || saved.step === 'success'
+            ? 'welcome'
+            : saved.step === 'language' && !includeLanguageStep
+              ? 'intent'
+              : saved.step;
+          setStep(savedStep);
+          setIntentQuestion(saved.intentQuestion);
+        }
+      }
     } catch {
       // A corrupt browser preference should never block the native setup.
+    } finally {
+      setDraftHydrated(true);
     }
-  }, []);
+  }, [includeLanguageStep]);
+
+  useEffect(() => {
+    if (!draftHydrated || completed) return;
+    const current = readOnboardingDraft();
+    const draft: OnboardingDraft = {
+      schemaVersion: 1,
+      answers: { ...answers, quotaGiB },
+      step: effectiveStep,
+      intentQuestion,
+      postponed: false,
+      preferencesSaved: current?.preferencesSaved ?? false,
+    };
+    writeOnboardingDraft(draft);
+  }, [answers, completed, draftHydrated, effectiveStep, intentQuestion, quotaGiB]);
 
   useEffect(() => {
     if (!isTauriRuntime() || !hasSetupData) return;
     let active = true;
-    setPreflight(null);
+    const requestId = ++storageAttemptRef.current;
     setStorageStatus(null);
+    setStorageError(null);
     setOptionalLoading(true);
-    void Promise.all([
-      optionalInvoke<unknown>('get_runtime_preflight'),
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('PULSAR_STORAGE_CHECK_TIMEOUT')), 30_000);
+    });
+    void Promise.race([
       optionalInvoke<unknown>('get_storage_status', { path: answers.mediaRoot }),
-    ]).then(([rawPreflight, rawStorage]) => {
-      if (!active) return;
-      setPreflight(normalizePreflight(rawPreflight) ?? {
-        ok: false,
-        ready: false,
-        message: 'El shell nativo no devolvió un preflight verificable. Reinstala Pulsaria para reparar el runtime.',
-      });
+      timeout,
+    ]).then((rawStorage) => {
+      if (!active || requestId !== storageAttemptRef.current) return;
       const nextStorage = normalizeStorageStatus(rawStorage);
       setStorageStatus(nextStorage);
+      if (!nextStorage) setStorageError(t('onboardingStorageCheckError'));
       if (nextStorage?.rootPath && answers.mediaRoot === DEFAULT_MEDIA_ROOT && !userAdjustedQuota.current) {
         setAnswers((current) => ({ ...current, mediaRoot: nextStorage.rootPath }));
       }
     }).catch((error) => {
-      if (!active) return;
-      setPreflight({
-        ok: false,
-        ready: false,
-        message: commandErrorMessage(error, 'No se pudieron verificar los recursos o la carpeta de medios. Comprueba permisos y reinstala el runtime si es necesario.'),
-      });
-      setStorageStatus(null);
+      if (!active || requestId !== storageAttemptRef.current) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setStorageError(message === 'PULSAR_STORAGE_CHECK_TIMEOUT'
+        ? t('onboardingStorageTimeout')
+        : commandErrorMessage(error, t('onboardingStorageCheckError')));
     }).finally(() => {
-      if (active) setOptionalLoading(false);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (active && requestId === storageAttemptRef.current) setOptionalLoading(false);
     });
     return () => {
       active = false;
+      storageAttemptRef.current += 1;
     };
-  }, [answers.mediaRoot, hasSetupData]);
+  }, [answers.mediaRoot, hasSetupData, storageRetrySignal, t]);
 
   useEffect(() => {
     if (!isTauriRuntime() || !hasSetupData) return;
@@ -585,23 +591,57 @@ export function ProcessingSetupModal({
     });
   };
 
-  const persistSetupPreferences = () => {
-    try {
-      localStorage.setItem('pulsaria-mvp-setup', JSON.stringify({
+  const persistProgress = (postponed: boolean, nextStep: SetupStep = effectiveStep) => {
+    const current = readOnboardingDraft();
+    const next: OnboardingDraft = {
+      schemaVersion: 1,
+      answers: {
         ...answers,
         quotaGiB,
         quotaBytes: quotaGiB * GIB,
         retention: recommendation.retention,
         formats: recommendation.formats,
         localLlm: 'on-demand-local-only',
-      }));
-    } catch {
-      // Settings remain usable if localStorage is unavailable.
+      },
+      step: nextStep,
+      intentQuestion,
+      postponed,
+      preferencesSaved: current?.preferencesSaved ?? false,
+    };
+    writeOnboardingDraft(next);
+    return next;
+  };
+
+  const persistSetupPreferences = () => {
+    persistProgress(false, 'success');
+    const current = readOnboardingDraft();
+    if (current) writeOnboardingDraft({ ...current, preferencesSaved: true });
+  };
+
+  const closeOnboarding = async () => {
+    // Closing during setup saves a resumable draft but must not mark the
+    // runtime/model as ready. The native command cancels model preparation
+    // and exits instead of applying the app's close-to-tray preference.
+    persistProgress(false, completed ? 'success' : effectiveStep);
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('quit_onboarding');
+  };
+  const windowControls = useWindowControls(closeOnboarding);
+
+  const handlePostpone = async () => {
+    if (savingRef.current) {
+      try {
+        await cancelRef.current();
+      } catch {
+        // A cancellation race must not prevent the user from leaving setup.
+      }
     }
+    const draft = persistProgress(true);
+    onPostpone?.({ answers: draft.answers, step: draft.step, intentQuestion: draft.intentQuestion });
   };
 
   const handleSave = async (qualityOverride?: number) => {
-    if (!hasSetupData || preflightBlocked || lowDisk || quotaGiB < 1) return;
+    if (!hasSetupData || preflightBlocked || storageBlocked || lowDisk || quotaGiB < 1) return;
     const selectedQuality = qualityOverride ?? quality;
     setSaving(true);
     setLocalError(null);
@@ -636,10 +676,10 @@ export function ProcessingSetupModal({
     if (effectiveStep === 'welcome') {
       setStep('hardware');
     } else if (effectiveStep === 'hardware') {
-      setStep('language');
+      setStep(includeLanguageStep ? 'language' : 'intent');
       setIntentQuestion(0);
     } else if (effectiveStep === 'language') {
-      setStep(processing?.configured ? 'model' : 'intent');
+      setStep('intent');
       setIntentQuestion(0);
     } else if (effectiveStep === 'intent') {
       if (intentQuestion < 3) {
@@ -664,6 +704,7 @@ export function ProcessingSetupModal({
     }
     if (effectiveStep === 'intent') {
       if (intentQuestion > 0) setIntentQuestion((current) => (current - 1) as IntentQuestionIndex);
+      else setStep(includeLanguageStep ? 'language' : 'hardware');
       return;
     }
     if (effectiveStep === 'storage') {
@@ -673,11 +714,37 @@ export function ProcessingSetupModal({
     if (effectiveStep === 'model') setStep('storage');
   };
 
-  const runtimeStatusLabel = preflightBlocked
-    ? (preflightPending ? 'Comprobando recursos locales' : 'Requiere atención')
-    : optionalLoading || loading
-      ? 'Comprobando recursos locales'
-      : 'Recursos locales listos';
+  const runtimeStatusLabel = loading || retrying
+    ? t('onboardingChecking')
+    : runtimeTimedOut
+      ? t('onboardingRuntimeTimeoutStatus')
+      : preflightBlocked
+        ? t('onboardingRuntimeNeedsAttention')
+        : t('onboardingRuntimeReady');
+  const showRuntimeIdentity = !initializationError && !runtimeTimedOut && !loading && !retrying;
+  const failedResources = (runtimePreflight?.resources ?? []).filter((resource) => resource.required && !resource.available);
+
+  const resourceAction = (resource: RuntimeResourceCheck) => {
+    const message = resource.message.toLowerCase();
+    if (resource.name.toLowerCase().includes('manifiesto') || resource.name.toLowerCase().includes('manifest')) {
+      return t('onboardingRuntimeManifestAction');
+    }
+    if (message.includes('import')) return t('onboardingRuntimeImportAction');
+    if (resource.name.toLowerCase().includes('workers') && (message.includes('faltan') || message.includes('missing'))) {
+      return t('onboardingRuntimeMissingAction');
+    }
+    return null;
+  };
+
+  const handleRuntimeRetry = async () => {
+    if (!onRetry || loading || retrying) return;
+    setRetrying(true);
+    try {
+      await onRetry();
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   return (
     <div
@@ -700,7 +767,7 @@ export function ProcessingSetupModal({
           role="dialog"
           aria-modal="true"
           tabIndex={-1}
-          aria-busy={loading || saving}
+          aria-busy={loading || saving || retrying}
           aria-labelledby="processing-setup-title"
           aria-describedby="processing-setup-description"
           className={styles.dialog}
@@ -723,14 +790,14 @@ export function ProcessingSetupModal({
                   Configura Pulsaria paso a paso. Puedes cambiar estas opciones después desde Ajustes.
                 </p>
               </div>
-              <div className={styles.stepCounter} aria-label={`Paso ${stepIndex + 1} de ${SETUP_STEPS.length}`}>
-                <span>Paso</span>
+              <div className={styles.stepCounter} aria-label={t('onboardingStepCounter', { current: stepIndex + 1, total: setupSteps.length })}>
+                <span>{t('onboardingStep')}</span>
                 <strong>{Math.max(1, stepIndex + 1).toString().padStart(2, '0')}</strong>
-                <small>/ {SETUP_STEPS.length.toString().padStart(2, '0')}</small>
+                <small>/ {setupSteps.length.toString().padStart(2, '0')}</small>
               </div>
-              <ol className={styles.stepRail} aria-label="Progreso de configuración">
-                {SETUP_STEPS.map((item, index) => (
-                  <li key={`${item.id}-${index}`} className={styles.stepItem} data-active={index <= stepIndex} data-current={index === stepIndex} aria-current={index === stepIndex ? 'step' : undefined}>
+              <ol className={styles.stepRail} aria-label={t('onboardingProgress')}>
+                {setupSteps.map((item, index) => (
+                  <li key={item.id} className={styles.stepItem} data-active={index <= stepIndex} data-current={index === stepIndex} aria-current={index === stepIndex ? 'step' : undefined}>
                     <span className={styles.stepDot}>{index < stepIndex ? <FaCheck size={8} /> : index + 1}</span>
                     <span>{item.label}</span>
                   </li>
@@ -744,7 +811,7 @@ export function ProcessingSetupModal({
               <FaTriangleExclamationFallback />
               <div>
                 <strong>Faltan recursos locales</strong>
-                <p>{preflight?.message || 'El asistente no guardará una configuración que pueda dejar el motor en un estado incompleto.'}</p>
+                <p>{runtimePreflight?.message || 'El asistente no guardará una configuración que pueda dejar el motor en un estado incompleto.'}</p>
                 {missingResources.length > 0 && <span>{missingResources.join(' · ')}</span>}
               </div>
             </div>
@@ -752,31 +819,44 @@ export function ProcessingSetupModal({
 
           {effectiveStep === 'runtime' && (
             <div className={styles.statusState}>
-              <div className={styles.statusMark} aria-hidden="true"><FaMicrochip size={20} /></div>
-              <p className={styles.eyebrow}>Primer arranque · Recursos locales</p>
+              {showRuntimeIdentity && <div className={styles.statusMark} aria-hidden="true"><FaMicrochip size={20} /></div>}
               <h2 id="processing-setup-title" className={styles.titleSmall}>
-                {initializationError ? 'No pudimos iniciar el motor' : 'Verificando tu instalación'}
+                {runtimeTimedOut
+                  ? t('onboardingRuntimeTimeoutTitle')
+                  : initializationError
+                    ? t('onboardingRuntimeErrorTitle')
+                    : t('onboardingRuntimeCheckingTitle')}
               </h2>
               <p id="processing-setup-description" className={styles.ledeSmall}>
-                {initializationError
-                  ? 'La interfaz está lista, pero necesitamos volver a consultar el hardware y la configuración local antes de continuar.'
-                  : 'Comprobamos hardware, Python embebido, modelos locales y almacenamiento. Esta verificación no envía tus archivos a la nube.'}
+                {runtimeTimedOut
+                  ? t('onboardingRuntimeTimeoutDescription')
+                  : initializationError
+                    ? t('onboardingRuntimeErrorDescription')
+                    : t('onboardingRuntimeInitialDescription')}
               </p>
-              <div className={styles.runtimeStatus} role="status">
-                <span className={styles.statusPulse} />
-                <span>{initializationError ? 'No disponible' : runtimeStatusLabel}</span>
-              </div>
-              {initializationError && <p role="alert" className={styles.errorMessage}>{initializationError}</p>}
-              {preflight?.checks && (
-                <div className={styles.checkList} aria-label="Comprobación de recursos">
-                  {Object.entries(preflight.checks).map(([name, ok]) => (
-                    <span key={name} data-ok={ok}>{ok ? <FaCheck size={9} /> : <FaTriangleExclamationFallback />}{name}</span>
-                  ))}
+              {showRuntimeIdentity && (
+                <div className={styles.runtimeStatus} role="status">
+                  <span className={styles.statusPulse} />
+                  <span>{runtimeStatusLabel}</span>
                 </div>
               )}
+              {initializationError && <p role="alert" className={styles.errorMessage}>{initializationError}</p>}
+              {failedResources.length > 0 && (
+                <ul className={styles.runtimeFailures} aria-label={t('onboardingRuntimeResource')}>
+                  {failedResources.map((resource) => (
+                    <li key={`${resource.name}:${resource.path}`}>
+                      <strong>{resource.name}</strong>
+                      <p>{resource.message}</p>
+                      <small>{t('onboardingRuntimePath')}: {resource.path}</small>
+                      {resourceAction(resource) && <p className={styles.runtimeAction}>{resourceAction(resource)}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {runtimeTimedOut && <p role="status" className={styles.runtimeTimeout}>{t('onboardingRuntimeTimeoutDescription')}</p>}
               {onRetry && (
-                <button type="button" className={styles.saveButton} onClick={() => void onRetry()} disabled={loading}>
-                  {loading ? 'Comprobando…' : 'Reintentar comprobación'}
+                <button type="button" className={styles.saveButton} onClick={() => void handleRuntimeRetry()} disabled={loading || retrying}>
+                  {loading || retrying ? t('onboardingChecking') : t('onboardingRetryCheck')}
                 </button>
               )}
             </div>
@@ -977,7 +1057,7 @@ export function ProcessingSetupModal({
 
                 {effectiveStep === 'storage' && (
                   <div className={styles.stepContent}>
-                    <p className={styles.sectionEyebrow}>3 · Almacenamiento</p>
+                    <p className={styles.sectionEyebrow}>{t('onboardingStageStorage')}</p>
                     <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.controlTitle}>Define una cuota segura</h3>
                     <p className={styles.controlDescription}>Solo cuenta video, audio, staging y cachés grandes. Transcript, segmentos, embeddings, metadata y capturas quedan fuera.</p>
 
@@ -1000,7 +1080,13 @@ export function ProcessingSetupModal({
                       </label>
                       <p id="setup-storage-status" className={styles.storageReason}>{recommendation.reason}</p>
                       {lowDisk && <p id="setup-storage-error" role="alert" className={styles.warningMessage}>No se habilitarán nuevas descargas hasta liberar espacio o elegir otra unidad. La purga nunca será automática.</p>}
-                      {optionalLoading && <p role="status" className={styles.statusMessage}>Midiendo el disco con el shell nativo…</p>}
+                      {optionalLoading && <p role="status" className={styles.statusMessage}>{t('onboardingStorageChecking')}</p>}
+                      {storageError && (
+                        <div role="alert" className={styles.storageCheckError}>
+                          <p>{storageError}</p>
+                          <button type="button" onClick={() => setStorageRetrySignal((value) => value + 1)} disabled={optionalLoading}>{t('onboardingRetryCheck')}</button>
+                        </div>
+                      )}
                     </div>
 
                     <div className={styles.retentionSummary}>
@@ -1013,7 +1099,7 @@ export function ProcessingSetupModal({
 
                 {effectiveStep === 'model' && (
                   <div className={styles.stepContent}>
-                    <p className={styles.sectionEyebrow}>4 · Modelo local</p>
+                    <p className={styles.sectionEyebrow}>{t('onboardingStageModel')}</p>
                     <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.controlTitle}>Elige tu nivel de análisis</h3>
                     <p className={styles.controlDescription}>Whisper tiny viene incluido para arrancar offline. Small y medium son opcionales y se preparan solo cuando confirmas.</p>
 
@@ -1095,7 +1181,7 @@ export function ProcessingSetupModal({
                     {(localError || preparationError || modelSetupState?.error) && (
                       <div role="alert" className={styles.errorMessage}>
                         <p>{localError || preparationError || modelSetupState?.error?.message || 'El modelo local no pudo prepararse.'}</p>
-                        <button type="button" onClick={() => void (modelSetupState?.error?.code === 'corrupt_model' ? onRepairModel?.() : onRetryModel?.())} disabled={saving || preflightBlocked || lowDisk || quotaGiB < 1} className={styles.errorAction}>
+                        <button type="button" onClick={() => void (modelSetupState?.error?.code === 'corrupt_model' ? onRepairModel?.() : onRetryModel?.())} disabled={saving || preflightBlocked || storageBlocked || lowDisk || quotaGiB < 1} className={styles.errorAction}>
                           {modelSetupState?.error?.code === 'corrupt_model' ? 'Reparar modelo' : 'Reintentar'}
                         </button>
                       </div>
@@ -1110,7 +1196,7 @@ export function ProcessingSetupModal({
                 {['welcome', 'hardware', 'storage'].includes(effectiveStep) && (
                   <div className={styles.navigation} data-first-step={effectiveStep === 'welcome'}>
                     {effectiveStep !== 'welcome' && <button type="button" onClick={previousStep} disabled={saving} className={styles.backButton}>{t('back')}</button>}
-                    <button type="button" onClick={nextStep} disabled={saving || preflightBlocked || (effectiveStep === 'storage' && (lowDisk || quotaGiB < 1))} className={styles.saveButton}>
+                    <button type="button" onClick={nextStep} disabled={saving || preflightBlocked || (effectiveStep === 'storage' && (storageBlocked || lowDisk || quotaGiB < 1))} className={styles.saveButton}>
                       {effectiveStep === 'welcome' ? 'Comenzar' : t('continue')}
                     </button>
                   </div>
@@ -1118,7 +1204,7 @@ export function ProcessingSetupModal({
                 {effectiveStep === 'model' && !completed && (
                   <div className={styles.navigation}>
                     <button type="button" onClick={previousStep} disabled={saving} className={styles.backButton}>{t('back')}</button>
-                    <button type="button" onClick={() => void handleSave()} disabled={saving || preflightBlocked || lowDisk || quotaGiB < 1} className={styles.saveButton}>
+                    <button type="button" onClick={() => void handleSave()} disabled={saving || preflightBlocked || storageBlocked || lowDisk || quotaGiB < 1} className={styles.saveButton}>
                       {saving ? 'Descargando y preparando…' : 'Descargar y preparar'}
                     </button>
                   </div>
@@ -1140,11 +1226,30 @@ export function ProcessingSetupModal({
               <h2 id="processing-setup-title" className={styles.titleSmall}>Tu motor local está listo</h2>
               <p id="processing-setup-description" className={styles.ledeSmall}>Whisper {savedProcessing?.whisper_model || selectedModel} quedó seleccionado. La cuota y la retención se conservaron como preferencias del asistente; cualquier purga deberá ser explícita y segura.</p>
               <div className={styles.successSummary}><span>{answers.intent}</span><span>{quotaGiB} GiB para medios</span><span>IA local bajo demanda</span></div>
+              <button
+                type="button"
+                className={styles.saveButton}
+                onClick={() => {
+                  if (onContinueFirstVideo) onContinueFirstVideo();
+                  else onDismiss?.();
+                }}
+              >
+                {t('onboardingContinueToVideo')}
+              </button>
+            </div>
+          )}
+
+          {effectiveStep !== 'success' && (
+            <div className={styles.postponeRow}>
+              <button type="button" onClick={() => void handlePostpone()}>{t('onboardingPostpone')}</button>
             </div>
           )}
 
           {effectiveStep !== 'runtime' && <p className={styles.footnote}>Tus archivos permanecen en tu equipo. El modelo generativo local no se descarga ni se ejecuta automáticamente.</p>}
           {processing && <span className="sr-only">Configuración actual: {processing.profile}, modelo {processing.whisper_model}</span>}
+          <div className="pointer-events-auto fixed right-4 top-4 z-[1300]">
+            <WindowControls controls={windowControls} />
+          </div>
         </motion.section>
       </div>
     </div>

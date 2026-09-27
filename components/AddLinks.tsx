@@ -6,10 +6,14 @@ import { validateTikTokUrl } from '@/lib/url-validation';
 import type { SubmitLinksResult } from '@/hooks/use-jobs';
 import { TikTokSourcesPanel } from '@/components/TikTokSourcesPanel';
 import { FaInfo } from '@/components/icon-library';
+import { useI18n } from '@/lib/i18n';
 
 interface AddLinksProps {
   onSubmitLinks: (urls: string[]) => Promise<SubmitLinksResult>;
   homeResetSignal?: number;
+  focusSignal?: number;
+  runtimeReady?: boolean;
+  runtimeIssue?: string | null;
   mode?: 'ingest' | 'profiles';
 }
 
@@ -25,7 +29,7 @@ interface StoredFile {
 interface QueueItemState {
   label: string;
   url: string;
-  status: 'pending' | 'running' | 'done' | 'rejected';
+  status: 'pending' | 'running' | 'accepted' | 'rejected';
   progress: number;
   error?: string;
 }
@@ -58,8 +62,16 @@ function formatBytes(bytes: number): string {
   return Math.max(1, Math.round(bytes / 1024)) + ' KB';
 }
 
-export function AddLinks({ onSubmitLinks, homeResetSignal = 0, mode = 'ingest' }: AddLinksProps) {
+export function AddLinks({
+  onSubmitLinks,
+  homeResetSignal = 0,
+  focusSignal = 0,
+  runtimeReady = true,
+  runtimeIssue,
+  mode = 'ingest',
+}: AddLinksProps) {
   const profileMode = mode === 'profiles';
+  const { t } = useI18n();
   const [mounted, setMounted] = useState(false);
   const [consented, setConsented] = useState<boolean>(false);
   const [gateChecked, setGateChecked] = useState<boolean>(false);
@@ -81,6 +93,7 @@ export function AddLinks({ onSubmitLinks, homeResetSignal = 0, mode = 'ingest' }
 
   const cardRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const firstUrlInputRef = useRef<HTMLInputElement>(null);
 
   // Check stored consent on mount
   useEffect(() => {
@@ -99,6 +112,15 @@ export function AddLinks({ onSubmitLinks, homeResetSignal = 0, mode = 'ingest' }
   useEffect(() => {
     setActiveTab(profileMode ? 'cuenta' : 'enlace');
   }, [homeResetSignal, profileMode]);
+
+  useEffect(() => {
+    if (focusSignal === 0 || profileMode || !consented) return;
+    if (activeTab !== 'enlace') {
+      setActiveTab('enlace');
+      return;
+    }
+    firstUrlInputRef.current?.focus({ preventScroll: true });
+  }, [activeTab, consented, focusSignal, profileMode]);
 
   const storeConsent = (val: boolean) => {
     try {
@@ -304,11 +326,11 @@ export function AddLinks({ onSubmitLinks, homeResetSignal = 0, mode = 'ingest' }
           ? { ...item, status: 'running', progress: 20 }
           : item));
         const result: SubmitLinksResult = await onSubmitLinks(urlsToSubmit);
-        submissionAccepted = true;
+        submissionAccepted = result.accepted.length > 0;
         const accepted = new Set(result.accepted.map((item) => item.url));
         const rejected = new Map(result.rejected.map((item) => [item.url, item.reason]));
         setQueueItems((prev) => prev.map((item) => {
-          if (accepted.has(item.url)) return { ...item, status: 'done', progress: 100 };
+          if (accepted.has(item.url)) return { ...item, status: 'accepted', progress: 0 };
           if (rejected.has(item.url)) return {
             ...item,
             status: 'rejected',
@@ -467,6 +489,7 @@ export function AddLinks({ onSubmitLinks, homeResetSignal = 0, mode = 'ingest' }
                         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                       </svg>
                       <input
+                        ref={idx === 0 ? firstUrlInputRef : undefined}
                         type="url"
                         aria-label={`URL de TikTok ${idx + 1}`}
                         spellCheck={false}
@@ -598,11 +621,14 @@ export function AddLinks({ onSubmitLinks, homeResetSignal = 0, mode = 'ingest' }
 
             {activeTab !== 'cuenta' && (
               <div className="actions">
+                {!runtimeReady && !profileMode && runtimeIssue && (
+                  <p role="status" className="rounded-xl bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-white/70">{runtimeIssue}</p>
+                )}
                 <button
                   type="button"
                   className={busy ? 'cta busy' : 'cta'}
                   id="cta"
-                  disabled={busy || !canProcess}
+                  disabled={busy || !canProcess || (!runtimeReady && !profileMode)}
                   onClick={handleProcess}
                 >
                   <svg className="rk" viewBox="0 0 24 24">
@@ -671,12 +697,12 @@ export function AddLinks({ onSubmitLinks, homeResetSignal = 0, mode = 'ingest' }
                         <span className="i">{String(qIdx + 1).padStart(2, '0')}</span>
                         <span className="u">{item.label}</span>
                         <span
-                          className={`s ${item.status === 'running' ? 'run' : item.status === 'done' ? 'done' : item.status === 'rejected' ? 'error' : ''}`}
+                          className={`s ${item.status === 'running' ? 'run' : item.status === 'accepted' ? 'done' : item.status === 'rejected' ? 'error' : ''}`}
                         >
                           {item.status === 'running'
                             ? 'Extrayendo…'
-                            : item.status === 'done'
-                            ? 'Listo'
+                            : item.status === 'accepted'
+                            ? t('linkAccepted')
                             : item.status === 'rejected'
                             ? 'Rechazado'
                             : 'En cola'}
@@ -684,7 +710,7 @@ export function AddLinks({ onSubmitLinks, homeResetSignal = 0, mode = 'ingest' }
                       </div>
                       <div className="tr">
                         <div
-                          className={`fl ${item.status === 'done' ? 'done' : ''}`}
+                          className={`fl ${item.status === 'accepted' ? 'done' : ''}`}
                           style={{ width: `${item.progress}%` }}
                         />
                       </div>
@@ -698,7 +724,7 @@ export function AddLinks({ onSubmitLinks, homeResetSignal = 0, mode = 'ingest' }
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
                     <span id="qfinTx">
-                      Proceso finalizado · {queueItems.filter((item) => item.status === 'done').length} aceptados,{' '}
+                      Proceso finalizado · {queueItems.filter((item) => item.status === 'accepted').length} aceptados,{' '}
                       {queueItems.filter((item) => item.status === 'rejected').length} rechazados
                     </span>
                   </div>

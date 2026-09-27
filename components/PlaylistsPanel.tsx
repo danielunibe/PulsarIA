@@ -1,9 +1,11 @@
 'use client';
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { FaPlus, FaFolder } from '@/components/icon-library';
+import { FaPlus, FaFolder, FaTrash } from '@/components/icon-library';
 import { PlaylistCard } from './PlaylistCard';
+import { SourceCollectionCard } from './SourceCollectionCard';
 import { usePlaylists } from '@/hooks/usePlaylists';
+import type { SourceCollectionRecord } from '@/hooks/usePlaylists';
 
 /**
  * Props del panel de playlists temáticas.
@@ -16,6 +18,10 @@ interface PlaylistsPanelProps {
   onPlaylistSelect: (id: number | null) => void;
   /** ID de la playlist actualmente seleccionada, o null */
   selectedPlaylistId: number | null;
+  /** Selecciona una agrupación confirmada de perfil/canal. */
+  onSourceCollectionSelect?: (collection: SourceCollectionRecord | null) => void;
+  /** Agrupación de fuente actualmente seleccionada, o null. */
+  selectedSourceCollection?: SourceCollectionRecord | null;
 }
 
 /**
@@ -27,9 +33,28 @@ interface PlaylistsPanelProps {
  * - Selección/deselección de playlist (filtra el VideoGrid)
  * - Eliminación de playlists con confirmación
  */
-export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: PlaylistsPanelProps) {
+export function PlaylistsPanel({
+  onPlaylistSelect,
+  selectedPlaylistId,
+  onSourceCollectionSelect,
+  selectedSourceCollection = null,
+}: PlaylistsPanelProps) {
   const {
-    playlists, loading, ready, error, createPlaylist, deletePlaylist, selectPlaylist
+    playlists,
+    loading,
+    ready,
+    error,
+    fetchPlaylists,
+    createPlaylist,
+    deletePlaylist,
+    selectPlaylist,
+    playlistItems,
+    removeFromPlaylist,
+    removeContentFromPlaylist,
+    sourceCollections,
+    sourceLoading,
+    sourceError,
+    fetchSourceCollections,
   } = usePlaylists();
 
   const [isCreating, setIsCreating] = useState(false);
@@ -38,6 +63,9 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
 
   const PLAYLIST_COLORS = ['#fe2c55', '#8a5cff', '#25f4ee', '#f59e0b', '#10b981', '#ec4899', '#3b82f6', '#f97316'];
   const [selectedColor, setSelectedColor] = useState(PLAYLIST_COLORS[1]);
+  const [collectionFilter, setCollectionFilter] = useState<'all' | 'manual' | 'source'>('all');
+  const manualPlaylists = playlists.filter((playlist) => playlist.kind !== 'legacy_auto' && !playlist.auto_generated);
+  const legacyPlaylists = playlists.filter((playlist) => playlist.kind === 'legacy_auto' || playlist.auto_generated);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -52,7 +80,15 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
   const handleSelect = async (id: number) => {
     const nextId = id === selectedPlaylistId ? null : id;
     await selectPlaylist(nextId);
+    onSourceCollectionSelect?.(null);
     onPlaylistSelect(nextId);
+  };
+
+  const handleSourceSelect = (collection: SourceCollectionRecord) => {
+    const nextCollection = selectedSourceCollection?.id === collection.id ? null : collection;
+    void selectPlaylist(null);
+    onPlaylistSelect(null);
+    onSourceCollectionSelect?.(nextCollection);
   };
 
   const [pendingDelete, setPendingDelete] = useState<{ id: number; name: string } | null>(null);
@@ -82,16 +118,37 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
           type="button"
           aria-expanded={isCreating}
           onClick={() => setIsCreating(!isCreating)}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[10px] font-bold tracking-wider uppercase text-white/90 bg-white/10 hover:bg-white/20 transition-all cursor-pointer border-0"
+          disabled={!ready || loading}
+          title={!ready ? 'Conecta con el motor local para crear playlists.' : undefined}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[10px] font-bold tracking-wider uppercase text-white/90 bg-white/10 hover:bg-white/20 transition-all cursor-pointer border-0 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <FaPlus size={9} />
           <span>Nueva</span>
         </button>
       </div>
 
+      <div className="grid grid-cols-3 gap-1 rounded-[11px] bg-white/[0.035] p-1">
+        {([
+          ['all', 'Todo'],
+          ['manual', 'Playlists'],
+          ['source', 'Fuentes'],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={collectionFilter === value}
+            onClick={() => setCollectionFilter(value)}
+            className={`rounded-[8px] px-2 py-1.5 text-[9px] font-bold uppercase tracking-[0.12em] transition-colors ${collectionFilter === value ? 'bg-white/10 text-white/80' : 'text-white/35 hover:text-white/60'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {error && (
-        <div role="alert" className="rounded-xl border-0 bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-[#fe2c55]">
-          No se pudo completar la operación de playlist: {error}
+        <div role="alert" className="flex items-center gap-3 rounded-xl border-0 bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-[#fe2c55]">
+          <span className="min-w-0 flex-1">{error}</span>
+          <button type="button" onClick={() => void fetchPlaylists()} className="shrink-0 rounded-md bg-white/[.07] px-2 py-1 font-bold text-white/75 hover:bg-white/10">Actualizar</button>
         </div>
       )}
 
@@ -159,26 +216,92 @@ export function PlaylistsPanel({ onPlaylistSelect, selectedPlaylistId }: Playlis
         )}
       </>
 
-      {/* Playlist list */}
-      <div className="flex flex-col gap-2">
-        {playlists.map((playlist) => (
-          <PlaylistCard
-            key={playlist.id}
-            playlist={playlist}
-            isSelected={playlist.id === selectedPlaylistId}
-            onSelect={() => handleSelect(playlist.id)}
-            onDelete={() => handleDelete(playlist.id, playlist.name)}
-          />
-        ))}
+      {/* Manual playlist list */}
+      {(collectionFilter === 'all' || collectionFilter === 'manual') && (
+        <div className="flex flex-col gap-2">
+          <div className="px-1 text-[9px] font-black uppercase tracking-[0.18em] text-white/30">Playlists manuales</div>
+          {manualPlaylists.map((playlist) => (
+            <PlaylistCard
+              key={playlist.id}
+              playlist={playlist}
+              isSelected={playlist.id === selectedPlaylistId}
+              onSelect={() => handleSelect(playlist.id)}
+              onDelete={() => handleDelete(playlist.id, playlist.name)}
+            />
+          ))}
 
-        {!loading && ready && !error && playlists.length === 0 && !isCreating && (
-          <div className="text-center py-6 px-3 rounded-[16px] border border-dashed border-white/10 bg-white/[0.01]">
-            <FaFolder size={20} className="mx-auto text-white/20 mb-2" />
-            <p className="text-xs text-white/40 font-medium">No hay playlists creadas</p>
-            <p className="text-[10px] text-white/25 mt-1">Crea una para organizar tus videos por temas</p>
-          </div>
-        )}
-      </div>
+          {!loading && ready && !error && manualPlaylists.length === 0 && !isCreating && (
+            <div className="text-center py-6 px-3 rounded-[16px] border border-dashed border-white/10 bg-white/[0.01]">
+              <FaFolder size={20} className="mx-auto text-white/20 mb-2" />
+              <p className="text-xs text-white/40 font-medium">No hay playlists creadas</p>
+              <p className="text-[10px] text-white/25 mt-1">Crea una para organizar tus videos por temas</p>
+            </div>
+          )}
+
+          {selectedPlaylistId !== null && playlistItems.length > 0 && (
+            <div className="mt-1 flex flex-col gap-1.5 rounded-[15px] bg-black/15 p-2">
+              <div className="px-1 text-[9px] font-black uppercase tracking-[0.16em] text-white/25">Memberships</div>
+              {playlistItems.map((item) => (
+                <div key={item.id} className="flex items-center gap-2 rounded-[10px] bg-white/[0.025] px-2 py-2">
+                  <span className="min-w-0 flex-1 truncate text-[10px] text-white/55">{item.title || item.url}</span>
+                  <button
+                    type="button"
+                    aria-label={`Quitar ${item.title || item.url} de la playlist`}
+                    onClick={() => void (item.job_id !== null
+                      ? removeFromPlaylist(selectedPlaylistId, item.job_id)
+                      : removeContentFromPlaylist(selectedPlaylistId, item.content_id))}
+                    className="shrink-0 rounded-md p-1 text-white/30 transition-colors hover:bg-[#fe2c55]/10 hover:text-[#fe2c55]"
+                  >
+                    <FaTrash size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {collectionFilter === 'all' && legacyPlaylists.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div className="px-1 text-[9px] font-black uppercase tracking-[0.18em] text-white/30">Clustering legado</div>
+          {legacyPlaylists.map((playlist) => (
+            <PlaylistCard
+              key={playlist.id}
+              playlist={playlist}
+              isSelected={playlist.id === selectedPlaylistId}
+              onSelect={() => handleSelect(playlist.id)}
+              onDelete={() => handleDelete(playlist.id, playlist.name)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Confirmed profile/channel groupings are read-only projections. */}
+      {(collectionFilter === 'all' || collectionFilter === 'source') && (
+        <div className="flex flex-col gap-2">
+          <div className="px-1 text-[9px] font-black uppercase tracking-[0.18em] text-white/30">Fuentes confirmadas</div>
+          {sourceError && (
+            <div role="alert" className="flex items-center gap-3 rounded-xl bg-[#f59e0b]/10 px-3 py-2 text-[10px] leading-relaxed text-[#f59e0b]/90">
+              <span className="min-w-0 flex-1">{sourceError}</span>
+              <button type="button" onClick={() => void fetchSourceCollections()} className="shrink-0 rounded-md bg-white/[.07] px-2 py-1 font-bold text-white/75 hover:bg-white/10">Reintentar</button>
+            </div>
+          )}
+          {sourceCollections.map((collection) => (
+            <SourceCollectionCard
+              key={collection.id}
+              collection={collection}
+              isSelected={selectedSourceCollection?.id === collection.id}
+              onSelect={() => handleSourceSelect(collection)}
+            />
+          ))}
+          {!sourceLoading && !sourceError && sourceCollections.length === 0 && (
+            <div className="rounded-[16px] bg-white/[0.02] px-3 py-5 text-center">
+              <p className="text-xs text-white/40 font-medium">No hay canales confirmados</p>
+              <p className="mt-1 text-[10px] text-white/25">Las fuentes aparecerán después de confirmar un perfil.</p>
+            </div>
+          )}
+        </div>
+      )}
       {pendingDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
              role="dialog" aria-modal="true" aria-label="Confirmar eliminación">

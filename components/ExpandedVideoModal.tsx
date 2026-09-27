@@ -37,6 +37,8 @@ interface ExpandedVideoModalProps {
     onClose: () => void;
     /** Abre el modo Cinema en este video (opcional; oculta el boton si no viene) */
     onOpenCinema?: () => void;
+    /** Timestamp del momento que originó la apertura desde una búsqueda. */
+    initialTime?: number;
 }
 
 type SourceState = 'local' | 'online' | 'unavailable';
@@ -108,7 +110,7 @@ async function resolveArtifactUrl(path: string): Promise<string | undefined> {
  * - Importación de archivos UNIB existentes
  * - Búsqueda semántica inline sobre la transcripción
  */
-export function ExpandedVideoModal({ video, onClose, onOpenCinema }: ExpandedVideoModalProps) {
+export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }: ExpandedVideoModalProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const semanticInputRef = useRef<HTMLInputElement>(null);
     const [mounted, setMounted] = useState(false);
@@ -136,6 +138,23 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema }: ExpandedVid
     const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutput[]>([]);
     const [generatedOutputUrls, setGeneratedOutputUrls] = useState<Record<number, string>>({});
     const [savingFrame, setSavingFrame] = useState(false);
+
+    useEffect(() => {
+        if (initialTime === undefined || !Number.isFinite(initialTime)) return;
+        const seekToMatch = () => {
+            const element = videoRef.current;
+            if (!element) return;
+            const requestedTime = Math.max(0, initialTime);
+            const duration = Number.isFinite(element.duration) && element.duration > 0 ? element.duration : requestedTime;
+            element.currentTime = Math.min(requestedTime, duration);
+            setRawCurrentTime(element.currentTime);
+        };
+        const element = videoRef.current;
+        if (!element) return;
+        if (element.readyState >= 1) seekToMatch();
+        element.addEventListener('loadedmetadata', seekToMatch);
+        return () => element.removeEventListener('loadedmetadata', seekToMatch);
+    }, [initialTime, video.videoSrc]);
 
     const { exportSemantic, importSemantic, downloadUnib, exporting, importing, error: semanticError, exportedContent } = useSemanticIO();
 

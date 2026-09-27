@@ -134,9 +134,9 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
         run: |
-          $isCandidate = $env:RELEASE_TAG -match '-rc\.'
-          $env:NEXT_PUBLIC_PULSARIA_UPDATE_CHANNEL = if ($isCandidate) { 'rc' } else { 'stable' }
-          $endpoint = if ($isCandidate) {
+          $isPrerelease = $env:RELEASE_TAG -match '-'
+          $env:NEXT_PUBLIC_PULSARIA_UPDATE_CHANNEL = if ($isPrerelease) { 'rc' } else { 'stable' }
+          $endpoint = if ($isPrerelease) {
             "https://github.com/danielunibe/PulsarIA/releases/download/$env:RELEASE_TAG/latest.json"
           } else {
             'https://github.com/danielunibe/PulsarIA/releases/latest/download/latest.json'
@@ -163,7 +163,13 @@ jobs:
           }
           $overlay | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $overlayPath -Encoding utf8
           try {
-            npm run tauri build -- --config $overlayPath
+            if ($isPrerelease) {
+              # WiX/MSI requires numeric-only prerelease identifiers. Beta/RC
+              # tags publish the per-user NSIS installer; stable tags publish both.
+              npm run tauri build -- --bundles nsis --config $overlayPath
+            } else {
+              npm run tauri build -- --config $overlayPath
+            }
             if ($LASTEXITCODE -ne 0) { throw 'Tauri release build failed.' }
           } finally {
             if (Test-Path -LiteralPath $overlayPath -PathType Leaf) {
@@ -177,13 +183,17 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
         run: |
+          $isPrerelease = $env:RELEASE_TAG -match '-'
           $nsis = Get-ChildItem -LiteralPath 'target-tauri/release/bundle/nsis' -Filter '*_x64-setup.exe' -File | Select-Object -First 1
-          $msi = Get-ChildItem -LiteralPath 'target-tauri/release/bundle/msi' -Filter '*_x64*.msi' -File | Select-Object -First 1
-          if ($null -eq $nsis -or $null -eq $msi) { throw 'NSIS or MSI installer was not generated.' }
+          $msi = Get-ChildItem -LiteralPath 'target-tauri/release/bundle/msi' -Filter '*_x64*.msi' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -eq $nsis) { throw 'NSIS installer was not generated.' }
+          if (-not $isPrerelease -and $null -eq $msi) { throw 'Stable MSI installer was not generated.' }
           & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .github/scripts/sign-windows.ps1 -Path $nsis.FullName
           if ($LASTEXITCODE -ne 0) { throw 'NSIS Authenticode signing failed.' }
-          & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .github/scripts/sign-windows.ps1 -Path $msi.FullName
-          if ($LASTEXITCODE -ne 0) { throw 'MSI Authenticode signing failed.' }
+          if ($null -ne $msi) {
+            & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .github/scripts/sign-windows.ps1 -Path $msi.FullName
+            if ($LASTEXITCODE -ne 0) { throw 'MSI Authenticode signing failed.' }
+          }
 
       - name: Smoke test installed release
         run: |
@@ -192,6 +202,7 @@ jobs:
 
       - name: Generate and verify updater manifest
         run: |
+          $isPrerelease = $env:RELEASE_TAG -match '-'
           pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/create-updater-manifest.ps1 `
             -ArtifactRoot target-tauri/release/bundle `
             -Version ($env:RELEASE_TAG -replace '^v', '') `
@@ -206,7 +217,11 @@ jobs:
             "$hash  $($file.Name)"
           }
           $checksumLines | Set-Content -LiteralPath $checksumPath -Encoding utf8
-          npm run verify:release-artifacts -- -ArtifactRoot target-tauri/release/bundle -RequireAuthenticode
+          if ($isPrerelease) {
+            npm run verify:release-artifacts -- -ArtifactRoot target-tauri/release/bundle -RequireAuthenticode -AllowPrerelease
+          } else {
+            npm run verify:release-artifacts -- -ArtifactRoot target-tauri/release/bundle -RequireAuthenticode
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Release artifact verification failed.' }
 
       - name: Stage public release assets
@@ -228,7 +243,7 @@ jobs:
           @("Pulsaria $env:RELEASE_TAG", '', 'Artefactos generados por el workflow firmado de Windows.', '', 'La aplicación valida la firma Tauri antes de instalar actualizaciones.') | Set-Content -LiteralPath $notesPath -Encoding utf8
           $assets = @(Get-ChildItem -LiteralPath $env:RELEASE_ASSET_ROOT -File | ForEach-Object { $_.FullName })
           $arguments = @('release', 'create', $env:RELEASE_TAG, '--repo', 'danielunibe/PulsarIA', '--title', "Pulsaria $env:RELEASE_TAG", '--notes-file', $notesPath)
-          if ($env:RELEASE_TAG -match '-rc\.') { $arguments += '--prerelease' }
+          if ($env:RELEASE_TAG -match '-') { $arguments += '--prerelease' }
           $arguments += $assets
           & gh @arguments
           if ($LASTEXITCODE -ne 0) { throw 'GitHub Release publication failed.' }

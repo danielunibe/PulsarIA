@@ -12,13 +12,54 @@ export interface PlaylistRecord {
   topic_keywords: string;
   color: string;
   created_at: string;
+  kind?: 'manual' | 'legacy_auto' | 'smart' | string;
+  sort_mode?: string;
+  smart_query?: string | null;
+  smart_filters_json?: string | null;
   item_count: number;
 }
+
+export interface SourceCollectionRecord {
+  id: number;
+  profile_source_id: number;
+  channel_kind: string;
+  name: string;
+  username: string | null;
+  display_name: string | null;
+  enabled: boolean;
+  status: string;
+  item_count: number | null;
+  last_sync_at: string | null;
+}
+
+export interface SourceContentItem {
+  id: number;
+  platform: string;
+  platform_content_id: string;
+  canonical_url: string;
+  author_id: string | null;
+  author_handle: string | null;
+  title: string | null;
+  published_at: string | null;
+  discovered_at: string;
+  updated_at: string;
+  availability: string;
+  job_id: number | null;
+}
+
+export interface PlaylistContentView extends JobRecord {
+  content_id: number;
+  job_id: number | null;
+  availability: string;
+}
+
+/** Source groupings and manual playlists share the same projected card model. */
+export type SourceContentView = PlaylistContentView;
 
 export type PlaylistLoadState = 'loading' | 'ready' | 'error';
 
 import { REST_API_BASE } from '@/lib/api-config';
-import { apiFetch } from '@/lib/api-client';
+import { apiFetch, localApiErrorMessage } from '@/lib/api-client';
 
 async function restRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(`${REST_API_BASE}${path}`, {
@@ -58,10 +99,13 @@ export function usePlaylists() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<PlaylistLoadState>('loading');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
-  const [playlistItems, setPlaylistItems] = useState<JobRecord[]>([]);
+  const [playlistItems, setPlaylistItems] = useState<PlaylistContentView[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [sourceCollections, setSourceCollections] = useState<SourceCollectionRecord[]>([]);
+  const [sourceLoading, setSourceLoading] = useState(true);
+  const [sourceError, setSourceError] = useState<string | null>(null);
 
-  const errorMessage = (value: unknown) => value instanceof Error ? value.message : String(value);
+  const errorMessage = (value: unknown) => localApiErrorMessage(value, 'No se pudo completar la operación de playlist.');
 
   const fetchPlaylists = useCallback(async () => {
     setLoading(true);
@@ -87,17 +131,52 @@ export function usePlaylists() {
 
   const fetchPlaylistItems = useCallback(async (playlistId: number) => {
     try {
-      let items: JobRecord[];
+      let items: PlaylistContentView[];
       try {
-        items = await tauriInvoke<JobRecord[]>('get_playlist_items', { playlistId });
+        try {
+          items = await tauriInvoke<PlaylistContentView[]>('get_playlist_content_items', { playlistId });
+        } catch {
+          items = await restRequest<PlaylistContentView[]>(`/playlists/${playlistId}/content`);
+        }
       } catch {
-        items = await restRequest<JobRecord[]>(`/playlists/${playlistId}/items`);
+        let legacyItems: JobRecord[];
+        try {
+          legacyItems = await tauriInvoke<JobRecord[]>('get_playlist_items', { playlistId });
+        } catch {
+          legacyItems = await restRequest<JobRecord[]>(`/playlists/${playlistId}/items`);
+        }
+        items = legacyItems.map((item) => ({
+          ...item,
+          content_id: item.id,
+          job_id: item.id,
+          availability: 'available',
+        }));
       }
       setPlaylistItems(items);
     } catch (fetchItemsError) {
       console.error('fetchPlaylistItems failed:', fetchItemsError);
       setPlaylistItems([]);
       setError(errorMessage(fetchItemsError));
+    }
+  }, []);
+
+  const fetchSourceCollections = useCallback(async () => {
+    setSourceLoading(true);
+    try {
+      let data: SourceCollectionRecord[];
+      try {
+        data = await tauriInvoke<SourceCollectionRecord[]>('get_source_collections');
+      } catch {
+        data = await restRequest<SourceCollectionRecord[]>('/source-collections');
+      }
+      setSourceCollections(data);
+      setSourceError(null);
+    } catch (fetchError) {
+      console.error('fetchSourceCollections failed:', fetchError);
+      setSourceCollections([]);
+      setSourceError(errorMessage(fetchError));
+    } finally {
+      setSourceLoading(false);
     }
   }, []);
 
@@ -148,6 +227,28 @@ export function usePlaylists() {
     [fetchPlaylistItems, fetchPlaylists, selectedPlaylistId],
   );
 
+  const addContentToPlaylist = useCallback(
+    async (playlistId: number, contentId: number) => {
+      try {
+        try {
+          await tauriInvoke<void>('add_to_playlist', { playlistId, contentId });
+        } catch {
+          await restRequest<void>(`/playlists/${playlistId}/items`, {
+            method: 'POST',
+            body: JSON.stringify({ content_id: contentId }),
+          });
+        }
+        if (selectedPlaylistId === playlistId) await fetchPlaylistItems(playlistId);
+        await fetchPlaylists();
+        setError(null);
+      } catch (addError) {
+        console.error('addContentToPlaylist failed:', addError);
+        setError(errorMessage(addError));
+      }
+    },
+    [fetchPlaylistItems, fetchPlaylists, selectedPlaylistId],
+  );
+
   const removeFromPlaylist = useCallback(
     async (playlistId: number, jobId: number) => {
       try {
@@ -161,6 +262,25 @@ export function usePlaylists() {
         setError(null);
       } catch (removeError) {
         console.error('removeFromPlaylist failed:', removeError);
+        setError(errorMessage(removeError));
+      }
+    },
+    [fetchPlaylistItems, fetchPlaylists, selectedPlaylistId],
+  );
+
+  const removeContentFromPlaylist = useCallback(
+    async (playlistId: number, contentId: number) => {
+      try {
+        try {
+          await tauriInvoke<void>('remove_from_playlist', { playlistId, contentId });
+        } catch {
+          await restRequest<void>(`/playlists/${playlistId}/content/${contentId}`, { method: 'DELETE' });
+        }
+        if (selectedPlaylistId === playlistId) await fetchPlaylistItems(playlistId);
+        await fetchPlaylists();
+        setError(null);
+      } catch (removeError) {
+        console.error('removeContentFromPlaylist failed:', removeError);
         setError(errorMessage(removeError));
       }
     },
@@ -203,12 +323,14 @@ export function usePlaylists() {
   useEffect(() => {
     let active = true;
     queueMicrotask(() => {
-      if (active) void fetchPlaylists();
+      if (!active) return;
+      void fetchPlaylists();
+      void fetchSourceCollections();
     });
     return () => {
       active = false;
     };
-  }, [fetchPlaylists]);
+  }, [fetchPlaylists, fetchSourceCollections]);
 
   return {
     playlists,
@@ -219,9 +341,15 @@ export function usePlaylists() {
     status,
     ready: status === 'ready',
     fetchPlaylists,
+    sourceCollections,
+    sourceLoading,
+    sourceError,
+    fetchSourceCollections,
     createPlaylist,
     addToPlaylist,
+    addContentToPlaylist,
     removeFromPlaylist,
+    removeContentFromPlaylist,
     deletePlaylist,
     selectPlaylist,
   };

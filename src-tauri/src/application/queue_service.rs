@@ -796,8 +796,7 @@ impl QueueService {
         {
             command.env("PULSAR_COOKIES_FROM_BROWSER", browser);
         }
-        #[cfg(windows)]
-        command.creation_flags(0x08000000);
+        crate::process_control::hide_tokio_command(&mut command);
 
         let output = tokio::time::timeout(Duration::from_secs(120), command.output())
             .await
@@ -866,8 +865,7 @@ impl QueueService {
         {
             command.env("PULSAR_COOKIES_FROM_BROWSER", browser);
         }
-        #[cfg(windows)]
-        command.creation_flags(0x08000000);
+        crate::process_control::hide_tokio_command(&mut command);
 
         let output = tokio::time::timeout(Duration::from_secs(180), command.output())
             .await
@@ -1287,50 +1285,88 @@ impl QueueService {
                 // indexing; searchable chunks are created only when text exists.
                 if let Err(error) = persist_worker_result(&repo, job, &worker_result) {
                     Err(QueueError::ProcessingError(error))
-                } else if worker_result.transcript.trim().is_empty() {
-                    Ok(())
-                } else if let Err(error) =
-                    search_service.index_document(job.job_id, &worker_result.transcript)
-                {
-                    Err(QueueError::ProcessingError(format!(
-                        "HNSW indexing failed: {}",
-                        error
-                    )))
-                } else if let Err(error) = search_service.snapshot_index() {
-                    Err(QueueError::ProcessingError(format!(
-                        "HNSW snapshot failed: {}",
-                        error
-                    )))
                 } else {
-                    let retention = std::env::var("PULSAR_DEFAULT_RETENTION")
-                        .unwrap_or_else(|_| "keep".to_string());
-                    let connection = repo.get_connection().map_err(QueueError::ProcessingError)?;
-                    let connection = connection.lock().map_err(|_| {
-                        QueueError::ProcessingError("Database mutex poisoned".to_string())
-                    })?;
-                    if retention == "online" {
-                        // `online` means the job is eligible for an explicit,
-                        // explainable purge. Never remove media silently at
-                        // the end of a successful download: the user must be
-                        // able to review candidates and undo a purge.
-                        crate::db::set_media_keep_status(&connection, job.job_id, "online")
-                            .map_err(|error| {
-                                QueueError::ProcessingError(format!(
-                                    "retention status failed: {}",
-                                    error
-                                ))
-                            })?;
-                    } else {
-                        crate::db::set_media_keep_status(&connection, job.job_id, "keep").map_err(
-                            |error| {
-                                QueueError::ProcessingError(format!(
-                                    "retention status failed: {}",
-                                    error
-                                ))
+                    if let Some(visual_analysis) = worker_result.visual_analysis.as_ref() {
+                        let raw_visual = serde_json::to_string(visual_analysis)
+                            .map_err(|error| QueueError::ProcessingError(error.to_string()))?;
+                        match repo.get_connection() {
+                            Ok(connection) => match connection.lock() {
+                                Ok(mut connection) => {
+                                    if let Err(error) = crate::db::index_visual_search_units(
+                                        &mut connection,
+                                        job.job_id,
+                                        Some(&raw_visual),
+                                    ) {
+                                        // OCR is optional enrichment; a malformed
+                                        // visual frame must not hide transcript or
+                                        // metadata results.
+                                        warn!(
+                                            "OCR indexing skipped for job {}: {}",
+                                            job.job_id, error
+                                        );
+                                    }
+                                }
+                                Err(_) => warn!(
+                                    "OCR indexing skipped for job {}: database mutex poisoned",
+                                    job.job_id
+                                ),
                             },
-                        )?;
+                            Err(error) => {
+                                warn!("OCR indexing skipped for job {}: {}", job.job_id, error)
+                            }
+                        }
                     }
-                    Ok(())
+
+                    if worker_result.transcript.trim().is_empty() {
+                        Ok(())
+                    } else if let Err(error) = (|| {
+                        let connection = repo.get_connection()?;
+                        let connection = connection
+                            .lock()
+                            .map_err(|_| "Database mutex poisoned".to_string())?;
+                        let segments = crate::db::get_transcript_segments(&connection, job.job_id)
+                            .map_err(|error| error.to_string())?;
+                        search_service.index_document_with_segments(job.job_id, &segments)
+                    })() {
+                        Err(QueueError::ProcessingError(format!(
+                            "HNSW indexing failed: {}",
+                            error
+                        )))
+                    } else if let Err(error) = search_service.snapshot_index() {
+                        Err(QueueError::ProcessingError(format!(
+                            "HNSW snapshot failed: {}",
+                            error
+                        )))
+                    } else {
+                        let retention = std::env::var("PULSAR_DEFAULT_RETENTION")
+                            .unwrap_or_else(|_| "keep".to_string());
+                        let connection =
+                            repo.get_connection().map_err(QueueError::ProcessingError)?;
+                        let connection = connection.lock().map_err(|_| {
+                            QueueError::ProcessingError("Database mutex poisoned".to_string())
+                        })?;
+                        if retention == "online" {
+                            // `online` means the job is eligible for an explicit,
+                            // explainable purge. Never remove media silently at
+                            // the end of a successful download.
+                            crate::db::set_media_keep_status(&connection, job.job_id, "online")
+                                .map_err(|error| {
+                                    QueueError::ProcessingError(format!(
+                                        "retention status failed: {}",
+                                        error
+                                    ))
+                                })?;
+                        } else {
+                            crate::db::set_media_keep_status(&connection, job.job_id, "keep")
+                                .map_err(|error| {
+                                    QueueError::ProcessingError(format!(
+                                        "retention status failed: {}",
+                                        error
+                                    ))
+                                })?;
+                        }
+                        Ok(())
+                    }
                 }
             }
             Ok(Ok(None)) => Err(QueueError::ProcessingError(
