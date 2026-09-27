@@ -6,16 +6,16 @@
 
 ## Estado ejecutivo
 
-El repositorio [danielunibe/PulsarIA](https://github.com/danielunibe/PulsarIA) es público y ya ofrece la prerelease `v0.1.0-eval.3`, sin costo de descarga. Esa release es del 2026-09-14 y no contiene el código Beta 2 validado en este checkout. El instalador NSIS reconstruido localmente desde el código actual sí pasó el smoke aislado, pero aún no se ha publicado.
+El repositorio [danielunibe/PulsarIA](https://github.com/danielunibe/PulsarIA) es público y ya ofrece la prerelease `v0.1.0-eval.3`, sin costo de descarga. Esa release es del 2026-09-14 y no contiene el código Beta 2 validado en este checkout. El candidato Beta 2 está en el PR borrador [#2](https://github.com/danielunibe/PulsarIA/pull/2), todavía sin merge ni release. El instalador NSIS reconstruido desde `08ecdf5` pasó el smoke aislado, pero aún no se ha publicado.
 
-El objetivo final sigue **PARTIAL**. Los gates técnicos del MVP pasan y el instalador Windows por usuario funciona. La publicación del código y un instalador actual requiere cerrar los datos y la aprobación legal pendientes, además de revisar y transferir el árbol de trabajo al repositorio remoto. El MSI falla con versiones prerelease alfanuméricas; el flujo de GitHub se ajustó para generar NSIS en prereleases y conservar MSI para versiones estables.
+El objetivo final sigue **PARTIAL**. La rama candidata ya está en GitHub; el CI del commit `6a56f43` pasó y el CI del commit `08ecdf5` está en curso. Para publicar un instalador actual faltan la revisión/merge del PR, los datos y la aprobación legal, la verificación final de atribuciones y una release desde un commit validado. El MSI falla con versiones prerelease alfanuméricas; el flujo de GitHub se ajustó para generar NSIS en prereleases y conservar MSI para versiones estables.
 
 “Descarga gratis” describe el precio de descarga. La licencia del código es **Pulsaria Source-Visible Beta License**, no una licencia open source aprobada por OSI.
 
 ## Autoridad y preservación
 
 - Checkout inspeccionado: `C:\Users\danie\Desktop\Pulsaria`.
-- Rama actual: `beta2-hardening`; `HEAD` observado: `4cf30dd62aa6c728349b10c4fbcab5c6a09ebdda`.
+- Rama de trabajo: `beta2-hardening`; commit de código, runtime y artefacto evaluado: `08ecdf5570002f7739907d7678313dc0995cc1a6`.
 - El árbol ya tenía cambios extensos y archivos nuevos antes de esta fase. Se trabajó sobre ese mismo estado; no se ejecutaron reset, clean ni stash.
 - El código de actividad, errores de API local y playlists se modificó en esta fase. El instalador smoke crea y borra exclusivamente directorios de prueba dentro de `%TEMP%` y confirma que el marcador de datos sobrevive a la desinstalación.
 
@@ -23,14 +23,14 @@ El objetivo final sigue **PARTIAL**. Los gates técnicos del MVP pasan y el inst
 
 | Fase | Estado | Evidencia actual | Cierre requerido |
 | --- | --- | --- | --- |
-| 0. Preservar y fijar autoridad | **PASS local** | Rama, HEAD y cambios locales revisados; checkout canónico conservado. | Revisión de cambios exactos antes de commit/push. |
-| 1. Integridad de código y MVP | **PASS local** | `npm run verify:mvp`: 13/13; lint, TypeScript, Next producción, Rust formato/check/103 pruebas, Python 31 pruebas PASS + 1 omitida, secretos, loopback, estructura y 54/54 recursos. | Repetir sobre el commit candidato en CI. |
+| 0. Preservar y fijar autoridad | **PASS local** | Rama, HEAD y cambios locales revisados; checkout canónico conservado. El PR borrador #2 contiene la rama; `scratch/` sigue sin seguimiento y quedó fuera del commit. | Revisión y merge del PR antes de tag/release. |
+| 1. Integridad de código y MVP | **PASS local / CI parcial** | `npm run verify:mvp`: 13/13 en la validación local inicial; tras el arreglo de imports, Python: 31 PASS + 1 omitida; CI del commit `6a56f43` pasó. El commit `08ecdf5` está en CI. Runtime manifest fuente: 54/54. | Confirmar CI verde en `08ecdf5` y conservar logs. |
 | 2. Reparación de actividad y playlists | **PASS automatizado** | Centro de actividad conectado a trabajos persistidos; carga/error/reintento explícitos; sin ceros falsos cuando falla el motor; mensajes REST 401/403 explican que la biblioteca requiere la app de escritorio; lint, TypeScript y `verify:mvp` pasan. | Revisión visual real en Tauri a 1280×800 y 860×640. |
 | 3. Calidad complementaria | **PASS local** | `verify:frontend-a11y`, `verify:versions` (0.1.0-beta.2), `verify:icons`, `verify:local-llm`; `npm audit --omit=dev --audit-level=low`: 0 vulnerabilidades. | Añadir estos gates al candidato público y conservar logs. |
-| 4. Instalador Windows actual | **PASS NSIS / MSI bloqueado por versión** | NSIS Beta 2: 687,312,308 bytes; SHA-256 `BC9B38F317A22C6DCE9E2EAFD0C7DC78D47D38AE4DC9234E6D7F908D0B91CD0C`. Instalación, primer arranque, reinicio, health, 54/54 recursos y preservación de datos al desinstalar: PASS en perfil temporal con `PATH` vacío. | Construir/validar en Actions tras publicar el candidato; MSI solo para versión estable. |
-| 5. Pipeline live de contenido | **PENDIENTE** | Las 32 pruebas Python pasan; el caso TikTok live se omite porque no se suministró URL autorizada. El smoke del instalador actual fue offline. | Ejecutar con URL autorizada y harness nativo que entregue el token de proceso; comprobar ingestión, duplicado, outputs, búsqueda y reinicio. |
+| 4. Instalador Windows actual | **PASS NSIS / MSI bloqueado por versión** | NSIS Beta 2: 687,830,129 bytes; SHA-256 `1EB95639A5470DA254B2D9F693AADCC9CE7D372D69B0CCCA3450C9E5480B56B9`. Smoke aislado: instalación/desinstalación 0, primer arranque/reinicio health OK, runtime 54/54, fallback `%APPDATA%`, `PATH` y overrides externos vacíos, marcador de datos preservado y limpieza temporal: PASS. Authenticode: sin firma. | Reproducir en Actions desde el commit final; MSI solo para versión estable. |
+| 5. Pipeline live de contenido | **PENDIENTE** | Las 32 pruebas Python pasan; el caso TikTok live se omite porque no se suministró URL autorizada. El smoke del instalador actual fue offline; no prueba ingestión live. | Ejecutar con URL autorizada y harness nativo que entregue el token de proceso; comprobar ingestión, duplicado, outputs, búsqueda y reinicio. |
 | 6. Legal, dependencias y atribuciones | **BLOCKED_EXTERNAL** | `npm run verify:legal-release` falla por una entrada de tercero no verificada y los campos placeholder `public_owner`, `legal_contact_email`, `notice_address`, `legal_approval`. | Verificar inventario completo/SBOM y modelos/notices; titular aporta contacto y domicilio para avisos; revisión y aprobación humana de los textos. No rellenar esos campos por inferencia. |
-| 7. Publicar la versión validada en GitHub | **PENDIENTE** | Release remota más reciente: [`v0.1.0-eval.3`](https://github.com/danielunibe/PulsarIA/releases/tag/v0.1.0-eval.3), prerelease pública del 2026-09-14. No hay nueva release para este árbol. | Revisar y transferir los cambios necesarios, generar tag desde el commit validado, ejecutar la build limpia y adjuntar instalador actual, hashes y notas; confirmar descarga pública desde la página de Releases. |
+| 7. Publicar la versión validada en GitHub | **PENDIENTE** | Release remota más reciente: [`v0.1.0-eval.3`](https://github.com/danielunibe/PulsarIA/releases/tag/v0.1.0-eval.3), prerelease pública del 2026-09-14. El PR #2 contiene la Beta 2, pero aún no hay nueva release para este árbol. | Merge del PR tras revisar CI y gates legales; generar tag desde el commit validado, ejecutar la build limpia y adjuntar instalador actual, hashes y notas; confirmar descarga pública desde Releases. |
 | 8. Cierre estable y actualización automática | **BLOCKED_EXTERNAL / opcional para descarga directa** | Firma Authenticode, clave Tauri updater, runtime externo reproducible y variable protegida `RELEASE_READY` no están configurados. | Para release estable con actualización: credenciales/runtime de GitHub Environment, firma y gate de artefactos. Una descarga directa gratis no requiere auto-updater, pero sí comunicar que el instalador no está firmado si se distribuye así. |
 
 ## Hallazgo del empaquetado y corrección
@@ -39,14 +39,16 @@ El objetivo final sigue **PARTIAL**. Los gates técnicos del MVP pasan y el inst
 
 > `optional pre-release identifier in app version must be numeric-only and cannot be greater than 65535 for msi target`
 
-El instalador NSIS resultante se instaló y pasó `npm run verify:installed -- -Configuration release -Bundle nsis`. Se corrigió `.github/workflows/release.yml` para construir y firmar solo NSIS en cualquier prerelease; las versiones estables siguen generando NSIS y MSI. `scripts/verify-release-artifacts.ps1` ahora admite explícitamente `-AllowPrerelease`, comprueba que `latest.json` tenga versión prerelease y hace Authenticode sobre los artefactos presentes. El flujo editado aún necesita ejecución en GitHub Actions.
+El primer smoke de NSIS reveló que el manifiesto no coincidía con `python-workers/prepare_whisper_model.py`: tamaño y SHA-256 seguían apuntando a la versión anterior. Se regeneró `src-tauri/resources/runtime-manifest.json` con el generador canónico, pasó la gate fuente e instalado (54/54), y se reconstruyó el instalador. El artefacto de `08ecdf5` pasó `npm run verify:installed -- -Configuration release -Bundle nsis` en perfil temporal. Se corrigió `.github/workflows/release.yml` para construir y firmar solo NSIS en cualquier prerelease; las versiones estables siguen generando NSIS y MSI. `scripts/verify-release-artifacts.ps1` admite `-AllowPrerelease`, comprueba que `latest.json` tenga versión prerelease y hace Authenticode sobre los artefactos presentes. La CI del commit actual aún está en curso.
 
 ## Bloqueos concretos para pedir al titular
 
-1. Nombre legal del titular que debe figurar como `public_owner`.
-2. Email de contacto legal y domicilio de notificaciones para publicación.
-3. Aprobación humana de licencia, EULA, privacidad, contenido, copyright/takedown y notices; el gate no trata la aprobación pendiente como un dato técnico.
-4. Una URL de TikTok cuyo procesamiento el titular esté autorizado a validar, si se quiere cerrar el smoke live de esta versión.
+1. Confirmar quién posee los derechos de Pulsaria: persona física o entidad; usar el nombre legal exacto de ese titular en licencia, EULA, manifiesto y copyright.
+2. Reservar un correo legal público dedicado que controle el titular y un domicilio real, autorizado para recibir avisos. No se debe inventar el dato ni poner el domicilio particular por defecto. La ley mexicana vigente pide identidad y domicilio del responsable en el aviso de privacidad (art. 15, fr. I); revisar el domicilio concreto con asesoría mexicana antes de publicarlo: [texto vigente de la LFPDPPP, Cámara de Diputados](https://www.diputados.gob.mx/LeyesBiblio/pdf/LFPDPPP.pdf).
+3. La web actual solo dirige “Soporte” a GitHub Issues; no usar Issues para solicitudes de privacidad ni como domicilio legal. Crear un canal legal dedicado y dejar los datos personales fuera de tickets públicos.
+4. Aprobación humana real de licencia, EULA, privacidad, contenido, copyright/takedown y notices; el gate no trata la aprobación pendiente como un dato técnico.
+5. Verificar dependencias, modelos, SBOM, atribuciones y procedencia de derechos; `THIRD_PARTY_NOTICES.md` todavía contiene campos “Pending/Verify”.
+6. Una URL de TikTok cuyo procesamiento el titular esté autorizado a validar, si se quiere cerrar el smoke live de esta versión.
 
 ## Límites de lo demostrado
 
