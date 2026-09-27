@@ -316,8 +316,8 @@
                                              "sourcePath":  "python-workers/prepare_whisper_model.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  9446,
-                                             "sha256":  "76A3A0F6B56F979D2FA8572E0A3B48E49AEFF2C997F7093EEC74CFBFD9B87A04"
+                                             "sizeBytes":  9766,
+                                             "sha256":  "A3953478E960F7833E5B15DD52A6B9261C46E3B3D0FCB2393EB1D5FD35B8111A"
                                          },
                                          {
                                              "path":  "python-workers/process_utils.py",
