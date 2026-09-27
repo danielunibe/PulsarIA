@@ -11,11 +11,6 @@ import sys
 import time
 from pathlib import Path
 
-from tqdm.auto import tqdm
-
-from huggingface_hub import snapshot_download
-
-
 PINNED_REVISIONS = {
     "tiny": "d90ca5fe260221311c53c58e660288d3deb8d356",
     "small": "536b0662742c02347bc0e980a01041f333bce120",
@@ -24,51 +19,57 @@ PINNED_REVISIONS = {
 REQUIRED_FILES = ("config.json", "model.bin", "tokenizer.json", "vocabulary.txt")
 
 
-class PulsariaProgress(tqdm):
-    """Emit machine-readable aggregate download progress for the Tauri bridge."""
+def _create_progress_class():
+    """Load the bundled progress dependency only when a download is requested."""
+    from tqdm.auto import tqdm
 
-    _lock = __import__("threading").Lock()
-    _bars: set["PulsariaProgress"] = set()
-    _last_sample: tuple[float, int] | None = None
-    _throughput: float | None = None
+    class PulsariaProgress(tqdm):
+        """Emit machine-readable aggregate download progress for the Tauri bridge."""
 
-    def __init__(self, *args, **kwargs):
-        kwargs["disable"] = True
-        super().__init__(*args, **kwargs)
-        with self._lock:
-            self._bars.add(self)
+        _lock = __import__("threading").Lock()
+        _bars: set["PulsariaProgress"] = set()
+        _last_sample: tuple[float, int] | None = None
+        _throughput: float | None = None
 
-    def update(self, n=1):
-        result = super().update(n)
-        with self._lock:
-            total = sum(int(bar.total or 0) for bar in self._bars)
-            downloaded = sum(int(bar.n) for bar in self._bars)
-            now = time.monotonic()
-            eta_seconds = None
-            if self._last_sample is not None:
-                previous_time, previous_bytes = self._last_sample
-                delta_time = now - previous_time
-                delta_bytes = downloaded - previous_bytes
-                if delta_time >= 0.5 and delta_bytes > 0:
-                    current_rate = delta_bytes / delta_time
-                    alpha = 0.25
-                    self._throughput = current_rate if self._throughput is None else alpha * current_rate + (1 - alpha) * self._throughput
-            self._last_sample = (now, downloaded)
-            if total > 0 and self._throughput and self._throughput > 0:
-                remaining = max(0, total - downloaded)
-                eta_seconds = max(0, round(remaining / self._throughput))
-        print(json.dumps({
-            "status": "downloading",
-            "downloaded_bytes": downloaded,
-            "total_bytes": total or None,
-            "eta_seconds": eta_seconds,
-        }), flush=True)
-        return result
+        def __init__(self, *args, **kwargs):
+            kwargs["disable"] = True
+            super().__init__(*args, **kwargs)
+            with self._lock:
+                self._bars.add(self)
 
-    def close(self):
-        with self._lock:
-            self._bars.discard(self)
-        return super().close()
+        def update(self, n=1):
+            result = super().update(n)
+            with self._lock:
+                total = sum(int(bar.total or 0) for bar in self._bars)
+                downloaded = sum(int(bar.n) for bar in self._bars)
+                now = time.monotonic()
+                eta_seconds = None
+                if self._last_sample is not None:
+                    previous_time, previous_bytes = self._last_sample
+                    delta_time = now - previous_time
+                    delta_bytes = downloaded - previous_bytes
+                    if delta_time >= 0.5 and delta_bytes > 0:
+                        current_rate = delta_bytes / delta_time
+                        alpha = 0.25
+                        self._throughput = current_rate if self._throughput is None else alpha * current_rate + (1 - alpha) * self._throughput
+                self._last_sample = (now, downloaded)
+                if total > 0 and self._throughput and self._throughput > 0:
+                    remaining = max(0, total - downloaded)
+                    eta_seconds = max(0, round(remaining / self._throughput))
+            print(json.dumps({
+                "status": "downloading",
+                "downloaded_bytes": downloaded,
+                "total_bytes": total or None,
+                "eta_seconds": eta_seconds,
+            }), flush=True)
+            return result
+
+        def close(self):
+            with self._lock:
+                self._bars.discard(self)
+            return super().close()
+
+    return PulsariaProgress
 
 
 def digest(path: Path) -> str:
@@ -170,12 +171,14 @@ def prepare(model: str, cache_root: Path, repair: bool = False, start_phase: str
         shutil.rmtree(staging)
     staging.mkdir(parents=True, exist_ok=True)
     print(json.dumps({"status": "downloading", "model": model, "revision": revision}), flush=True)
+    from huggingface_hub import snapshot_download
+
     snapshot_download(
         repo_id=f"Systran/faster-whisper-{model}",
         revision=revision,
         local_dir=staging,
         allow_patterns=list(REQUIRED_FILES),
-        tqdm_class=PulsariaProgress,
+        tqdm_class=_create_progress_class(),
     )
     print(json.dumps({"status": "verifying", "model": model}), flush=True)
     files = validate_model(staging)
