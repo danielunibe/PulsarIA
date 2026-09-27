@@ -11,22 +11,25 @@ palabras o por significado desde una biblioteca local.
 
 ## Descargar e instalar
 
-Puedes descargar directamente
-[`Pulsaria_0.1.0_x64-setup.exe`](https://github.com/danielunibe/PulsarIA/releases/download/v0.1.0-eval.3/Pulsaria_0.1.0_x64-setup.exe)
-o consultar la [release de evaluación completa](https://github.com/danielunibe/PulsarIA/releases/tag/v0.1.0-eval.3).
-El instalador es para Windows x64 y no requiere instalar Node.js, Rust,
-Python, FFmpeg ni FFprobe por separado.
+La versión pública actual es `v0.1.0-eval.3`. Puedes descargar gratis el
+instalador NSIS o MSI para Windows x64, o consultar la
+[release completa](https://github.com/danielunibe/PulsarIA/releases/tag/v0.1.0-eval.3):
+
+- [Descargar NSIS (EXE)](https://github.com/danielunibe/PulsarIA/releases/download/v0.1.0-eval.3/Pulsaria_0.1.0_x64-setup.exe)
+- [Descargar MSI](https://github.com/danielunibe/PulsarIA/releases/download/v0.1.0-eval.3/Pulsaria_0.1.0_x64_en-US.msi)
 
 Antes de ejecutar el archivo, comprueba su integridad en PowerShell:
 
 ```powershell
 Get-FileHash .\Pulsaria_0.1.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\Pulsaria_0.1.0_x64_en-US.msi -Algorithm SHA256
 ```
 
-El hash de la compilación de evaluación es:
+SHA-256 de los assets publicados en GitHub:
 
 ```text
-C1B8683BA5D5137DB319B68D2F849FCF629EB9F6F19D1607D80D30FE0F7D90B8
+NSIS: 1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF
+MSI:  F092CDFA6DC736F13FEF8B17302B81E1BB181796639D68676F7244154DDCB2F4
 ```
 
 Durante la instalación puedes conservar la carpeta propuesta. Al finalizar,
@@ -118,23 +121,18 @@ No se deben copiar Python, modelos, FFmpeg, instaladores ni bases de datos al
 repositorio. La preparación externa y su SHA-256 se verifican mediante el
 workflow de release.
 
-## Validación actual
+## Estado de Beta 2
 
-La punta publicada de `main` es `f6f046fa`. La validación reproducible actual
-incluye:
-
-- `npm run verify:mvp`: 13/13 gates PASS.
-- Rust: formato, check y 60 tests PASS.
-- Python: 26 tests PASS; el único skip corresponde a una URL TikTok live no
-  suministrada en CI.
-- Runtime preparado: 51/51 recursos canónicos PASS en staging local.
-- Smoke NSIS instalado: instalación, arranque, health, reinicio y
-  desinstalación PASS.
-
-Estos resultados no sustituyen una prueba visual nativa, una certificación
-live con voz reconocible, una firma Authenticode o una publicación estable.
-Consulta [docs/MVP_STATUS.md](docs/MVP_STATUS.md) y
-[PROJECT_TRUTH.md](PROJECT_TRUTH.md) para los límites de evidencia.
+La descarga `v0.1.0-eval.3` de arriba es la release pública; no contiene los
+cambios del candidato Beta 2. Ese candidato está en el
+[PR #2](https://github.com/danielunibe/PulsarIA/pull/2) y todavía no tiene una
+release propia. Su validación local incluye `npm run verify:mvp` (13/13), 31
+pruebas Python PASS + 1 omitida para TikTok live, 54/54 recursos y un smoke
+offline de instalación NSIS con health inicial/reinicio y preservación de datos.
+Consulta los [checks del PR](https://github.com/danielunibe/PulsarIA/pull/2/checks)
+y el [plan de reparación](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md) para el
+estado actual y los límites pendientes. La revisión visual nativa, TikTok live,
+revisión legal y firma Authenticode siguen pendientes.
 
 ## Release y updater
 

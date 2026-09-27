@@ -18,9 +18,10 @@ distribución estable a terceros.
 
 ## Fuente canónica
 
-La rama activa es `main` en `origin`. Este checkout de producto parte de la
-punta publicada `f6f046fa`; las ramas antiguas se conservan como referencias
-archivadas y no son líneas de desarrollo nuevas.
+La línea canónica activa es `main` en `origin`. Al iniciar esta propuesta,
+`origin/main` apuntaba a `0b5d02ce`, que ya publicaba los enlaces de la release
+`v0.1.0-eval.3`. La rama `beta2-hardening` es temporal para el PR #2, parte de
+esa punta y no reemplaza a `main` como línea activa.
 
 Las fuentes funcionales únicas son:
 
@@ -130,7 +131,7 @@ La tabla es un estado de trabajo, no reemplaza la salida de los verificadores.
 
 ### Evidencia de publicación canónica
 
-La publicación de código y documentación de la base se realizó el 14 de septiembre de 2026 sobre `origin/main`, sin force push ni reescritura de historia. La punta publicada actual es `f6f046fa`; la clonación limpia de esa base pasó `npm run verify:canonical` y el workflow canónico remoto terminó correctamente. Los instaladores generados se distribuyen mediante GitHub Releases y no se guardan como blobs normales del árbol fuente.
+La publicación inicial de código y documentación de la base se realizó el 14 de septiembre de 2026 sobre `origin/main`, sin force push ni reescritura de historia. En aquella publicación la punta era `f6f046fa`; posteriormente `main` avanzó a `0b5d02ce`, que publicó los enlaces de `v0.1.0-eval.3`. La propuesta Beta 2 parte exactamente de esa punta y se revisa en el PR #2 antes de integrarse a `main`. Los instaladores se distribuyen mediante GitHub Releases y no se guardan como blobs normales del árbol fuente.
 
 Las líneas anteriores permanecen como referencias históricas mediante tags `archive/*`; no se borraron ramas ni se presentan como líneas activas de desarrollo.
 
@@ -175,8 +176,11 @@ manual opcional y no es un requisito del procesamiento local.
 
 ## Beta 2 — integración canónica activa
 
-La integración Beta 2 se realiza directamente sobre este checkout de `main`.
-`pulsaria.zip` es una referencia de diseño y no una segunda fuente ejecutable.
+La propuesta de integración Beta 2 está en la rama temporal `beta2-hardening`,
+base del PR #2 contra la punta `0b5d02ce` de `origin/main`. `main` conserva la
+autoridad canónica; la propuesta no se considera integrada hasta que el PR se
+revise, complete los checks requeridos y se mergee. `pulsaria.zip` es una
+referencia de diseño y no una segunda fuente ejecutable.
 La interfaz activa vive únicamente en `app/`, `components/`, `hooks/`, `lib/`
 y `types/`; el backend y los workers permanecen en `src-tauri/src/` y
 `python-workers/`.
@@ -245,9 +249,9 @@ preparada para una integración autorizada posterior.
 
 ## Verificación Beta 2 — 2026-09-20
 
-Este bloque es la referencia de estado actual para la integración Beta 2; las
-tablas históricas anteriores se conservan como registro y no sustituyen estos
-resultados.
+Este bloque conserva la evidencia del snapshot del 2026-09-20. El estado más
+reciente de publicación y reparación está en la auditoría del 2026-09-27 y en
+`docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md`.
 
 | Gate | Estado | Evidencia o límite |
 | --- | --- | --- |
@@ -270,8 +274,10 @@ resultados.
 | Firma, updater y publicación | BLOCKED_EXTERNAL | Requieren certificado, secretos, endpoint y aceptación externa; no se fabrican esos artefactos |
 
 La base de datos, medios, runtime y modelos existentes no se reinicializaron ni
-se eliminaron. No se hizo `git reset`, `git clean`, stash global, commit ni
-push durante esta integración.
+se eliminaron. Durante la integración inicial del snapshot del 2026-09-20 no
+se hizo `git reset`, `git clean` ni stash global. La auditoría de publicación
+posterior agregó commits únicamente a la rama temporal del PR #2; no se hizo
+force push ni se escribieron commits directamente en `main`.
 
 ## Auditoría de publicación gratuita — 2026-09-27
 
