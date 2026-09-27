@@ -131,8 +131,9 @@ pruebas Python PASS + 1 omitida para TikTok live, 54/54 recursos y un smoke
 offline de instalación NSIS con health inicial/reinicio y preservación de datos.
 Consulta los [checks del PR](https://github.com/danielunibe/PulsarIA/pull/2/checks)
 y el [plan de reparación](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md) para el
-estado actual y los límites pendientes. La revisión visual nativa, TikTok live,
-revisión legal y firma Authenticode siguen pendientes.
+estado actual y los límites pendientes. [PROJECT_TRUTH.md](PROJECT_TRUTH.md)
+define la autoridad técnica del producto. La revisión visual nativa, TikTok
+live, revisión legal y firma Authenticode siguen pendientes.
 
 ## Release y updater
 
