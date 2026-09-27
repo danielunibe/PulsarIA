@@ -624,6 +624,11 @@ export function AddLinks({
                 {!runtimeReady && !profileMode && runtimeIssue && (
                   <p role="status" className="rounded-xl bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-white/70">{runtimeIssue}</p>
                 )}
+                {activeTab === 'enlace' && rejectedInputCount > 0 && (
+                  <p role="status" aria-live="polite" className="mb-2 rounded-xl bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-white/80">
+                    Hay {rejectedInputCount} {rejectedInputCount === 1 ? 'entrada no válida' : 'entradas no válidas'}. Usa URLs HTTPS de TikTok; las entradas inválidas se omiten.
+                  </p>
+                )}
                 <button
                   type="button"
                   className={busy ? 'cta busy' : 'cta'}
@@ -653,11 +658,6 @@ export function AddLinks({
                               ? 'archivo seleccionado'
                               : 'archivos seleccionados'}
                         </span>
-                        {rejectedInputCount > 0 && (
-                          <span className="cta-rejected">
-                            · {rejectedInputCount} {rejectedInputCount === 1 ? 'entrada se rechazará' : 'entradas se rechazarán'}
-                          </span>
-                        )}
                       </span>
                     )}
                     <span id="ctaTx">{busy ? 'Procesando…' : 'Procesar'}</span>

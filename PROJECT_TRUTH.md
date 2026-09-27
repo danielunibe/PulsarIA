@@ -284,6 +284,9 @@ force push ni se escribieron commits directamente en `main`.
 La matriz vigente de reparación, los gates repetidos y los bloqueos para
 publicar una descarga del código actual se mantienen en
 [docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md).
+La auditoría de producto, los hallazgos del preview web y la secuencia general
+de reparación están en
+[docs/AUDITORIA_INTEGRAL_Y_FASES.md](docs/AUDITORIA_INTEGRAL_Y_FASES.md).
 Este seguimiento suplementa las tablas históricas: la descarga GitHub más
 reciente todavía es `v0.1.0-eval.3`; el NSIS Beta 2 actual pasó el smoke
 aislado, el MSI prerelease no es compatible con el identificador

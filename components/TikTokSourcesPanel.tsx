@@ -496,6 +496,8 @@ export function TikTokSourcesPanel() {
           <span className="source-profile-at" aria-hidden="true"><FaUser size={14} /></span>
           <input
             id="tiktok-profile-input"
+            aria-label="URL de perfil o nombre de usuario de TikTok"
+            aria-describedby="tiktok-profile-input-help"
             type="text"
             value={profileInput}
             onChange={(event) => setProfileInput(event.target.value)}
@@ -505,7 +507,7 @@ export function TikTokSourcesPanel() {
             disabled={registering}
           />
         </label>
-        <p className="source-profile-help">Pega una URL o @usuario</p>
+        <p id="tiktok-profile-input-help" className="source-profile-help">Pega una URL o @usuario</p>
 
         <div className="source-profile-cap">
           <span>Pestañas del perfil a procesar</span>

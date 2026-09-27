@@ -2813,11 +2813,6 @@ textarea {
   text-overflow: ellipsis;
 }
 
-.pulsaria-ingest .cta-rejected {
-  color: rgba(255, 255, 255, 0.52);
-  font-size: 9px;
-}
-
 /* Cola en directo */
 .pulsaria-ingest .q {
   margin-top: 12px;
@@ -5731,12 +5726,14 @@ textarea {
 .pulsaria-window-header__status-message {
   min-width: 0;
   overflow: hidden;
+  display: -webkit-box;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.35;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .pulsaria-window-header__status-action {

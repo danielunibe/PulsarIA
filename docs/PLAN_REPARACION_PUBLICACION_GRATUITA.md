@@ -4,6 +4,10 @@
 **Autoridad del proyecto:** [PROJECT_TRUTH.md](../PROJECT_TRUTH.md)  
 **Alcance:** preparar Pulsaria para que una persona pueda descargar gratis el instalador vigente desde GitHub Releases.
 
+La auditoría de producto y el plan de reparación por fases están en
+[AUDITORIA_INTEGRAL_Y_FASES.md](AUDITORIA_INTEGRAL_Y_FASES.md). Este documento
+se conserva enfocado en publicar la Beta 2.
+
 ## Estado ejecutivo
 
 El repositorio [danielunibe/PulsarIA](https://github.com/danielunibe/PulsarIA) es público y ya ofrece la prerelease `v0.1.0-eval.3`, sin costo de descarga. Esa release es del 2026-09-14 y no contiene el código Beta 2 validado en este checkout. La página de descargas del sitio ahora apunta a esa release y sus dos instaladores verificados. El candidato Beta 2 está en el PR borrador [#2](https://github.com/danielunibe/PulsarIA/pull/2), todavía sin merge ni release. El instalador NSIS reconstruido desde `08ecdf5` pasó el smoke aislado, pero aún no se ha publicado.
@@ -24,8 +28,8 @@ El objetivo final sigue **PARTIAL**. La rama candidata ya está en GitHub; el CI
 | Fase | Estado | Evidencia actual | Cierre requerido |
 | --- | --- | --- | --- |
 | 0. Preservar y fijar autoridad | **PASS local** | Rama, HEAD y cambios locales revisados; checkout canónico conservado. El PR borrador #2 contiene la rama; `scratch/` sigue sin seguimiento y quedó fuera del commit. | Revisión y merge del PR antes de tag/release. |
-| 1. Integridad de código y MVP | **PASS local / CI parcial** | `npm run verify:mvp`: 13/13 en la validación local inicial; tras el arreglo de imports, Python: 31 PASS + 1 omitida; CI de los commits de código `6a56f43` y `08ecdf5` pasó. Runtime manifest fuente: 54/54. | Confirmar checks verdes en el head final del PR y conservar logs. |
-| 2. Reparación de actividad y playlists | **PASS automatizado** | Centro de actividad conectado a trabajos persistidos; carga/error/reintento explícitos; sin ceros falsos cuando falla el motor; mensajes REST 401/403 explican que la biblioteca requiere la app de escritorio; lint, TypeScript y `verify:mvp` pasan. | Revisión visual real en Tauri a 1280×800 y 860×640. |
+| 1. Integridad de código y MVP | **PASS local / CI parcial** | `npm run verify:mvp`: 13/13 en la validación local inicial; tras el arreglo de imports, Python: 31 PASS + 1 omitida; runtime manifest fuente: 54/54. El PR #2 tenía `verify-canonical-source` PASS en su head anterior `a1969c7`; las correcciones UX y la auditoría de esta fase requieren CI en su nuevo commit. | Confirmar checks verdes en el nuevo head final del PR. |
+| 2. Reparación de actividad y playlists | **PASS automatizado / visual parcial** | Centro de actividad conectado a trabajos persistidos; carga/error/reintento explícitos; sin ceros falsos cuando falla el motor; mensajes REST 401/403 explican que la biblioteca requiere la app de escritorio; gates históricos lint/TypeScript/`verify:mvp` pasan. El banner superior también se revisó en preview web; la aceptación Tauri sigue pendiente. | Revisión visual real en Tauri a 1280×800 y 860×640. |
 | 3. Calidad complementaria | **PASS local** | `verify:frontend-a11y`, `verify:versions` (0.1.0-beta.2), `verify:icons`, `verify:local-llm`; `npm audit --omit=dev --audit-level=low`: 0 vulnerabilidades. | Añadir estos gates al candidato público y conservar logs. |
 | 4. Instalador Windows actual | **PASS NSIS / MSI bloqueado por versión** | NSIS Beta 2: 687,830,129 bytes; SHA-256 `1EB95639A5470DA254B2D9F693AADCC9CE7D372D69B0CCCA3450C9E5480B56B9`. Smoke aislado: instalación/desinstalación 0, primer arranque/reinicio health OK, runtime 54/54, fallback `%APPDATA%`, `PATH` y overrides externos vacíos, marcador de datos preservado y limpieza temporal: PASS. Authenticode: sin firma. | Reproducir en Actions desde el commit final; MSI solo para versión estable. |
 | 5. Pipeline live de contenido | **PENDIENTE** | Las 32 pruebas Python pasan; el caso TikTok live se omite porque no se suministró URL autorizada. El smoke del instalador actual fue offline; no prueba ingestión live. | Ejecutar con URL autorizada y harness nativo que entregue el token de proceso; comprobar ingestión, duplicado, outputs, búsqueda y reinicio. |

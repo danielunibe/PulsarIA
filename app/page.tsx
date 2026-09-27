@@ -553,11 +553,19 @@ export default function Page() {
                 toast.info('No se encontraron recuerdos con esos criterios');
             }
         } catch (error) {
-            console.error('Search failed:', error);
+            if (error instanceof TypeError) {
+                console.warn('Search unavailable: the local library could not be reached.', error);
+            } else {
+                console.error('Search failed:', error);
+            }
             if (requestId === searchRequestRef.current) {
-                setSearchResults([]);
+                setSearchResults(null);
                 setSearchResponse(null);
-                setSearchError(error instanceof Error ? error.message : String(error));
+                setSearchContext(null);
+                setSearchModeUsed(null);
+                setSearchError(error instanceof TypeError
+                    ? t('searchConnectionError')
+                    : error instanceof Error ? error.message : String(error));
             }
         } finally {
             if (requestId === searchRequestRef.current) setIsSearching(false);
@@ -808,8 +816,8 @@ export default function Page() {
                                 <span className="text-white/40 text-xs font-mono">Inferencia semántica ONNX + síntesis LLM local...</span>
                             </div>
                         </div>
-                    </div>
-                                ) : (searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null) ? (
+                                </div>
+                ) : (searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null) ? (
 
                     <div className="px-8 py-4 flex flex-col gap-5">
                         {/* Search View Header */}
@@ -820,7 +828,7 @@ export default function Page() {
                                     <span>{t('search')}</span>
                                 </h2>
                             </div>
-                                                        <button
+                            <button
                                 type="button"
                                 aria-label="Volver a la biblioteca"
                                 onClick={handleClearSearch}
@@ -832,7 +840,7 @@ export default function Page() {
                             </button>
                         </div>
 
-                        {searchResults !== null && (
+                        {searchResults !== null && !searchError && (
                             <section
                                 aria-label="Síntesis opcional con Gemini"
                                 className="flex flex-col gap-3 rounded-[20px] border border-[#4285f4]/25 bg-[#4285f4]/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between"
@@ -855,7 +863,7 @@ export default function Page() {
                             </section>
                         )}
 
-                                                 {searchError && (
+                        {searchError && (
                             <div role="alert" className="p-4 rounded-[20px] border border-[#fe2c55]/30 bg-[#fe2c55]/10 text-sm text-[#fe2c55]">
                                 No se pudo completar la búsqueda: {searchError}
                             </div>

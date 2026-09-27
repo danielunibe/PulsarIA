@@ -235,7 +235,7 @@ export function SpotlightSearch({
                         </div>
                     )}
 
-                    {searchResults !== null && !isSearching && (
+                    {searchResults !== null && !isSearching && !searchError && (
                         <div className="flex flex-col gap-2.5" aria-live="polite">
                             <div className="flex items-center justify-between px-1">
                                 <span className="text-[10px] font-black uppercase tracking-[0.16em] text-white/40">
