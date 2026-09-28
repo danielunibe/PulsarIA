@@ -1,6 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isNativeShell } from '@/lib/api-client';
+
+function logLinkProcessingFailure(url: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const expectedBrowserBoundary = !isNativeShell()
+    && /failed to fetch|fetch failed|networkerror|network request failed|load failed|econnrefused|connection refused|\b(?:401|403)\b/i.test(message);
+  const log = expectedBrowserBoundary ? console.warn : console.error;
+  log('Failed to add job', { url, error });
+}
 
 /**
  * Plataforma de origen detectada a partir de la URL del video.
@@ -227,7 +236,7 @@ export function useLinkProcessor() {
             jobCreated = true;
           }
         } catch (error) {
-          console.error('Failed to add job', { url, error });
+          logLinkProcessingFailure(url, error);
           failedUrls.push(url);
         }
 

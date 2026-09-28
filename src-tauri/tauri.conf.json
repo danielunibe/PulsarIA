@@ -49,7 +49,20 @@
     "resources/assets": "resources/assets",
             "resources/bin": "resources/bin",
             "resources/runtime-manifest.json": "resources/runtime-manifest.json",
-            "resources/local-llm-manifest.json": "resources/local-llm-manifest.json"
+            "resources/local-llm-manifest.json": "resources/local-llm-manifest.json",
+            "../LICENSE": "resources/legal/LICENSE",
+            "../THIRD_PARTY_NOTICES.md": "resources/legal/THIRD_PARTY_NOTICES.md",
+            "../MODEL_NOTICE.md": "resources/legal/MODEL_NOTICE.md",
+            "../EULA.es.md": "resources/legal/EULA.es.md",
+            "../EULA.en.md": "resources/legal/EULA.en.md",
+            "../TERMS_OF_USE.es.md": "resources/legal/TERMS_OF_USE.es.md",
+            "../TERMS_OF_USE.en.md": "resources/legal/TERMS_OF_USE.en.md",
+            "../PRIVACY.es.md": "resources/legal/PRIVACY.es.md",
+            "../PRIVACY.en.md": "resources/legal/PRIVACY.en.md",
+            "../CONTENT_POLICY.es.md": "resources/legal/CONTENT_POLICY.es.md",
+            "../CONTENT_POLICY.en.md": "resources/legal/CONTENT_POLICY.en.md",
+            "../COPYRIGHT_AND_TAKEDOWN.es.md": "resources/legal/COPYRIGHT_AND_TAKEDOWN.es.md",
+            "../COPYRIGHT_AND_TAKEDOWN.en.md": "resources/legal/COPYRIGHT_AND_TAKEDOWN.en.md"
         },
         "windows": {
             "webviewInstallMode": {

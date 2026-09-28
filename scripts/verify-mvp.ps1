@@ -65,6 +65,13 @@ try {
     $config = Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
     $workerMappings = @($config.bundle.resources.PSObject.Properties | Where-Object { $_.Name -like '../python-workers/*.py' })
     if ($workerMappings.Count -lt 11) { throw 'Canonical Python worker mappings are incomplete' }
+    $legalResourceMappings = @($config.bundle.resources.PSObject.Properties | Where-Object { [string]$_.Value -like 'resources/legal/*' })
+    if ($legalResourceMappings.Count -lt 13) { throw 'Bundled license, privacy, EULA, content, model, or third-party notice resources are incomplete' }
+    foreach ($mapping in $legalResourceMappings) {
+        if (-not (Test-Path -LiteralPath (Join-Path (Join-Path (Get-Location).Path 'src-tauri') ([string]$mapping.Name)) -PathType Leaf)) {
+            throw "Bundled legal resource source is missing: $($mapping.Name)"
+        }
+    }
     $duplicateWorkers = @(Get-ChildItem -LiteralPath 'src-tauri/resources/python-workers' -Filter '*.py' -ErrorAction SilentlyContinue)
     if ($duplicateWorkers.Count -ne 0) { throw 'Duplicated packaged Python worker sources detected' }
 

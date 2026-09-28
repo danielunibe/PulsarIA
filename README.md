@@ -127,8 +127,13 @@ La descarga `v0.1.0-eval.3` de arriba es la release pública; no contiene los
 cambios del candidato Beta 2. Ese candidato está en el
 [PR #2](https://github.com/danielunibe/PulsarIA/pull/2) y todavía no tiene una
 release propia. Su validación local incluye `npm run verify:mvp` (13/13), 31
-pruebas Python PASS + 1 omitida para TikTok live, 54/54 recursos y un smoke
-offline de instalación NSIS con health inicial/reinicio y preservación de datos.
+pruebas Python PASS + 1 omitida para TikTok live (32 en total), 54/54 recursos,
+13 documentos legales empaquetados con hashes verificados y un smoke offline de
+instalación NSIS con health inicial/reinicio y preservación de datos.
+El flujo manual `Pulsaria direct GitHub prerelease` ya prepara una descarga NSIS
+gratuita sin Authenticode ni updater; sigue cerrado hasta completar los datos y
+la revisión legal, la revisión de notices del artefacto y configurar el runtime
+externo en el Environment protegido `direct-download`.
 Consulta los [checks del PR](https://github.com/danielunibe/PulsarIA/pull/2/checks)
 y el [plan de reparación](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md) para el
 estado actual y los límites pendientes. [PROJECT_TRUTH.md](PROJECT_TRUTH.md)
@@ -142,6 +147,14 @@ NSIS/MSI, firmas Tauri, `latest.json`, `.sig` y `SHA256SUMS.txt` cuando el
 Environment `release` tiene todas las credenciales y el runtime externo.
 Mientras `RELEASE_READY` no sea `true`, las etiquetas no ejecutan un job de
 release incompleto y quedan sin notificaciones de fallo.
+
+La ruta de descarga directa está en
+[direct-download-release.yml](.github/workflows/direct-download-release.yml).
+Es una ejecución manual para tags Beta/RC: genera SBOM SPDX agregado, valida
+el runtime, construye y prueba el instalador NSIS, adjunta hashes y notices y
+publica una prerelease gratis en GitHub. Requiere `DIRECT_DOWNLOAD_RELEASE_READY=true`,
+el runtime HTTPS con SHA-256 y todos los gates legales aprobados. No firma el
+instalador ni crea artefactos del updater.
 
 La release de evaluación no activa el updater público. Una release estable
 requiere clave pública Tauri, clave privada, certificado Authenticode,

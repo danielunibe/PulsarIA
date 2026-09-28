@@ -203,6 +203,26 @@ try {
     $result.resourceChecks.ffmpeg = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'bin/ffmpeg.exe')
     $result.resourceChecks.ffprobe = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'bin/ffprobe.exe')
     $result.resourceChecks.ffmpegLicense = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'bin/FFMPEG-LICENSE.txt')
+    $result.resourceChecks.thirdPartyNotices = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/THIRD_PARTY_NOTICES.md')
+    $result.resourceChecks.modelNotice = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/MODEL_NOTICE.md')
+    $result.resourceChecks.sourceLicense = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/LICENSE')
+    $result.resourceChecks.eulaEs = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/EULA.es.md')
+    $result.resourceChecks.privacyEs = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/PRIVACY.es.md')
+    $legalMappings = @($tauriConfig.bundle.resources.PSObject.Properties | Where-Object { [string]$_.Value -like 'resources/legal/*' })
+    $legalDocumentsValid = $legalMappings.Count -ge 13
+    foreach ($mapping in $legalMappings) {
+        $destination = [string]$mapping.Value
+        $sourcePath = Join-Path (Join-Path $projectRoot 'src-tauri') ([string]$mapping.Name)
+        $installedPath = Join-Path $installDir $destination
+        $matchesSource = (Test-Path -LiteralPath $sourcePath -PathType Leaf) -and (Test-Path -LiteralPath $installedPath -PathType Leaf)
+        if ($matchesSource) {
+            $matchesSource = (Get-Sha256Hex -Path $sourcePath) -eq (Get-Sha256Hex -Path $installedPath)
+        }
+        $result.resourceChecks["legal_$([IO.Path]::GetFileName($destination))"] = $matchesSource
+        if (-not $matchesSource) { $legalDocumentsValid = $false }
+    }
+    $result.resourceChecks.legalDocumentCount = $legalMappings.Count
+    $result.resourceChecks.legalDocuments = $legalDocumentsValid
     $onnxModelDir = Join-Path $installDir 'resources/assets/models/all-MiniLM-L6-v2'
     $whisperModelDir = Join-Path $installDir 'resources/assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356'
     $result.resourceChecks.onnx = (Test-ModelFile (Join-Path $onnxModelDir 'model.onnx') 1000000) -and
@@ -221,8 +241,8 @@ try {
     } else {
         $result.runtimeManifestGate = @('BLOCKED: resources/runtime-manifest.json is missing from the installed bundle')
     }
-    if (-not ($result.resourceChecks.runtimeManifest -and $result.resourceChecks.python -and $result.resourceChecks.worker -and $result.resourceChecks.ffmpeg -and $result.resourceChecks.ffprobe -and $result.resourceChecks.ffmpegLicense -and $result.resourceChecks.onnx -and $result.resourceChecks.whisper)) {
-        throw 'One or more packaged runtime resources are missing; ffmpeg.exe, ffprobe.exe and local license evidence are required'
+    if (-not ($result.resourceChecks.runtimeManifest -and $result.resourceChecks.python -and $result.resourceChecks.worker -and $result.resourceChecks.ffmpeg -and $result.resourceChecks.ffprobe -and $result.resourceChecks.ffmpegLicense -and $result.resourceChecks.thirdPartyNotices -and $result.resourceChecks.modelNotice -and $result.resourceChecks.sourceLicense -and $result.resourceChecks.eulaEs -and $result.resourceChecks.privacyEs -and $result.resourceChecks.legalDocuments -and $result.resourceChecks.onnx -and $result.resourceChecks.whisper)) {
+        throw 'One or more packaged runtime or legal resources are missing; the NSIS installation must include ffmpeg/ffprobe evidence, third-party notices, model notice, source license, EULA and privacy document.'
     }
 
     # Do not provide PULSAR_DATA_DIR here. This deliberately exercises the

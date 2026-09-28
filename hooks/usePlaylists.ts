@@ -59,7 +59,7 @@ export type SourceContentView = PlaylistContentView;
 export type PlaylistLoadState = 'loading' | 'ready' | 'error';
 
 import { REST_API_BASE } from '@/lib/api-config';
-import { apiFetch, localApiErrorMessage } from '@/lib/api-client';
+import { apiFetch, isNativeShell, localApiErrorMessage } from '@/lib/api-client';
 
 async function restRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(`${REST_API_BASE}${path}`, {
@@ -84,6 +84,18 @@ async function tauriInvoke<T>(command: string, args?: Record<string, unknown>): 
   }
 }
 
+function playlistErrorMessage(value: unknown): string {
+  return localApiErrorMessage(value, 'No se pudo completar la operación de playlist.');
+}
+
+function logPlaylistFailure(operation: string, value: unknown): void {
+  const message = value instanceof Error ? value.message : String(value ?? '');
+  const expectedBrowserBoundary = !isNativeShell()
+    && /failed to fetch|fetch failed|networkerror|network request failed|load failed|econnrefused|connection refused|\b(?:401|403)\b/i.test(message);
+  const log = expectedBrowserBoundary ? console.warn : console.error;
+  log(`${operation}:`, value);
+}
+
 /**
  * Hook para gestionar playlists de videos.
  * 
@@ -105,8 +117,6 @@ export function usePlaylists() {
   const [sourceLoading, setSourceLoading] = useState(true);
   const [sourceError, setSourceError] = useState<string | null>(null);
 
-  const errorMessage = (value: unknown) => localApiErrorMessage(value, 'No se pudo completar la operación de playlist.');
-
   const fetchPlaylists = useCallback(async () => {
     setLoading(true);
     setStatus('loading');
@@ -121,8 +131,8 @@ export function usePlaylists() {
       setError(null);
       setStatus('ready');
     } catch (fetchError) {
-      console.error('fetchPlaylists failed:', fetchError);
-      setError(errorMessage(fetchError));
+      logPlaylistFailure('fetchPlaylists failed', fetchError);
+      setError(playlistErrorMessage(fetchError));
       setStatus('error');
     } finally {
       setLoading(false);
@@ -154,9 +164,9 @@ export function usePlaylists() {
       }
       setPlaylistItems(items);
     } catch (fetchItemsError) {
-      console.error('fetchPlaylistItems failed:', fetchItemsError);
+      logPlaylistFailure('fetchPlaylistItems failed', fetchItemsError);
       setPlaylistItems([]);
-      setError(errorMessage(fetchItemsError));
+      setError(playlistErrorMessage(fetchItemsError));
     }
   }, []);
 
@@ -172,9 +182,9 @@ export function usePlaylists() {
       setSourceCollections(data);
       setSourceError(null);
     } catch (fetchError) {
-      console.error('fetchSourceCollections failed:', fetchError);
+      logPlaylistFailure('fetchSourceCollections failed', fetchError);
       setSourceCollections([]);
-      setSourceError(errorMessage(fetchError));
+      setSourceError(playlistErrorMessage(fetchError));
     } finally {
       setSourceLoading(false);
     }
@@ -197,8 +207,8 @@ export function usePlaylists() {
         setError(null);
         return id;
       } catch (createError) {
-        console.error('createPlaylist failed:', createError);
-        setError(errorMessage(createError));
+        logPlaylistFailure('createPlaylist failed', createError);
+        setError(playlistErrorMessage(createError));
         return null;
       }
     },
@@ -220,8 +230,8 @@ export function usePlaylists() {
         await fetchPlaylists();
         setError(null);
       } catch (addError) {
-        console.error('addToPlaylist failed:', addError);
-        setError(errorMessage(addError));
+        logPlaylistFailure('addToPlaylist failed', addError);
+        setError(playlistErrorMessage(addError));
       }
     },
     [fetchPlaylistItems, fetchPlaylists, selectedPlaylistId],
@@ -242,8 +252,8 @@ export function usePlaylists() {
         await fetchPlaylists();
         setError(null);
       } catch (addError) {
-        console.error('addContentToPlaylist failed:', addError);
-        setError(errorMessage(addError));
+        logPlaylistFailure('addContentToPlaylist failed', addError);
+        setError(playlistErrorMessage(addError));
       }
     },
     [fetchPlaylistItems, fetchPlaylists, selectedPlaylistId],
@@ -261,8 +271,8 @@ export function usePlaylists() {
         await fetchPlaylists();
         setError(null);
       } catch (removeError) {
-        console.error('removeFromPlaylist failed:', removeError);
-        setError(errorMessage(removeError));
+        logPlaylistFailure('removeFromPlaylist failed', removeError);
+        setError(playlistErrorMessage(removeError));
       }
     },
     [fetchPlaylistItems, fetchPlaylists, selectedPlaylistId],
@@ -280,8 +290,8 @@ export function usePlaylists() {
         await fetchPlaylists();
         setError(null);
       } catch (removeError) {
-        console.error('removeContentFromPlaylist failed:', removeError);
-        setError(errorMessage(removeError));
+        logPlaylistFailure('removeContentFromPlaylist failed', removeError);
+        setError(playlistErrorMessage(removeError));
       }
     },
     [fetchPlaylistItems, fetchPlaylists, selectedPlaylistId],
@@ -298,8 +308,8 @@ export function usePlaylists() {
         await fetchPlaylists();
         setError(null);
       } catch (deleteError) {
-        console.error('deletePlaylist failed:', deleteError);
-        setError(errorMessage(deleteError));
+        logPlaylistFailure('deletePlaylist failed', deleteError);
+        setError(playlistErrorMessage(deleteError));
         return;
       }
 

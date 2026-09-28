@@ -15,6 +15,6 @@
   "llm_model_revision": "91cad51170dc346986eccefdc2dd33a9da36ead9",
   "llm_model_sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
   "llm_model_license": "Apache-2.0",
-  "release_version": "0.1.0",
+  "release_version": "0.1.0-beta.2",
   "legal_approval": "PENDING HUMAN REVIEW"
 }

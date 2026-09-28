@@ -1,0 +1,177 @@
+name: Pulsaria direct GitHub prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing prerelease tag to build and publish, for example v0.1.0-beta.2'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pulsaria-direct-download-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    environment:
+      name: direct-download
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PULSARIA_RELEASE_TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Validate prerelease and publication gate
+        env:
+          DIRECT_DOWNLOAD_RELEASE_READY: ${{ vars.DIRECT_DOWNLOAD_RELEASE_READY }}
+        run: |
+          if ($env:PULSARIA_RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+-(beta|rc)\.\d+$') {
+            throw 'Direct-download workflow accepts versioned beta/rc prerelease tags only.'
+          }
+          if ($env:DIRECT_DOWNLOAD_RELEASE_READY -ne 'true') {
+            throw 'Set DIRECT_DOWNLOAD_RELEASE_READY=true in the protected direct-download environment only after release review is complete.'
+          }
+          $tagCommit = git rev-parse "$env:PULSARIA_RELEASE_TAG^{commit}"
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tagCommit)) { throw 'The requested release tag does not resolve to a commit.' }
+          $changes = git status --porcelain
+          if ($LASTEXITCODE -ne 0 -or $changes) { throw 'Tagged release checkout must start clean.' }
+
+      - name: Synchronize release version
+        run: |
+          node scripts/set-release-version.mjs $env:PULSARIA_RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Release version synchronization failed.' }
+
+      - name: Install locked dependencies
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+
+      - name: Prepare verified runtime bundle
+        env:
+          PULSAR_RUNTIME_BUNDLE_URL: ${{ vars.PULSAR_RUNTIME_BUNDLE_URL }}
+          PULSAR_RUNTIME_BUNDLE_SHA256: ${{ vars.PULSAR_RUNTIME_BUNDLE_SHA256 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PULSAR_RUNTIME_BUNDLE_URL) -or [string]::IsNullOrWhiteSpace($env:PULSAR_RUNTIME_BUNDLE_SHA256)) {
+            throw 'External runtime bundle URL and SHA-256 are required; runtime files are not stored in Git.'
+          }
+          if ($env:PULSAR_RUNTIME_BUNDLE_URL -notmatch '^https://') { throw 'Runtime bundle URL must use HTTPS.' }
+          if ($env:PULSAR_RUNTIME_BUNDLE_SHA256 -notmatch '^[A-Fa-f0-9]{64}$') { throw 'Runtime bundle SHA-256 must contain 64 hexadecimal characters.' }
+          $zipPath = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bundle.zip'
+          $bundlePath = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bundle'
+          Invoke-WebRequest -Uri $env:PULSAR_RUNTIME_BUNDLE_URL -OutFile $zipPath
+          $actualHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actualHash -ne $env:PULSAR_RUNTIME_BUNDLE_SHA256.ToUpperInvariant()) { throw 'External runtime SHA-256 mismatch.' }
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $bundlePath -Force
+          npm run prepare:runtime -- -RuntimeBundle $bundlePath
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime preparation failed.' }
+
+      - name: Verify source, component inventory, and legal gate
+        run: |
+          npm run verify:canonical
+          if ($LASTEXITCODE -ne 0) { throw 'Canonical source gate failed.' }
+          $npmSbomPath = Join-Path $env:RUNNER_TEMP 'pulsaria-npm.spdx.json'
+          $sbomPath = Join-Path $env:RUNNER_TEMP 'pulsaria-release.spdx.json'
+          npm sbom --sbom-format=spdx --sbom-type=application | Set-Content -LiteralPath $npmSbomPath -Encoding utf8
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $npmSbomPath -PathType Leaf)) { throw 'npm SPDX generation failed.' }
+          node scripts/create-release-sbom.mjs --npm-sbom $npmSbomPath --output $sbomPath
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sbomPath -PathType Leaf)) { throw 'Aggregate release SPDX generation failed.' }
+          npm run verify:legal-release -- -RequireSbom -SbomPath $sbomPath
+          if ($LASTEXITCODE -ne 0) { throw 'Legal and component review gate failed.' }
+          npm run verify:local-llm
+          if ($LASTEXITCODE -ne 0) { throw 'Local model and sidecar gate failed.' }
+          npm run verify:mvp
+          if ($LASTEXITCODE -ne 0) { throw 'MVP gate failed.' }
+          npm run verify:api
+          if ($LASTEXITCODE -ne 0) { throw 'API boundary gate failed.' }
+          npm audit --omit=dev --audit-level=low
+          if ($LASTEXITCODE -ne 0) { throw 'Production dependency audit failed.' }
+
+      - name: Build direct-download NSIS bundle
+        env:
+          NEXT_PUBLIC_PULSARIA_UPDATER_ENABLED: 'false'
+        run: |
+          npm run tauri build -- --bundles nsis
+          if ($LASTEXITCODE -ne 0) { throw 'Direct-download Tauri NSIS build failed.' }
+
+      - name: Smoke test installed NSIS bundle
+        run: |
+          npm run verify:installed -- -Configuration release -Bundle nsis
+          if ($LASTEXITCODE -ne 0) { throw 'Installed NSIS smoke failed.' }
+
+      - name: Stage and verify public assets
+        run: |
+          $bundleRoot = Join-Path $env:GITHUB_WORKSPACE 'target-tauri/release/bundle'
+          $stageRoot = Join-Path $bundleRoot 'direct-assets'
+          New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
+          $installerName = "Pulsaria_$($env:PULSARIA_RELEASE_TAG -replace '^v', '')_x64-setup.exe"
+          $installer = Join-Path $bundleRoot "nsis/$installerName"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Versioned NSIS installer missing: $installerName" }
+          $sbomPath = Join-Path $env:RUNNER_TEMP 'pulsaria-release.spdx.json'
+          foreach ($source in @(
+            @{ Path = $installer; Name = $installerName },
+            @{ Path = $sbomPath; Name = 'pulsaria-release.spdx.json' },
+            @{ Path = (Join-Path $env:GITHUB_WORKSPACE 'THIRD_PARTY_NOTICES.md'); Name = 'THIRD_PARTY_NOTICES.md' },
+            @{ Path = (Join-Path $env:GITHUB_WORKSPACE 'LICENSE'); Name = 'LICENSE' }
+          )) {
+            if (-not (Test-Path -LiteralPath $source.Path -PathType Leaf)) { throw "Release asset input missing: $($source.Path)" }
+            Copy-Item -LiteralPath $source.Path -Destination (Join-Path $stageRoot $source.Name) -Force
+          }
+          $checksums = foreach ($file in Get-ChildItem -LiteralPath $stageRoot -File | Sort-Object Name) {
+            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+            "$hash  $($file.Name)"
+          }
+          $checksums | Set-Content -LiteralPath (Join-Path $stageRoot 'SHA256SUMS.txt') -Encoding utf8
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-direct-release-artifacts.ps1 -ArtifactRoot $stageRoot -ReleaseVersion ($env:PULSARIA_RELEASE_TAG -replace '^v', '')
+          if ($LASTEXITCODE -ne 0) { throw 'Direct-download artifact gate failed.' }
+          "DIRECT_RELEASE_ASSET_ROOT=$stageRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Publish free GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:PULSARIA_RELEASE_TAG -replace '^v', ''
+          $notesPath = Join-Path $env:RUNNER_TEMP 'pulsaria-direct-release-notes.md'
+          @(
+            "Pulsaria $version — descarga directa gratuita",
+            '',
+            'Instalador NSIS x64 probado con instalación, primer arranque, reinicio, runtime local y preservación de datos.',
+            '',
+            'Este candidato beta se distribuye sin firma Authenticode y no activa el actualizador automático. Windows puede mostrar una advertencia de SmartScreen. Verifica SHA256SUMS.txt antes de instalar.',
+            '',
+            'Se incluyen el inventario SPDX agregado y los notices de terceros. Usa Pulsaria sólo con contenido que tengas derecho o autorización suficiente para procesar.'
+          ) | Set-Content -LiteralPath $notesPath -Encoding utf8
+          $assets = @(Get-ChildItem -LiteralPath $env:DIRECT_RELEASE_ASSET_ROOT -File | Sort-Object Name | ForEach-Object { $_.FullName })
+          $arguments = @('release', 'create', $env:PULSARIA_RELEASE_TAG, '--repo', 'danielunibe/PulsarIA', '--title', "Pulsaria $version — Beta directa", '--notes-file', $notesPath, '--prerelease')
+          $arguments += $assets
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub prerelease publication failed.' }
+
+      - name: Clean temporary publication files
+        if: always()
+        run: |
+          foreach ($path in @(
+            (Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bundle.zip'),
+            (Join-Path $env:RUNNER_TEMP 'pulsaria-npm.spdx.json'),
+            (Join-Path $env:RUNNER_TEMP 'pulsaria-release.spdx.json'),
+            (Join-Path $env:RUNNER_TEMP 'pulsaria-direct-release-notes.md'),
+            (Join-Path $env:GITHUB_WORKSPACE 'target-tauri/release/bundle/direct-assets')
+          )) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
+          }

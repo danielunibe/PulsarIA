@@ -1187,6 +1187,8 @@ export default function Page() {
                                     jobs={jobs}
                                     jobsLoading={jobsLoading}
                                     jobsReady={jobsReady}
+                                    libraryItemCount={jobCount}
+                                    activityItemCount={activityCount}
                                     onVisibleVideosChange={setCinemaVideos}
                                     onOpenCinemaAt={handleOpenCinema}
                                     showDemoVideos={settings.showDemoVideos}

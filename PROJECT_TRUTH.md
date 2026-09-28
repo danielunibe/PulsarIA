@@ -291,3 +291,27 @@ Este seguimiento suplementa las tablas históricas: la descarga GitHub más
 reciente todavía es `v0.1.0-eval.3`; el NSIS Beta 2 actual pasó el smoke
 aislado, el MSI prerelease no es compatible con el identificador
 `0.1.0-beta.2`, y la aprobación/datos legales siguen siendo un gate humano.
+
+El head `47d8d8de` del PR #2 pasó `verify-canonical-source` el 2026-09-27 (Actions run `36335532610`). La siguiente corrección local de Inicio se mantiene en `beta2-hardening` hasta revisión y actualización del PR. El preview web no proporciona Tauri/SQLite y no sustituye la aceptación nativa.
+
+La ruta firmada de `.github/workflows/release.yml` conserva sus gates de `RELEASE_READY`, runtime externo, Authenticode y firmas Tauri updater. Se añadió `.github/workflows/direct-download-release.yml` para prereleases NSIS gratuitas: sin updater y sin Authenticode, con SBOM agregado, notices, checksums, smoke instalado y revisión legal obligatoria. El workflow requiere dispatch manual, runtime HTTPS con SHA-256 y `DIRECT_DOWNLOAD_RELEASE_READY=true` en el Environment `direct-download`; todavía no se ha ejecutado y no existe una nueva Beta 2 pública.
+
+### Evidencia de empaquetado reproducida — 2026-09-27
+
+Desde el checkout actual `beta2-hardening` se reconstruyó el instalador NSIS
+`target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.2_x64-setup.exe`.
+Su tamaño es `687863182` bytes y su SHA-256 es
+`BA83B97F7B607162085A5383DFD403EE2B748856E563C419486536320B1E1D86`.
+`npm run verify:installed -- -Configuration release -Bundle nsis` terminó con
+salida 0: instalación y desinstalación, health inicial y tras reinicio,
+runtime 54/54, los 13 documentos legales con hashes iguales a sus fuentes,
+aislamiento de rutas externas y preservación de datos pasaron. El binario está
+`NotSigned`; esta evidencia local no equivale a una firma Authenticode ni a una
+publicación GitHub.
+
+El generador `scripts/create-release-sbom.mjs` combina SPDX npm, metadatos
+Cargo y Python y hashes de todos los archivos del runtime manifest. El gate
+comprueba versión, inventario de los tres ecosistemas y cada hash de runtime.
+La publicación permanece bloqueada por el marcador humano de revisión de
+licencias/notices y los cuatro datos placeholder de titular, correo, domicilio
+y aprobación en `legal/release-manifest.json`.

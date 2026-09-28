@@ -7,8 +7,9 @@ import type { JobRecord as SharedJobRecord } from '@/hooks/use-jobs';
 import type { PlaylistContentView, SourceContentView } from '@/hooks/usePlaylists';
 import type { CinemaVideo, VideoData } from '@/types';
 import { apiFetch } from '@/lib/api-client';
+import { useI18n } from '@/lib/i18n';
 import { useDemoMedia } from '@/hooks/use-demo-media';
-/** Number of decorative empty slots kept visible when the library is empty. */
+/** Preferred grid density for decorative slots around actual visible content. */
 const INACTIVE_SLOTS_COUNT = 12;
 
 const ExpandedVideoModal = dynamic(
@@ -60,6 +61,10 @@ interface VideoGridProps {
     jobsLoading?: boolean;
     /** Evita mostrar contenido cuando la biblioteca no pudo reconciliarse. */
     jobsReady?: boolean;
+    /** Recuento canónico de elementos reales de la biblioteca. */
+    libraryItemCount?: number;
+    /** Trabajos activos o pendientes que se consultan desde Actividad. */
+    activityItemCount?: number;
     /** Filtrar por estado de retención: 'keep', 'online' */
     keepStatusFilter?: string;
     /** Filtro heredado; el MVP solo admite TikTok. */
@@ -299,6 +304,8 @@ export function VideoGrid({
     jobs: controlledJobs,
     jobsLoading = false,
     jobsReady = true,
+    libraryItemCount,
+    activityItemCount = 0,
     onVisibleVideosChange,
     onOpenCinemaAt,
     showDemoVideos = false,
@@ -306,6 +313,7 @@ export function VideoGrid({
     onContextMenu,
 }: VideoGridProps) {
 
+    const { t } = useI18n();
     const [isInitialLoad, setIsInitialLoad] = useState(true);
     const [activeDemoDetail, setActiveDemoDetail] = useState<VideoData | null>(null);
     const demoDetailTriggerRef = useRef<HTMLElement | null>(null);
@@ -318,6 +326,7 @@ export function VideoGrid({
     const { items: demoMedia } = useDemoMedia(showDemoVideos && !collectionSelected);
 
     const jobs = controlledJobs ?? localJobs;
+    const realLibraryItemCount = libraryItemCount ?? jobs.length;
     const sourceJobs = collectionSelected ? playlistJobs : jobs;
     const isCompleted = (job: SharedJobRecord) => ['complete', 'completed'].includes(job.status.toLowerCase());
     const isError = (job: SharedJobRecord) => ['error', 'failed', 'failure', 'cancelled', 'canceled'].includes(job.status.toLowerCase());
@@ -546,12 +555,29 @@ export function VideoGrid({
     const renderList = useMemo<Array<SharedJobRecord | VideoData>>(() => collectionSelected
         ? sortedJobs
         : [...sortedJobs, ...demoVideos], [collectionSelected, demoVideos, sortedJobs]);
-    // The empty cards are a permanent part of the library composition. They
-    // fill the visual skeleton around real media, but never become media
-    // records and never receive the active-video overlay.
+    const confirmedEmptyLibrary = !collectionSelected
+        && jobsReady
+        && !jobsLoading
+        && realLibraryItemCount === 0
+        && activityItemCount === 0;
+    const waitingForFirstLibraryItem = !collectionSelected
+        && jobsReady
+        && !jobsLoading
+        && realLibraryItemCount === 0
+        && activityItemCount > 0;
+    const noVisibleLibraryItems = !collectionSelected
+        && jobsReady
+        && !jobsLoading
+        && realLibraryItemCount > 0
+        && sortedJobs.length === 0;
+    // Decorative slots only fill space around visible content. They must not
+    // imply an empty library while its connection is unavailable or loading.
     const placeholderCount = layout === 'list'
         ? 0
-        : Math.max(0, INACTIVE_SLOTS_COUNT - renderList.length);
+        : (jobsLoading || !jobsReady || renderList.length === 0
+            || (!collectionSelected && realLibraryItemCount === 0)
+            ? 0
+            : Math.max(0, INACTIVE_SLOTS_COUNT - renderList.length));
 
     // El padre conserva una instantánea de la misma colección que ve el usuario.
     // La clave evita un ciclo de renders cuando el array calculado cambia de referencia.
@@ -595,6 +621,8 @@ export function VideoGrid({
     return (
         <motion.div
             style={{
+                position: 'relative',
+                zIndex: 1,
                 width: '100%',
                 minHeight: 'max-content',
                 padding: `${SPACING}px 32px 160px`,
@@ -625,6 +653,29 @@ export function VideoGrid({
                     overflow: 'visible',
                 }}
             >
+                {(confirmedEmptyLibrary || waitingForFirstLibraryItem || noVisibleLibraryItems) && (
+                    <section className="pulsaria-library-context pulsaria-library-context--empty" role="status">
+                        <h2>
+                            {confirmedEmptyLibrary
+                                ? t('libraryEmptyTitle')
+                                : waitingForFirstLibraryItem
+                                    ? t('libraryWaitingTitle')
+                                    : t('libraryFilteredTitle')}
+                        </h2>
+                        <p>
+                            {confirmedEmptyLibrary
+                                ? t('libraryEmptyDescription')
+                                : waitingForFirstLibraryItem
+                                    ? t('libraryWaitingDescription')
+                                    : t('libraryFilteredDescription')}
+                        </p>
+                    </section>
+                )}
+                {demoVideos.length > 0 && (
+                    <aside className="pulsaria-library-context pulsaria-library-context--demo" role="note">
+                        {t('demoLibraryNotice')}
+                    </aside>
+                )}
                 {/* -- Tarjetas de videos completados o mocks -- */}
                                 {renderList.map((job: SharedJobRecord | VideoData, idx: number) => {
                     const isRealJob = 'status' in job;

@@ -34,6 +34,18 @@ const tauriConfig = readJson('src-tauri/tauri.conf.json');
 tauriConfig.value.version = version;
 writeJson(tauriConfig.filePath, tauriConfig.value);
 
+const releaseManifest = readJson('legal/release-manifest.json');
+releaseManifest.value.release_version = version;
+writeJson(releaseManifest.filePath, releaseManifest.value);
+
+const projectManifest = readJson('PROJECT.manifest.json');
+projectManifest.value.version = version;
+writeJson(projectManifest.filePath, projectManifest.value);
+
+const runtimeManifest = readJson('src-tauri/resources/runtime-manifest.json');
+runtimeManifest.value.version = version;
+writeJson(runtimeManifest.filePath, runtimeManifest.value);
+
 const cargoManifestPath = path.join(projectRoot, 'src-tauri', 'Cargo.toml');
 const cargoManifest = fs.readFileSync(cargoManifestPath, 'utf8');
 const nextCargoManifest = cargoManifest.replace(
