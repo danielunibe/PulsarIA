@@ -52,11 +52,11 @@ export function AiTab({
                 <div className="flex items-start justify-between gap-3">
                     <SectionTitle icon={FaBrain} label="IA Local Privada" />
                     <span className="rounded-full bg-[#8a5cff]/15 px-2.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-[#c4b5fd]">
-                        100% Sin Nube
+                        Modelo local
                     </span>
                 </div>
                 <p className="text-[10px] leading-relaxed text-white/50">
-                    La síntesis y el asistente usan un sidecar local de llama.cpp. El modelo se descarga solo tras tu confirmación; tus transcripciones nunca se envían a un servidor externo.
+                    El asistente y la síntesis de esta sección usan un modelo local de llama.cpp, que se descarga solo tras tu confirmación. Si solicitas la síntesis opcional con Gemini desde una búsqueda, hasta cinco fragmentos relevantes se envían a Google.
                 </p>
 
                 <div className="flex items-center justify-between gap-3 rounded-[14px] bg-black/35 px-3.5 py-2.5 text-[9px] shadow-inner">

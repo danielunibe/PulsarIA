@@ -634,22 +634,6 @@ export function SettingsPanel({
     const changePerformanceMode = (mode: PerformanceMode) => {
         setPerformanceMode(mode);
         setPlaybackProfile(mode);
-        if (!isTauriRuntime()) return;
-        void invokeOptionalCommand<PerformancePolicyUi>('set_performance_policy', {
-            input: {
-                mode,
-                backgroundProcessing,
-                startInBackground: autostartEnabled,
-                idleThresholdSeconds,
-                acOnlyForMaximum,
-                preferredAdapterId,
-                analysisDepth,
-            },
-        }).then((policy) => {
-            if (policy) setPerformancePolicy(policy);
-        }).catch((error) => {
-            setSettingsError(error instanceof Error ? error.message : String(error));
-        });
     };
 
     const prepareLocalLlm = async () => {
@@ -1029,22 +1013,20 @@ export function SettingsPanel({
                 return { count: matched.length, jobs: matched, name, keywords, jobIds };
             }).filter(g => g.jobs.length > 0);
 
-            if (groups.length > 0) {
-                const persisted: Array<{ id: number; name: string; auto_generated: boolean }> = await invoke('replace_ai_playlists', {
-                    groups: groups.map((group, idx) => ({
-                        name: group.name,
-                        description: organizationCondition.trim() || 'Organizada por similitud semántica y transcripción.',
-                        color: ['#8a5cff', '#25f4ee', '#fe2c55'][idx % 3],
-                        cover_job_id: group.jobIds[0] ?? null,
-                        topic_keywords: group.keywords,
-                        job_ids: group.jobIds,
-                    })),
-                });
-                const playlistByName = new Map(persisted.filter((playlist) => playlist.auto_generated).map((playlist) => [playlist.name, playlist.id]));
-                setClustersList(groups.map((group) => ({ ...group, playlistId: playlistByName.get(group.name) })));
-            } else {
-                setClustersList([]);
-            }
+            // A successful empty run must replace older generated playlists too.
+            // Failures still leave persisted playlists untouched in the catch path.
+            const persisted: Array<{ id: number; name: string; auto_generated: boolean }> = await invoke('replace_ai_playlists', {
+                groups: groups.map((group, idx) => ({
+                    name: group.name,
+                    description: organizationCondition.trim() || 'Organizada por similitud semántica y transcripción.',
+                    color: ['#8a5cff', '#25f4ee', '#fe2c55'][idx % 3],
+                    cover_job_id: group.jobIds[0] ?? null,
+                    topic_keywords: group.keywords,
+                    job_ids: group.jobIds,
+                })),
+            });
+            const playlistByName = new Map(persisted.filter((playlist) => playlist.auto_generated).map((playlist) => [playlist.name, playlist.id]));
+            setClustersList(groups.map((group) => ({ ...group, playlistId: playlistByName.get(group.name) })));
         } catch (error) {
             setClustersList([]);
             setClusteringError(error instanceof Error ? error.message : String(error));
@@ -1121,6 +1103,18 @@ export function SettingsPanel({
                     },
                 });
                 await invoke<boolean>('set_autostart', { enabled: autostartEnabled });
+                const nextPolicy = await invoke<PerformancePolicyUi>('set_performance_policy', {
+                    input: {
+                        mode: performanceMode,
+                        backgroundProcessing,
+                        startInBackground: autostartEnabled,
+                        idleThresholdSeconds,
+                        acOnlyForMaximum,
+                        preferredAdapterId,
+                        analysisDepth,
+                    },
+                });
+                setPerformancePolicy(nextPolicy);
                 savedProcessing = {
                     quality: nativeSettings.processingQuality,
                     profile: nativeSettings.processingProfile,

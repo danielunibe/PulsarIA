@@ -139,6 +139,7 @@ export function PerformanceTab({
                         </button>
                     ))}
                 </div>
+                <p className="text-[10px] text-white/35">El modo elegido se aplica al guardar los cambios.</p>
                 <div className="rounded-xl bg-black/30 p-3 text-[10px] text-white/60">
                     <div className="flex items-center justify-between gap-2">
                         <span>Estado efectivo</span>
