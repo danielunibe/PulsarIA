@@ -326,9 +326,9 @@ El último commit de implementación validado en la rama `beta2-hardening` es
 `8277f774dfae2c33596307e87da0ca9940aff796`. CI canónico pasó en
 `36470434450`: estructura, frontend, accesibilidad, iconos, 103 pruebas Rust y
 contratos Python. El preflight de runtime pasó en `36470434457`: instaló el
-bootstrap fijado `eval.3` y verificó 54/54 recursos. El PR #2 sigue abierto,
-en borrador y con checks verdes en ese head; la actualización documental actual
-todavía debe recibir sus propios checks. La release pública más reciente sigue
+bootstrap fijado `eval.3` y verificó 54/54 recursos. El PR #2 sigue abierto y en
+borrador. El estado de los checks de cada head se consulta en el rollup del PR.
+La release pública más reciente sigue
 siendo `v0.1.0-eval.3`; Beta 2 aún no está publicada.
 
 Se reconstruyó el instalador NSIS desde el checkout `7c7e9f0ae219c4394ce109dcf5b0a8f2ba385d34` en
