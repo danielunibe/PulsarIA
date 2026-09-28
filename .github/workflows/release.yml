@@ -201,7 +201,7 @@ jobs:
 
       - name: Smoke test installed release
         run: |
-          npm run verify:installed -- -Configuration release
+          npm run verify:installed -- -Configuration release -ApiPort 8080
           if ($LASTEXITCODE -ne 0) { throw 'Installed release smoke failed.' }
 
       - name: Generate and verify updater manifest

@@ -110,7 +110,7 @@ jobs:
 
       - name: Smoke test installed NSIS bundle
         run: |
-          npm run verify:installed -- -Configuration release -Bundle nsis
+          npm run verify:installed -- -Configuration release -Bundle nsis -ApiPort 8080
           if ($LASTEXITCODE -ne 0) { throw 'Installed NSIS smoke failed.' }
 
       - name: Stage and verify public assets

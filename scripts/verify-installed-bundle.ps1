@@ -7,7 +7,7 @@ param(
     [switch]$RunLive,
     [string]$ApiToken,
     [string]$TikTokUrl = 'https://www.tiktok.com/@scout2015/video/6718335390845095173',
-    [int]$ApiPort = 18874,
+    [int]$ApiPort = 8080,
     [int]$StartupTimeoutSeconds = 90,
     [int]$JobTimeoutSeconds = 360
 )
