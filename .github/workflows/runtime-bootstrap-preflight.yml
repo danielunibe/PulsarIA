@@ -22,14 +22,52 @@ jobs:
   verify-pinned-runtime-bootstrap:
     name: Verify pinned runtime bootstrap and source manifest
     runs-on: windows-latest
+    timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
     steps:
       - name: Check out the pull request source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+
+      - name: Check whether the latest PR commit changes runtime bootstrap inputs
+        id: runtime-scope
+        if: github.event_name == 'pull_request'
+        env:
+          PR_ACTION: ${{ github.event.action }}
+        run: |
+          $runBootstrap = $env:PR_ACTION -in @('opened', 'reopened')
+          if (-not $runBootstrap) {
+            $parentCommit = git rev-parse HEAD^
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($parentCommit)) {
+              throw 'Could not resolve the parent commit for the runtime bootstrap scope check.'
+            }
+            $changedPaths = @(git diff --name-only $parentCommit HEAD)
+            if ($LASTEXITCODE -ne 0) { throw 'Could not inspect paths changed by the latest PR commit.' }
+            $exactPaths = @(
+              '.github/workflows/direct-download-release.yml',
+              'scripts/prepare-runtime-from-pinned-release.ps1',
+              'scripts/prepare-runtime.ps1',
+              'scripts/generate-runtime-manifest.ps1',
+              'scripts/verify-runtime-manifest.ps1',
+              'src-tauri/tauri.conf.json',
+              'src-tauri/resources/runtime-manifest.json'
+            )
+            $runBootstrap = @($changedPaths | Where-Object {
+              $exactPaths -contains $_ -or
+              $_.StartsWith('python-workers/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('src-tauri/resources/', [System.StringComparison]::OrdinalIgnoreCase)
+            }).Count -gt 0
+          }
+          $runValue = $runBootstrap.ToString().ToLowerInvariant()
+          Write-Host "Run pinned runtime bootstrap for latest PR commit: $runValue"
+          [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "run=$runValue`n", [System.Text.Encoding]::ASCII)
 
       - name: Prepare pinned runtime and verify all resource hashes
+        if: github.event_name == 'workflow_dispatch' || steps.runtime-scope.outputs.run == 'true'
         run: |
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-runtime-from-pinned-release.ps1 -ProjectRoot $PWD.Path
           if ($LASTEXITCODE -ne 0) { throw 'Pinned runtime bootstrap preflight failed.' }
