@@ -4,6 +4,8 @@
 **Autoridad del proyecto:** [PROJECT_TRUTH.md](../PROJECT_TRUTH.md)  
 **Alcance:** preparar Pulsaria para que una persona pueda descargar gratis el instalador vigente desde GitHub Releases.
 
+> **Seguimiento 2026-09-28:** el arreglo responsive del encabezado quedó en el commit `468cbf28` del PR #2. CI canónica pasó en [36483722105](https://github.com/danielunibe/PulsarIA/actions/runs/36483722105). El preflight [36483721849](https://github.com/danielunibe/PulsarIA/actions/runs/36483721849) pasó, pero omitió la descarga/verificación de recursos porque este commit no cambia entradas del runtime. La verificación completa más reciente sigue siendo 54/54 recursos en [36477690739](https://github.com/danielunibe/PulsarIA/actions/runs/36477690739). El PR sigue abierto en borrador y la última release pública verificada continúa siendo `v0.1.0-eval.3`; la Beta 2 no está publicada y el gate legal sigue bloqueado.
+
 La auditoría de producto y el plan de reparación por fases están en
 [AUDITORIA_INTEGRAL_Y_FASES.md](AUDITORIA_INTEGRAL_Y_FASES.md). Este documento
 se conserva enfocado en publicar la Beta 2.
