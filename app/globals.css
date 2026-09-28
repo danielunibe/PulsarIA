@@ -5764,6 +5764,46 @@ textarea {
   text-shadow: 0 0 18px rgba(255, 107, 131, 0.48);
 }
 
+@media (max-width: 960px) {
+  .pulsaria-window-header {
+    min-height: 96px;
+  }
+
+  .pulsaria-window-header__wash {
+    height: 96px;
+  }
+
+  .pulsaria-window-header__topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(36px, auto) minmax(36px, auto);
+    row-gap: 2px;
+    min-height: 96px;
+  }
+
+  .pulsaria-window-header__brand {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .pulsaria-window-header__window-controls {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .pulsaria-window-header__center-tools {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    justify-self: stretch;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .pulsaria-window-header__library-pill {
+    margin-inline: 0;
+  }
+}
+
 @media (max-width: 720px) {
   .pulsaria-window-header__topbar {
     gap: 10px;
