@@ -300,17 +300,19 @@ La ruta firmada de `.github/workflows/release.yml` conserva sus gates de `RELEAS
 
 Desde el checkout actual `beta2-hardening` se reconstruyó el instalador NSIS
 `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.2_x64-setup.exe`.
-Su tamaño es `687863182` bytes y su SHA-256 es
-`BA83B97F7B607162085A5383DFD403EE2B748856E563C419486536320B1E1D86`.
+Su tamaño es `687834808` bytes y su SHA-256 es
+`29704A3714A121E2D0F3B81912DAF8754E3BC7633C90FAB5F543B141709A15B7`.
 `npm run verify:installed -- -Configuration release -Bundle nsis` terminó con
 salida 0: instalación y desinstalación, health inicial y tras reinicio,
-runtime 54/54, los 13 documentos legales con hashes iguales a sus fuentes,
-aislamiento de rutas externas y preservación de datos pasaron. El binario está
+runtime 54/54, los 13 documentos legales con hashes iguales a sus fuentes, la
+licencia Colorama coincidente, aislamiento de rutas externas y preservación de
+datos pasaron. El binario está
 `NotSigned`; esta evidencia local no equivale a una firma Authenticode ni a una
 publicación GitHub.
 
-El generador `scripts/create-release-sbom.mjs` combina SPDX npm, metadatos
-Cargo y Python y hashes de todos los archivos del runtime manifest. El gate
+El generador `scripts/create-release-sbom.mjs` combina el árbol npm de
+producción (34 paquetes), metadatos Cargo y Python y hashes de los 54 recursos
+runtime, los 13 documentos legales y la licencia distribuida de Colorama. El gate
 comprueba versión, inventario de los tres ecosistemas y cada hash de runtime.
 La publicación permanece bloqueada por el marcador humano de revisión de
 licencias/notices y los cuatro datos placeholder de titular, correo, domicilio

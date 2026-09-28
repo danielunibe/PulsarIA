@@ -89,6 +89,7 @@ const metadataDirectories = fs.readdirSync(sitePackages, { withFileTypes: true }
   .filter((entry) => entry.isDirectory() && entry.name.endsWith('.dist-info'))
   .map((entry) => entry.name)
   .sort();
+const thirdPartyLicenseFiles = [];
 const commonSpdxLicenses = new Map([
   ['MIT', 'MIT'], ['MIT LICENSE', 'MIT'],
   ['APACHE-2.0', 'Apache-2.0'], ['APACHE 2.0', 'Apache-2.0'], ['APACHE SOFTWARE LICENSE', 'Apache-2.0'],
@@ -111,7 +112,33 @@ for (const directory of metadataDirectories) {
   const classifiers = [...metadata.matchAll(/^Classifier:\s*License :: OSI Approved :: (.+)$/gim)]
     .map((match) => match[1].trim().toUpperCase());
   const classifierLicense = classifiers.map((classifier) => commonSpdxLicenses.get(classifier)).find(Boolean) || '';
-  const resolvedLicense = declaredLicense || classifierLicense;
+  let resolvedLicense = declaredLicense || classifierLicense;
+  let licenseEvidence = '';
+  if (normalizedName === 'colorama' && version === '0.4.6') {
+    const licensePath = path.join(sitePackages, directory, 'licenses', 'LICENSE.txt');
+    if (!fs.existsSync(licensePath)) throw new Error(`Bundled Colorama license is missing: ${licensePath}`);
+    const licenseText = fs.readFileSync(licensePath, 'utf8');
+    if (!/All rights reserved\./i.test(licenseText)
+      || !/Neither the name of the copyright holders, nor those of its contributors/i.test(licenseText)) {
+      throw new Error('Colorama 0.4.6 license text does not match the expected three-clause BSD terms.');
+    }
+    resolvedLicense = 'BSD-3-Clause';
+    const licenseBytes = fs.readFileSync(licensePath);
+    const checksum = crypto.createHash('sha256').update(licenseBytes).digest('hex').toUpperCase();
+    const releasePath = `python/Lib/site-packages/${directory}/licenses/LICENSE.txt`;
+    licenseEvidence = `; bundled license evidence: ${releasePath}`;
+    thirdPartyLicenseFiles.push({
+      fileName: `./src-tauri/resources/${releasePath}`,
+      SPDXID: stableId('SPDXRef-File-thirdparty-', `${purl}:${checksum}`),
+      fileTypes: ['TEXT'],
+      checksums: [{ algorithm: 'SHA256', checksumValue: checksum }],
+      licenseConcluded: 'NOASSERTION',
+      licenseInfoInFile: ['BSD-3-Clause'],
+      licenseComments: 'Colorama 0.4.6 license text bundled under the Python site-packages dist-info directory.',
+      copyrightText: 'Copyright (c) 2010 Jonathan Hartley',
+      comment: `Pulsaria third-party license file: ${purl}; path=${releasePath}; sizeBytes=${licenseBytes.length}.`,
+    });
+  }
   const component = packageComponent({
     ecosystem: 'pypi',
     name,
@@ -119,7 +146,7 @@ for (const directory of metadataDirectories) {
     purl,
     license: resolvedLicense || 'NOASSERTION',
     downloadLocation: 'NOASSERTION',
-    comment: `Bundled Python dist-info: ${directory}; license metadata: ${resolvedLicense || value('License') || classifiers.join('; ') || 'not declared'}.`,
+    comment: `Bundled Python dist-info: ${directory}; license metadata: ${resolvedLicense || value('License') || classifiers.join('; ') || 'not declared'}${licenseEvidence}.`,
   });
   if (component) extraPackages.push(component);
 }
@@ -170,7 +197,7 @@ const legalFiles = legalMappings.map(({ source, destination }) => {
 if (legalFiles.length === 0) throw new Error('Tauri config does not package any legal resource files.');
 
 const described = new Set(npmSbom.documentDescribes ?? []);
-for (const item of [...extraPackages, ...spdxFiles, ...legalFiles]) described.add(item.SPDXID);
+for (const item of [...extraPackages, ...spdxFiles, ...legalFiles, ...thirdPartyLicenseFiles]) described.add(item.SPDXID);
 const document = {
   ...npmSbom,
   name: `pulsaria-release-${tauri.version}`,
@@ -181,7 +208,7 @@ const document = {
   },
   documentDescribes: [...described],
   packages: [...npmSbom.packages, ...extraPackages],
-  files: [...(npmSbom.files ?? []), ...spdxFiles, ...legalFiles],
+  files: [...(npmSbom.files ?? []), ...spdxFiles, ...legalFiles, ...thirdPartyLicenseFiles],
 };
 
 const purls = document.packages.flatMap((item) => (item.externalRefs ?? [])
@@ -193,8 +220,9 @@ const counts = {
   python: purls.filter((value) => value.startsWith('pkg:pypi/')).length,
   runtimeFiles: document.files.filter((item) => item.comment?.startsWith('Pulsaria runtime manifest path: ')).length,
   packagedLegalFiles: document.files.filter((item) => item.comment?.startsWith('Pulsaria packaged legal file: ')).length,
+  thirdPartyLicenseFiles: document.files.filter((item) => item.comment?.startsWith('Pulsaria third-party license file: ')).length,
 };
-if (counts.npm < 2 || counts.cargo === 0 || counts.python === 0 || counts.runtimeFiles !== runtimeFiles.length || counts.packagedLegalFiles !== legalFiles.length) {
+if (counts.npm < 2 || counts.cargo === 0 || counts.python === 0 || counts.runtimeFiles !== runtimeFiles.length || counts.packagedLegalFiles !== legalFiles.length || counts.thirdPartyLicenseFiles !== 1) {
   throw new Error(`Aggregate SBOM is incomplete: ${JSON.stringify(counts)}.`);
 }
 

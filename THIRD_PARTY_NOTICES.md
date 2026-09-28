@@ -12,7 +12,8 @@ keeps its original license and copyright.
 | --- | --- | --- | --- |
 | Rust crates | `src-tauri/Cargo.lock` and `cargo metadata` | Cargo license declarations are included in the aggregate release SPDX SBOM | Locked source graph; verify declared licenses against source notices |
 | npm packages | `package-lock.json` and `npm sbom` | Exact npm dependency graph and registry license metadata are included in the aggregate release SPDX SBOM | Locked source graph; release SBOM required before publication |
-| Python runtime and packages | `src-tauri/resources/runtime-manifest.json` | Python 3.11.9; critical package versions and file hashes are recorded in the manifest | Included; manifest PASS (54 files) |
+| Python runtime and packages | `src-tauri/resources/runtime-manifest.json` | Python 3.11.9; the aggregate SPDX inventories bundled distribution metadata | Included; manifest PASS (54 required files) |
+| Colorama | `colorama` 0.4.6 | BSD-3-Clause; full license text at `python/Lib/site-packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt` in the installed resource tree | Included; exact license file hash is recorded in the aggregate SPDX |
 | FFmpeg / FFprobe | `src-tauri/resources/bin` | GPLv3 notice in `FFMPEG-LICENSE.txt`; exact hashes recorded below | Included; hashes verified in current checkout |
 | yt-dlp | `src-tauri/resources/python/Lib/site-packages/yt_dlp-2026.8.19.dist-info` | Package metadata and runtime manifest | Included; version 2026.8.19 |
 | Faster-Whisper | `src-tauri/resources/python/Lib/site-packages/faster_whisper-1.2.1.dist-info` | Package metadata and runtime manifest | Included; version 1.2.1 |
@@ -22,21 +23,22 @@ keeps its original license and copyright.
 | LLVM OpenMP runtime | 'src-tauri/resources/bin/LICENSE-LLVM-OpenMP' | Apache-2.0 with LLVM exceptions | Included |
 | Qwen2.5-1.5B-Instruct-GGUF | Downloaded on demand at the pinned revision in `src-tauri/resources/local-llm-manifest.json` | Apache-2.0; `MODEL_NOTICE.md` and manifest | Not bundled; HTTPS, size, revision and SHA-256 checked before use |
 
-The direct-download release job combines npm's SPDX graph, Cargo's locked
-metadata, installed Python distribution metadata and the runtime manifest
-into one SPDX document.
+The direct-download release job combines npm's production SPDX graph
+(`npm sbom --omit=dev`), Cargo's locked metadata, installed Python distribution
+metadata and the runtime manifest into one SPDX document. Development-only
+packages such as Firebase CLI and its transitive `valid-url` dependency are
+excluded from the application inventory.
 The runtime manifest is the source of truth for bundled file hashes; it
 currently reports 54/54 required files with PASS. Metadata and hashes support
 review but do not replace checking each component's license and required
 notices against the exact binary that ships.
 
-The aggregate built from this Beta 2 checkout inventories 921 npm packages,
-695 Cargo packages, 33 bundled Python distributions, 54 runtime files and 13
-packaged legal documents. SPDX records `NOASSERTION` for the custom Pulsaria
-source license and for `valid-url@1.0.9` and `colorama@0.4.6`; those are called
-out for explicit owner review rather than guessed from incomplete metadata.
+The aggregate built from this Beta 2 checkout inventories 34 production npm
+packages, 695 Cargo packages, 33 bundled Python distributions, 54 runtime
+files and 13 packaged legal documents. The package root uses `NOASSERTION` for
+the custom Pulsaria source license, which remains for explicit owner review.
 
-<!-- COMPONENT_LICENSE_REVIEW_PENDING: rights holder must review the custom source license, valid-url@1.0.9, colorama@0.4.6, the generated SPDX and exact bundled notices before public release. -->
+<!-- COMPONENT_LICENSE_REVIEW_PENDING: rights holder must review the custom source license, generated SPDX and exact bundled notices before public release. -->
 
 ## Current media and model hashes
 

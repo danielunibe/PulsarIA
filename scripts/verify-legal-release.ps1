@@ -54,6 +54,24 @@ try {
                 foreach ($ecosystem in @('npm', 'cargo', 'pypi')) {
                     if (-not ($purls | Where-Object { $_ -like "pkg:$ecosystem/*" })) { $blockers.Add("Release SBOM has no $ecosystem package inventory.") }
                 }
+                $coloramaPurl = 'pkg:pypi/colorama@0.4.6'
+                $coloramaPackage = $sbom.packages | Where-Object {
+                    $_.externalRefs | Where-Object { $_.referenceType -eq 'purl' -and $_.referenceLocator -eq $coloramaPurl }
+                } | Select-Object -First 1
+                $coloramaLicenseRelative = 'src-tauri/resources/python/Lib/site-packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt'
+                $coloramaLicensePath = Join-Path $SourceRoot $coloramaLicenseRelative
+                $coloramaLicenseFile = $sbom.files | Where-Object { [string]$_.comment -like "Pulsaria third-party license file: $coloramaPurl;*" } | Select-Object -First 1
+                if ($null -eq $coloramaPackage -or [string]$coloramaPackage.licenseDeclared -ne 'BSD-3-Clause') {
+                    $blockers.Add('Release SBOM must declare Colorama 0.4.6 as BSD-3-Clause from its bundled license text.')
+                }
+                if (-not (Test-Path -LiteralPath $coloramaLicensePath -PathType Leaf) -or $null -eq $coloramaLicenseFile) {
+                    $blockers.Add('Release SBOM or runtime source is missing Colorama 0.4.6 license text.')
+                } else {
+                    $coloramaHash = $coloramaLicenseFile.checksums | Where-Object { $_.algorithm -eq 'SHA256' } | Select-Object -First 1
+                    if ($null -eq $coloramaHash -or [string]$coloramaHash.checksumValue -ne (Get-Sha256Hex -Path $coloramaLicensePath)) {
+                        $blockers.Add('Release SBOM SHA-256 does not match the bundled Colorama 0.4.6 license text.')
+                    }
+                }
                 $bundleConfig = Get-Content -LiteralPath (Join-Path $SourceRoot 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json
                 $legalMappings = @($bundleConfig.bundle.resources.PSObject.Properties | Where-Object { [string]$_.Value -like 'resources/legal/*' })
                 $expectedLegalDocuments = @(

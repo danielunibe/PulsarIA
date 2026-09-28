@@ -88,7 +88,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Canonical source gate failed.' }
           $npmSbomPath = Join-Path $env:RUNNER_TEMP 'pulsaria-npm.spdx.json'
           $sbomPath = Join-Path $env:RUNNER_TEMP 'pulsaria-release.spdx.json'
-          npm sbom --sbom-format=spdx --sbom-type=application | Set-Content -LiteralPath $npmSbomPath -Encoding utf8
+          npm sbom --omit=dev --sbom-format=spdx --sbom-type=application | Set-Content -LiteralPath $npmSbomPath -Encoding utf8
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $npmSbomPath -PathType Leaf)) { throw 'npm SPDX generation failed.' }
           node scripts/create-release-sbom.mjs --npm-sbom $npmSbomPath --output $sbomPath
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sbomPath -PathType Leaf)) { throw 'Aggregate release SPDX generation failed.' }

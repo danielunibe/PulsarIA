@@ -208,6 +208,14 @@ try {
     $result.resourceChecks.sourceLicense = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/LICENSE')
     $result.resourceChecks.eulaEs = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/EULA.es.md')
     $result.resourceChecks.privacyEs = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/PRIVACY.es.md')
+    $coloramaLicenseRelative = 'python/Lib/site-packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt'
+    $coloramaLicenseSource = Join-Path (Join-Path $projectRoot 'src-tauri/resources') $coloramaLicenseRelative
+    $coloramaLicenseInstalled = Join-Path $installedResourceRoot $coloramaLicenseRelative
+    $result.resourceChecks.coloramaLicense = (Test-Path -LiteralPath $coloramaLicenseSource -PathType Leaf) -and
+        (Test-Path -LiteralPath $coloramaLicenseInstalled -PathType Leaf)
+    if ($result.resourceChecks.coloramaLicense) {
+        $result.resourceChecks.coloramaLicense = (Get-Sha256Hex -Path $coloramaLicenseSource) -eq (Get-Sha256Hex -Path $coloramaLicenseInstalled)
+    }
     $legalMappings = @($tauriConfig.bundle.resources.PSObject.Properties | Where-Object { [string]$_.Value -like 'resources/legal/*' })
     $legalDocumentsValid = $legalMappings.Count -ge 13
     foreach ($mapping in $legalMappings) {
@@ -221,6 +229,7 @@ try {
         $result.resourceChecks["legal_$([IO.Path]::GetFileName($destination))"] = $matchesSource
         if (-not $matchesSource) { $legalDocumentsValid = $false }
     }
+    if (-not $result.resourceChecks.coloramaLicense) { $legalDocumentsValid = $false }
     $result.resourceChecks.legalDocumentCount = $legalMappings.Count
     $result.resourceChecks.legalDocuments = $legalDocumentsValid
     $onnxModelDir = Join-Path $installDir 'resources/assets/models/all-MiniLM-L6-v2'
