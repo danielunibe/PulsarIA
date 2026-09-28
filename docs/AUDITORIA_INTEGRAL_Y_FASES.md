@@ -15,7 +15,7 @@ Esto es una auditoría por capas, no una certificación de todos los dispositivo
 ## Resumen ejecutivo
 
 - **El usuario ya puede descargar gratis `v0.1.0-eval.3` desde GitHub.** Esa versión publicada es anterior al candidato Beta 2.
-- **Beta 2 aún no es una descarga pública:** está en el PR borrador [#2](https://github.com/danielunibe/PulsarIA/pull/2), con head `47d8d8de`. `verify-canonical-source` pasó en ese head, run [36335532610](https://github.com/danielunibe/PulsarIA/actions/runs/36335532610).
+- **Beta 2 aún no es una descarga pública:** está en el PR borrador [#2](https://github.com/danielunibe/PulsarIA/pull/2). El commit de código `5f888e5f` pasó `verify-canonical-source`, run [36374365114](https://github.com/danielunibe/PulsarIA/actions/runs/36374365114); después se actualizó esta documentación.
 - **La principal prioridad funcional es terminar aceptación nativa.** En el preview web no hay acceso a la biblioteca local; la alerta y el reintento se muestran, pero eso no demuestra el comportamiento de SQLite/Tauri.
 - **Se corrigieron localmente cuatro defectos de comunicación/usabilidad:** error de búsqueda junto con “sin resultados”, enlaces inválidos escondidos dentro del CTA, nombre accesible insuficiente del campo de perfil y recorte a una sola línea de la alerta de biblioteca.
 - El fallo de red esperado del preview queda como advertencia de consola, así no abre el overlay rojo de Next Dev; los demás errores siguen como errores.
@@ -52,7 +52,7 @@ Las fases se cierran en orden, conservando separado el estado del candidato Beta
 | Fase | Prioridad | Estado | Entrega y condición de cierre |
 | --- | --- | --- | --- |
 | 0. Línea base y preservación | P0 | **PASS** | Mantener checkout canónico, rama `beta2-hardening` y datos existentes. `scratch/` es del usuario y no forma parte del cambio. No ejecutar reset, clean ni stash global. |
-| 1. Errores y accesibilidad inmediata | P1 | **PASS local / CI histórico PASS** | Búsqueda fallida no se presenta como cero resultados; resumen de enlace inválido vive fuera del CTA; perfil tiene nombre accesible y descripción; banner de biblioteca no trunca su mensaje; el error de red esperado no abre overlay rojo en Next Dev. CI canónico PASS en head `47d8d8de` (run `36335532610`); los cambios locales posteriores aún deben pasar CI al actualizar el PR. |
+| 1. Errores y accesibilidad inmediata | P1 | **PASS local / CI PASS** | Búsqueda fallida no se presenta como cero resultados; resumen de enlace inválido vive fuera del CTA; perfil tiene nombre accesible y descripción; banner de biblioteca no trunca su mensaje; el error de red esperado no abre overlay rojo en Next Dev. CI canónico PASS en head `5f888e5f` (run `36374365114`). |
 | 2. Primer arranque y biblioteca vacía | P1 | **PASS de implementación / aceptación nativa pendiente** | Error, biblioteca real vacía, trabajos pendientes y filtros sin coincidencias tienen estados distintos; las DEMO explican que son temporales; el grid no crea ranuras vacías durante carga/error ni cuando no hay contenido. Validación observada en preview web para desconexión + DEMO; aceptar estados con datos reales en Tauri a 1280 × 800 y 860 × 640. |
 | 3. Ingreso y fuentes autorizadas | P1 | **Parcial** | Validar enlace, lote TXT/CSV, perfil, consentimiento/revocación, duplicados y errores. Cerrar solo con perfil temporal y URL live cuyo uso autorice el titular; sin URL, mantener el smoke live omitido. |
 | 4. Runtime local: biblioteca, actividad, playlists | P1 | **Implementación reportada / aceptación nativa pendiente** | En ventana Tauri, aceptar persistencia SQLite, trabajos, errores/reintentos, alta y recuperación de playlists y fuentes; verificar que reinicio no pierda estado ni duplique. |
@@ -79,4 +79,4 @@ La publicación también requiere cotejar dependencias, modelos y notices del ar
 
 ## Cómo continuar fase por fase
 
-La fase activa es **2: mejorar Inicio y estados de biblioteca**; el cambio local está implementado y requiere aceptación nativa. Después sigue la fase 3. La CI de fase 1 ya pasó en `47d8d8de`. Cada cierre debe anotar evidencia y límites: navegador ≠ Tauri; build ≠ smoke instalado; smoke offline ≠ TikTok live; CI ≠ aprobación legal ni aceptación visual humana.
+La fase activa es **2: mejorar Inicio y estados de biblioteca**; el cambio está implementado y su CI pasó, pero requiere aceptación nativa. Después sigue la fase 3. Cada cierre debe anotar evidencia y límites: navegador ≠ Tauri; build ≠ smoke instalado; smoke offline ≠ TikTok live; CI ≠ aprobación legal ni aceptación visual humana.

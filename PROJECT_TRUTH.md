@@ -292,7 +292,7 @@ reciente todavía es `v0.1.0-eval.3`; el NSIS Beta 2 actual pasó el smoke
 aislado, el MSI prerelease no es compatible con el identificador
 `0.1.0-beta.2`, y la aprobación/datos legales siguen siendo un gate humano.
 
-El head `47d8d8de` del PR #2 pasó `verify-canonical-source` el 2026-09-27 (Actions run `36335532610`). La siguiente corrección local de Inicio se mantiene en `beta2-hardening` hasta revisión y actualización del PR. El preview web no proporciona Tauri/SQLite y no sustituye la aceptación nativa.
+El commit de código `5f888e5f` del PR #2 pasó `verify-canonical-source` el 2026-09-27 (Actions run `36374365114`). Las correcciones de Inicio y la ruta de descarga directa NSIS ya están en el PR borrador, pendientes de revisión y merge. El preview web no proporciona Tauri/SQLite y no sustituye la aceptación nativa.
 
 La ruta firmada de `.github/workflows/release.yml` conserva sus gates de `RELEASE_READY`, runtime externo, Authenticode y firmas Tauri updater. Se añadió `.github/workflows/direct-download-release.yml` para prereleases NSIS gratuitas: sin updater y sin Authenticode, con SBOM agregado, notices, checksums, smoke instalado y revisión legal obligatoria. El workflow requiere dispatch manual, runtime HTTPS con SHA-256 y `DIRECT_DOWNLOAD_RELEASE_READY=true` en el Environment `direct-download`; todavía no se ha ejecutado y no existe una nueva Beta 2 pública.
 
