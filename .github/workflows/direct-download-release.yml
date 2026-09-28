@@ -74,7 +74,7 @@ jobs:
       - name: Prepare runtime from pinned public GitHub release
         run: |
           # The public eval.3 installer is only a runtime bootstrap. Its SHA-256
-          # is pinned, and the Beta 2 manifest gate verifies every extracted file.
+          # is pinned, and the Beta 2 manifest gate verifies all declared required resources.
           # Its runtime manifest has 38/38 matching non-worker records; current Python
           # workers come from the tagged source mappings in tauri.conf.json.
           $bootstrapRelease = 'v0.1.0-eval.3'
