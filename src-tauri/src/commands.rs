@@ -4323,10 +4323,7 @@ pub async fn search_transcripts(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<db::SearchResult>, String> {
-    emit_log(
-        &app_handle,
-        "Search requested".into(),
-    );
+    emit_log(&app_handle, "Search requested".into());
 
     let config = state.config.lock().await;
     let final_limit = limit.unwrap_or(config.max_results);

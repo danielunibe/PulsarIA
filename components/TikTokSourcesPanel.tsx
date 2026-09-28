@@ -497,7 +497,7 @@ export function TikTokSourcesPanel() {
           <input
             id="tiktok-profile-input"
             aria-label="URL de perfil o nombre de usuario de TikTok"
-            aria-describedby="tiktok-profile-input-help"
+            aria-describedby="tiktok-profile-input-help tiktok-profile-sync-note"
             type="text"
             value={profileInput}
             onChange={(event) => setProfileInput(event.target.value)}
@@ -508,6 +508,11 @@ export function TikTokSourcesPanel() {
           />
         </label>
         <p id="tiktok-profile-input-help" className="source-profile-help">Pega una URL o @usuario</p>
+        <p id="tiktok-profile-sync-note" className="source-profile-sync-note" role="note">
+          Al registrar el perfil, Pulsaria consulta las pestañas activas. Mientras Pulsaria esté abierta,
+          revisa esas fuentes cada 15 minutos y añade a tu cola el contenido nuevo que cumpla las reglas.
+          Puedes pausar el perfil en Ajustes.
+        </p>
 
         <div className="source-profile-cap">
           <span>Pestañas del perfil a procesar</span>
