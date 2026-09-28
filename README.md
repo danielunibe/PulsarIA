@@ -135,9 +135,10 @@ gratuita sin Authenticode ni updater. Para el runtime usa como bootstrap el
 instalador público `v0.1.0-eval.3`, con SHA-256 fijado; la comparación de
 manifiestos encontró iguales sus 38/38 registros runtime no-worker y el build repone los
 workers desde el tag Beta 2. Falta ejecutar este bootstrap dentro del workflow.
-La publicación sigue cerrada hasta completar los datos y la revisión legal,
-revisar notices del artefacto y configurar la aprobación del Environment
-`direct-download`.
+La publicación sigue cerrada hasta completar los datos y la revisión legal y
+revisar notices del artefacto. El Environment `direct-download` ya exige
+aprobación humana, solo permite ejecuciones desde `main`, desactiva el bypass
+administrativo y mantiene `DIRECT_DOWNLOAD_RELEASE_READY=false`.
 Consulta los [checks del PR](https://github.com/danielunibe/PulsarIA/pull/2/checks)
 y el [plan de reparación](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md) para el
 estado actual y los límites pendientes. [PROJECT_TRUTH.md](PROJECT_TRUTH.md)
