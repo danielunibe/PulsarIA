@@ -320,10 +320,13 @@ y aprobación en `legal/release-manifest.json`.
 
 ### Seguimiento actual — 2026-09-28
 
-El checkout `beta2-hardening` está en `5e723141ac6f8f787b1e2159088eb4ee93e28c65`;
+El checkout `beta2-hardening` está en `10a680fdbc5c631bf01470719ab0c04a30fd75b8`;
 el PR #2 sigue abierto, en borrador y `CLEAN`. `verify-canonical-source` pasó
-para ese head en Actions run `36440084673`. El preflight del bootstrap fijado
-pasó en run `36440084731`. La release pública más reciente sigue siendo
+para ese head en Actions run `36443611705`, incluidos 103 tests Rust. El
+preflight completo del bootstrap fijado pasó sobre el head `5e723141` en run
+`36440084731` y verificó 54/54 recursos. En el head actual, run `36443611688`
+verificó el filtro de alcance y omitió la repetición pesada porque el último
+commit solo modificó ese filtro. La release pública más reciente sigue siendo
 `v0.1.0-eval.3`; Beta 2 aún no está publicada.
 
 Se reconstruyó el instalador NSIS desde el código de aplicación del head
