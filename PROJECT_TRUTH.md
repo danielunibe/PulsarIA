@@ -323,27 +323,28 @@ y aprobación en `legal/release-manifest.json`.
 ### Seguimiento actual — 2026-09-28
 
 El último commit de implementación validado en la rama `beta2-hardening` es
-`4da185e2d49c786dca57aeab8d98ddd63b21e1e4`; el PR #2 sigue abierto y en
-borrador. CI canónico pasó en Actions run `36455508083`: estructura, frontend,
-accesibilidad, iconos, 103 pruebas Rust y contratos Python. El preflight
+`4da185e2d49c786dca57aeab8d98ddd63b21e1e4`; el checkout documental `7c7e9f0a`
+también pasó CI canónico en run `36459414134`. El PR #2 sigue abierto y en
+borrador. CI del commit de implementación pasó en `36455508083`: estructura,
+frontend, accesibilidad, iconos, 103 pruebas Rust y Python. El preflight
 completo pasó en `36455508060`: instaló el bootstrap fijado `eval.3` y verificó
-54/54 recursos. Después se actualizaron solo documentos para registrar esos
-resultados. La release pública más reciente sigue siendo
+54/54 recursos. El preflight posterior `36459414477` omitió repetirlo porque
+los commits posteriores solo cambiaron documentación. La release pública más
+reciente sigue siendo
 `v0.1.0-eval.3`; Beta 2 aún no está publicada.
 
-Se reconstruyó el instalador NSIS desde el código de aplicación del head
-`6dd02497957369d78b8e070c090cde9bffb06f41` en
+Se reconstruyó el instalador NSIS desde el checkout `7c7e9f0ae219c4394ce109dcf5b0a8f2ba385d34` en
 `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.2_x64-setup.exe`:
-687,857,246 bytes, SHA-256
-`B742EA6AD37358E17D8D36FEEFBD77DFC5D4A33BCE28C7FF084857F65CBCEAED`.
+687,857,791 bytes, SHA-256
+`0035F92BBCA54E56007F5849FD6201D3CE7015C92F6205EDC838FAE5C141F8B3`.
 `npm run verify:installed -- -Configuration release -Bundle nsis` terminó
-con salida 0. El smoke confirmó instalación y desinstalación, health antes y
-después de reiniciar, 54/54 recursos runtime, los 13 documentos legales, el
-aislamiento de runtime, preservación de datos de usuario y limpieza del
-entorno de prueba. El modo fue offline (`RunLive` omitido): ingestión, búsqueda,
-exports y staging limpio no se probaron; el campo `stagingContract.clean=false`
-es el valor predeterminado de ese modo y no constituye un resultado de staging.
-El binario permanece `NotSigned`, condición aceptada para esta prerelease.
+con salida 0. El smoke confirmó instalación/desinstalación, health antes y
+después de reiniciar, 54/54 recursos runtime, 13 documentos legales, aislamiento
+del runtime, preservación de datos de usuario y cleanup. El modo fue offline
+(`RunLive` omitido): ingestión, búsqueda y exports no se ejecutaron;
+`stagingContract.clean=false` es el valor predeterminado offline y no constituye
+un resultado de staging. El binario permanece `NotSigned`, condición aceptada
+para esta prerelease.
 
 El gate de publicación sigue bloqueado por el marcador de revisión humana de
 licencias/notices y los placeholders de titular, correo de contacto, domicilio
@@ -353,6 +354,8 @@ la descarga/instalación del bootstrap `eval.3`, SHA-256
 `1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF`, runtime
 54/54 y limpieza temporal; ese resultado completo corresponde al run
 `36455508060` sobre el último commit de implementación `4da185e2`. El preflight
-anterior `36449269415` sigue como evidencia histórica del mismo flujo. Los workflows usan
+posterior `36459414477` omitió la etapa de runtime porque los cambios siguientes
+fueron documentales. El preflight anterior `36449269415` sigue como evidencia
+histórica del mismo flujo. Los workflows usan
 `actions/checkout@v7` y `actions/setup-node@v7`; CI canónico pasó en
 `36455508083` incluyendo los contratos nuevos de accesibilidad e iconos.
