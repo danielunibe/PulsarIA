@@ -346,6 +346,15 @@ del runtime, preservación de datos de usuario y cleanup. El modo fue offline
 un resultado de staging. El binario permanece `NotSigned`, condición aceptada
 para esta prerelease.
 
+El 2026-09-28, un arranque interactivo temporal de `target-tauri/release/pulsaria.exe`
+inicializó SQLite y mostró el proceso/ventana `Pulsaria`, pero `GET
+http://127.0.0.1:8080/health` rechazó la conexión; el proceso solo mostró el
+listener local de métricas en 9001. El smoke instalado citado arriba verificó
+health con el puerto de prueba 18874. La diferencia aún requiere reproducirse
+con el NSIS instalado en el puerto predeterminado antes de aceptar el gateway;
+esta observación no equivale a un diagnóstico de causa raíz ni a aceptación
+visual nativa.
+
 El gate de publicación sigue bloqueado por el marcador de revisión humana de
 licencias/notices y los placeholders de titular, correo de contacto, domicilio
 para notificaciones y aprobación en `legal/release-manifest.json`. El workflow
