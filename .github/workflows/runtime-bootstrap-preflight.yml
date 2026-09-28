@@ -1,0 +1,35 @@
+name: Direct download runtime bootstrap preflight
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/direct-download-release.yml
+      - .github/workflows/runtime-bootstrap-preflight.yml
+      - scripts/prepare-runtime-from-pinned-release.ps1
+      - scripts/prepare-runtime.ps1
+      - scripts/generate-runtime-manifest.ps1
+      - scripts/verify-runtime-manifest.ps1
+      - python-workers/**
+      - src-tauri/tauri.conf.json
+      - src-tauri/resources/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-pinned-runtime-bootstrap:
+    name: Verify pinned runtime bootstrap and source manifest
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the pull request source
+        uses: actions/checkout@v7
+
+      - name: Prepare pinned runtime and verify all resource hashes
+        run: |
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-runtime-from-pinned-release.ps1 -ProjectRoot $PWD.Path
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned runtime bootstrap preflight failed.' }

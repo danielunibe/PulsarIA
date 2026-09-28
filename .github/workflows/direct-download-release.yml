@@ -73,29 +73,8 @@ jobs:
 
       - name: Prepare runtime from pinned public GitHub release
         run: |
-          # The public eval.3 installer is only a runtime bootstrap. Its SHA-256
-          # is pinned, and the Beta 2 manifest gate verifies all declared required resources.
-          # Its runtime manifest has 38/38 matching non-worker records; current Python
-          # workers come from the tagged source mappings in tauri.conf.json.
-          $bootstrapRelease = 'v0.1.0-eval.3'
-          $bootstrapInstallerName = 'Pulsaria_0.1.0_x64-setup.exe'
-          $bootstrapSha256 = '1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF'
-          $bootstrapUrl = "https://github.com/danielunibe/PulsarIA/releases/download/$bootstrapRelease/$bootstrapInstallerName"
-          $bootstrapInstallerPath = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bootstrap.exe'
-          $bootstrapInstallRoot = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bootstrap-install'
-          Invoke-WebRequest -Uri $bootstrapUrl -OutFile $bootstrapInstallerPath
-          $actualHash = (Get-FileHash -LiteralPath $bootstrapInstallerPath -Algorithm SHA256).Hash.ToUpperInvariant()
-          if ($actualHash -ne $bootstrapSha256) { throw 'Pinned GitHub runtime bootstrap SHA-256 mismatch.' }
-          $install = Start-Process -FilePath $bootstrapInstallerPath -ArgumentList @('/S', "/D=$bootstrapInstallRoot") -WindowStyle Hidden -Wait -PassThru
-          if ($install.ExitCode -ne 0) { throw "Runtime bootstrap installer failed with exit code $($install.ExitCode)." }
-          $bootstrapResources = Join-Path $bootstrapInstallRoot 'resources'
-          foreach ($relative in @('python', 'assets/models', 'bin')) {
-            if (-not (Test-Path -LiteralPath (Join-Path $bootstrapResources $relative) -PathType Container)) {
-              throw "Pinned runtime bootstrap is missing resources/$relative."
-            }
-          }
-          npm run prepare:runtime -- -RuntimeBundle $bootstrapResources
-          if ($LASTEXITCODE -ne 0) { throw 'Runtime preparation from pinned GitHub release failed.' }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-runtime-from-pinned-release.ps1 -ProjectRoot $PWD.Path
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned GitHub runtime bootstrap failed.' }
 
       - name: Verify source, component inventory, and legal gate
         run: |
@@ -182,8 +161,6 @@ jobs:
         if: always()
         run: |
           foreach ($path in @(
-            (Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bootstrap.exe'),
-            (Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bootstrap-install'),
             (Join-Path $env:RUNNER_TEMP 'pulsaria-npm.spdx.json'),
             (Join-Path $env:RUNNER_TEMP 'pulsaria-release.spdx.json'),
             (Join-Path $env:RUNNER_TEMP 'pulsaria-direct-release-notes.md'),
