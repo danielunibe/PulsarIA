@@ -322,12 +322,13 @@ y aprobación en `legal/release-manifest.json`.
 
 ### Seguimiento actual — 2026-09-28
 
-El checkout `beta2-hardening` está en `4da185e2d49c786dca57aeab8d98ddd63b21e1e4`;
-el PR #2 sigue abierto y en borrador, con ambos checks en verde. CI canónico
-pasó en Actions run `36455508083`: estructura, frontend, accesibilidad, iconos,
-103 pruebas Rust y contratos Python. El preflight completo pasó en
-`36455508060`: instaló el bootstrap fijado `eval.3` y verificó 54/54 recursos.
-La release pública más reciente sigue siendo
+El último commit de implementación validado en la rama `beta2-hardening` es
+`4da185e2d49c786dca57aeab8d98ddd63b21e1e4`; el PR #2 sigue abierto y en
+borrador. CI canónico pasó en Actions run `36455508083`: estructura, frontend,
+accesibilidad, iconos, 103 pruebas Rust y contratos Python. El preflight
+completo pasó en `36455508060`: instaló el bootstrap fijado `eval.3` y verificó
+54/54 recursos. Después se actualizaron solo documentos para registrar esos
+resultados. La release pública más reciente sigue siendo
 `v0.1.0-eval.3`; Beta 2 aún no está publicada.
 
 Se reconstruyó el instalador NSIS desde el código de aplicación del head
@@ -351,7 +352,7 @@ de publicación desde `main` aún no se ha ejecutado. El preflight de PR validó
 la descarga/instalación del bootstrap `eval.3`, SHA-256
 `1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF`, runtime
 54/54 y limpieza temporal; ese resultado completo corresponde al run
-`36455508060` sobre el head `4da185e2`. El preflight anterior `36449269415`
-sigue como evidencia histórica del mismo flujo. Los workflows usan
+`36455508060` sobre el último commit de implementación `4da185e2`. El preflight
+anterior `36449269415` sigue como evidencia histórica del mismo flujo. Los workflows usan
 `actions/checkout@v7` y `actions/setup-node@v7`; CI canónico pasó en
 `36455508083` incluyendo los contratos nuevos de accesibilidad e iconos.
