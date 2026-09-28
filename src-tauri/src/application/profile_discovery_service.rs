@@ -183,7 +183,7 @@ impl ProfileDiscoveryService {
             (source.profile_url, source.username)
         };
 
-        info!("Resolving metadata for profile source {source_id}: {profile_url}");
+        info!("Resolving metadata for profile source {source_id}");
         match self.resolve_profile_metadata(&profile_url).await {
             Ok(snapshot) => {
                 let conn = self
@@ -607,7 +607,7 @@ impl ProfileDiscoveryService {
                     queued += 1;
                 }
                 Err(err) => {
-                    error!("Failed to enqueue job for {canonical_url}: {err}");
+                    error!("Failed to enqueue discovered item for source {source_id}: {err}");
                 }
             }
 

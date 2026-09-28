@@ -165,7 +165,7 @@ impl SearchService {
             return Ok(Vec::new());
         }
         let start_time = std::time::Instant::now();
-        info!("Ejecutando semantic search para: '{}'", query);
+        info!("Ejecutando semantic search");
 
         // 1. Convertir la string de búsqueda a embedding
         let query_vec = self.generate_embedding(query)?;
