@@ -323,15 +323,13 @@ y aprobación en `legal/release-manifest.json`.
 ### Seguimiento actual — 2026-09-28
 
 El último commit de implementación validado en la rama `beta2-hardening` es
-`4da185e2d49c786dca57aeab8d98ddd63b21e1e4`; el checkout documental `7c7e9f0a`
-también pasó CI canónico en run `36459414134`. El PR #2 sigue abierto y en
-borrador. CI del commit de implementación pasó en `36455508083`: estructura,
-frontend, accesibilidad, iconos, 103 pruebas Rust y Python. El preflight
-completo pasó en `36455508060`: instaló el bootstrap fijado `eval.3` y verificó
-54/54 recursos. El preflight posterior `36459414477` omitió repetirlo porque
-los commits posteriores solo cambiaron documentación. La release pública más
-reciente sigue siendo
-`v0.1.0-eval.3`; Beta 2 aún no está publicada.
+`8277f774dfae2c33596307e87da0ca9940aff796`. CI canónico pasó en
+`36470434450`: estructura, frontend, accesibilidad, iconos, 103 pruebas Rust y
+contratos Python. El preflight de runtime pasó en `36470434457`: instaló el
+bootstrap fijado `eval.3` y verificó 54/54 recursos. El PR #2 sigue abierto,
+en borrador y con checks verdes en ese head; la actualización documental actual
+todavía debe recibir sus propios checks. La release pública más reciente sigue
+siendo `v0.1.0-eval.3`; Beta 2 aún no está publicada.
 
 Se reconstruyó el instalador NSIS desde el checkout `7c7e9f0ae219c4394ce109dcf5b0a8f2ba385d34` en
 `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.2_x64-setup.exe`:
@@ -350,21 +348,23 @@ El 2026-09-28, un arranque interactivo temporal de `target-tauri/release/pulsari
 inicializó SQLite y mostró el proceso/ventana `Pulsaria`, pero `GET
 http://127.0.0.1:8080/health` rechazó la conexión; el proceso solo mostró el
 listener local de métricas en 9001. El smoke instalado citado arriba verificó
-health con el puerto de prueba 18874. La diferencia aún requiere reproducirse
-con el NSIS instalado en el puerto predeterminado antes de aceptar el gateway;
-esta observación no equivale a un diagnóstico de causa raíz ni a aceptación
-visual nativa.
+health con el puerto de prueba 18874. En la misma sesión, el `.env` local
+ignorado por Git definía el puerto de producto 8080, coincidente con el
+frontend, así que esa configuración no explica por sí sola la falta del
+listener. `startup.log` no registra el resultado del bind. La discrepancia aún
+requiere reproducirse con el NSIS instalado en el puerto predeterminado antes
+de aceptar el gateway; esta observación no equivale a un diagnóstico de causa
+raíz ni a aceptación visual nativa.
 
-El gate de publicación sigue bloqueado por el marcador de revisión humana de
-licencias/notices y los placeholders de titular, correo de contacto, domicilio
-para notificaciones y aprobación en `legal/release-manifest.json`. El workflow
-de publicación desde `main` aún no se ha ejecutado. El preflight de PR validó
-la descarga/instalación del bootstrap `eval.3`, SHA-256
+El gate de publicación sigue bloqueado. `scripts/verify-legal-release.ps1`
+reporta el marcador `COMPONENT_LICENSE_REVIEW_PENDING` y cuatro placeholders
+en `legal/release-manifest.json`: titular, correo legal, domicilio de avisos y
+aprobación humana. El workflow de publicación desde `main` aún no se ha
+ejecutado y `DIRECT_DOWNLOAD_RELEASE_READY` permanece en `false`. El preflight
+de runtime más reciente `36470434457` validó la descarga/instalación del
+bootstrap `eval.3`, SHA-256
 `1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF`, runtime
-54/54 y limpieza temporal; ese resultado completo corresponde al run
-`36455508060` sobre el último commit de implementación `4da185e2`. El preflight
-posterior `36459414477` omitió la etapa de runtime porque los cambios siguientes
-fueron documentales. El preflight anterior `36449269415` sigue como evidencia
-histórica del mismo flujo. Los workflows usan
-`actions/checkout@v7` y `actions/setup-node@v7`; CI canónico pasó en
-`36455508083` incluyendo los contratos nuevos de accesibilidad e iconos.
+54/54 y limpieza temporal. Los runs `36455508060` y `36449269415` siguen como
+evidencia histórica del mismo flujo. Los workflows usan
+`actions/checkout@v7` y `actions/setup-node@v7`; el smoke NSIS en 8080 y la
+aceptación visual Tauri continúan pendientes.
