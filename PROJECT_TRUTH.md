@@ -294,7 +294,7 @@ aislado, el MSI prerelease no es compatible con el identificador
 
 El commit de código `5f888e5f` del PR #2 pasó `verify-canonical-source` el 2026-09-27 (Actions run `36374365114`). Las correcciones de Inicio y la ruta de descarga directa NSIS ya están en el PR borrador, pendientes de revisión y merge. El preview web no proporciona Tauri/SQLite y no sustituye la aceptación nativa.
 
-La ruta firmada de `.github/workflows/release.yml` conserva sus gates de `RELEASE_READY`, runtime externo, Authenticode y firmas Tauri updater. Se añadió `.github/workflows/direct-download-release.yml` para prereleases NSIS gratuitas: sin updater y sin Authenticode, con SBOM agregado, notices, checksums, smoke instalado y revisión legal obligatoria. El runtime directo se obtiene del instalador público `v0.1.0-eval.3`, fijado por SHA-256 `1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF`; una comparación de manifiestos dio 38/38 registros runtime no-worker iguales y los workers se generan desde el source tag actual. El bootstrap en Actions aún no se ha ejecutado. El Environment `direct-download` ya exige aprobación humana, limita despliegues a `main` y desactiva el bypass administrativo; `DIRECT_DOWNLOAD_RELEASE_READY` permanece en `false` hasta concluir la revisión legal y del artefacto. No existe una nueva Beta 2 pública.
+La ruta firmada de `.github/workflows/release.yml` conserva sus gates de `RELEASE_READY`, runtime externo, Authenticode y firmas Tauri updater. Se añadió `.github/workflows/direct-download-release.yml` para prereleases NSIS gratuitas: sin updater y sin Authenticode, con SBOM agregado, notices, checksums, smoke instalado y revisión legal obligatoria. El runtime directo se obtiene del instalador público `v0.1.0-eval.3`, fijado por SHA-256 `1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF`; una comparación de manifiestos dio 38/38 registros runtime no-worker iguales y los workers se generan desde el source tag actual. El preflight separado de PR instaló ese bootstrap y verificó los 54 recursos en Actions run `36440084731`; la ruta completa de publicación desde `main` aún no se ha ejecutado. El Environment `direct-download` ya exige aprobación humana, limita despliegues a `main` y desactiva el bypass administrativo; `DIRECT_DOWNLOAD_RELEASE_READY` permanece en `false` hasta concluir la revisión legal y del artefacto. No existe una nueva Beta 2 pública.
 
 ### Evidencia de empaquetado reproducida — 2026-09-27
 
@@ -320,12 +320,14 @@ y aprobación en `legal/release-manifest.json`.
 
 ### Seguimiento actual — 2026-09-28
 
-El checkout `beta2-hardening` está en `6dd02497957369d78b8e070c090cde9bffb06f41`;
+El checkout `beta2-hardening` está en `5e723141ac6f8f787b1e2159088eb4ee93e28c65`;
 el PR #2 sigue abierto, en borrador y `CLEAN`. `verify-canonical-source` pasó
-para ese head en Actions run `36383346900`. La release pública más reciente
-sigue siendo `v0.1.0-eval.3`; Beta 2 aún no está publicada.
+para ese head en Actions run `36440084673`. El preflight del bootstrap fijado
+pasó en run `36440084731`. La release pública más reciente sigue siendo
+`v0.1.0-eval.3`; Beta 2 aún no está publicada.
 
-Se reconstruyó el instalador NSIS del head actual en
+Se reconstruyó el instalador NSIS desde el código de aplicación del head
+`6dd02497957369d78b8e070c090cde9bffb06f41` en
 `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.2_x64-setup.exe`:
 687,857,246 bytes, SHA-256
 `B742EA6AD37358E17D8D36FEEFBD77DFC5D4A33BCE28C7FF084857F65CBCEAED`.
@@ -341,4 +343,8 @@ El binario permanece `NotSigned`, condición aceptada para esta prerelease.
 El gate de publicación sigue bloqueado por el marcador de revisión humana de
 licencias/notices y los placeholders de titular, correo de contacto, domicilio
 para notificaciones y aprobación en `legal/release-manifest.json`. El workflow
-de bootstrap desde el instalador semilla todavía no se ha ejecutado en Actions.
+de publicación desde `main` aún no se ha ejecutado. El preflight de PR sí validó
+la descarga/instalación del bootstrap `eval.3`, SHA-256
+`1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF`, runtime
+54/54 y limpieza temporal. Los workflows usan `actions/checkout@v7` y
+`actions/setup-node@v7`; el CI canónico pasó con esos cambios.
