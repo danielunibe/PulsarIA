@@ -607,7 +607,10 @@ impl ProfileDiscoveryService {
                     queued += 1;
                 }
                 Err(err) => {
-                    error!("Failed to enqueue discovered item for source {source_id}: {err}");
+                    error!(
+                        "Failed to enqueue discovered item for source {}: {err}",
+                        source.id
+                    );
                 }
             }
 
