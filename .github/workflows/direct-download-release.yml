@@ -80,6 +80,10 @@ jobs:
         run: |
           npm run verify:canonical
           if ($LASTEXITCODE -ne 0) { throw 'Canonical source gate failed.' }
+          npm run verify:frontend-a11y
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend accessibility contract failed.' }
+          npm run verify:icons
+          if ($LASTEXITCODE -ne 0) { throw 'Web and native icon asset contract failed.' }
           $npmSbomPath = Join-Path $env:RUNNER_TEMP 'pulsaria-npm.spdx.json'
           $sbomPath = Join-Path $env:RUNNER_TEMP 'pulsaria-release.spdx.json'
           npm sbom --omit=dev --sbom-format=spdx --sbom-type=application | Set-Content -LiteralPath $npmSbomPath -Encoding utf8

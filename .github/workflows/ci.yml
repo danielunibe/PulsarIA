@@ -39,6 +39,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'TypeScript failed.' }
           npm run build
           if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+          npm run verify:frontend-a11y
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend accessibility contract failed.' }
+          npm run verify:icons
+          if ($LASTEXITCODE -ne 0) { throw 'Web and native icon asset contract failed.' }
 
       - name: Verify Rust contracts
         run: |

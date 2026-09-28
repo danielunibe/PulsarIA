@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$ProjectRoot
+    [string]$ProjectRoot,
+    [string]$SourceImagePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,9 +9,15 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 }
 
-$source = 'C:\Users\danie\Downloads\icono pulsaria .png'
 $publicIcon = Join-Path $ProjectRoot 'public\pulsaria-icon.png'
 $iconRoot = Join-Path $ProjectRoot 'src-tauri\icons'
+$sourceImageSpecified = -not [string]::IsNullOrWhiteSpace($SourceImagePath)
+if (-not $sourceImageSpecified) {
+    $userProfilePath = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+    $SourceImagePath = Join-Path (Join-Path $userProfilePath 'Downloads') 'icono pulsaria .png'
+}
+$externalSourceAvailable = Test-Path -LiteralPath $SourceImagePath -PathType Leaf
+$source = if ($externalSourceAvailable) { $SourceImagePath } else { $publicIcon }
 $required = @(
     'icon.png', 'icon.ico', 'icon.icns', '32x32.png', '64x64.png',
     '128x128.png', '128x128@2x.png', 'StoreLogo.png'
@@ -36,16 +43,21 @@ function Read-PngSize([string]$path) {
     return @{ Width = $width; Height = $height }
 }
 
-if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-    Add-Error "Icon source is missing: $source"
+if ($sourceImageSpecified -and -not $externalSourceAvailable) {
+    Add-Error "Specified icon reference image is missing: $SourceImagePath"
+}
+if (-not (Test-Path -LiteralPath $publicIcon -PathType Leaf)) {
+    Add-Error "Web icon is missing: $publicIcon"
+} elseif ((Get-Item -LiteralPath $publicIcon).Length -eq 0) {
+    Add-Error "Web icon is empty: $publicIcon"
 } else {
+    $publicSize = Read-PngSize $publicIcon
+    if ($null -eq $publicSize) { Add-Error 'Web icon is not a valid PNG image' }
+}
+if ($externalSourceAvailable -and (Test-Path -LiteralPath $publicIcon -PathType Leaf)) {
     $sourceHash = Get-Sha256 $source
-    if (-not (Test-Path -LiteralPath $publicIcon -PathType Leaf)) {
-        Add-Error "Web icon is missing: $publicIcon"
-    } else {
-        $publicHash = Get-Sha256 $publicIcon
-        if ($sourceHash -ne $publicHash) { Add-Error 'public/pulsaria-icon.png does not match the provided source PNG' }
-    }
+    $publicHash = Get-Sha256 $publicIcon
+    if ($sourceHash -ne $publicHash) { Add-Error 'public/pulsaria-icon.png does not match the provided source PNG' }
 }
 
 foreach ($name in $required) {
@@ -78,6 +90,7 @@ $status = if ($errors.Count -eq 0) { 'PASS' } else { 'FAIL' }
     status = $status
     source = $source
     sourceHash = if (Test-Path -LiteralPath $source) { Get-Sha256 $source } else { $null }
+    externalSourceCompared = $externalSourceAvailable
     webIcon = $publicIcon
     nativeIconRoot = $iconRoot
     errors = @($errors)
