@@ -1005,17 +1005,21 @@ pub async fn sync_due_collections(
     };
 
     for source in sources {
-        if let Err(error) = sync_collection_source_by_id(
+        if sync_collection_source_by_id(
             db_connection.clone(),
             queue.clone(),
             source.id,
             app_handle.clone(),
         )
         .await
+        .is_err()
         {
             crate::commands::emit_log(
                 &app_handle,
-                format!("Collection sync failed for {}: {error}", source.profile_url),
+                format!(
+                    "Collection sync failed for source #{}; check its sync status.",
+                    source.id
+                ),
             );
         }
     }

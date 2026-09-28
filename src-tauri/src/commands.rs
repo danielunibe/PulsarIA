@@ -4325,7 +4325,7 @@ pub async fn search_transcripts(
 ) -> Result<Vec<db::SearchResult>, String> {
     emit_log(
         &app_handle,
-        format!("Search requested for query: '{}'", query),
+        "Search requested".into(),
     );
 
     let config = state.config.lock().await;
@@ -4516,10 +4516,7 @@ pub async fn debug_search_transcripts(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<DebugSearchResult, String> {
-    emit_log(
-        &app_handle,
-        format!("Debug pipeline running for query: '{}'", query),
-    );
+    emit_log(&app_handle, "Debug search started".into());
 
     let start_total = std::time::Instant::now();
     let start_embed = std::time::Instant::now();

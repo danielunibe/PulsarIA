@@ -260,8 +260,8 @@
                                              "sourcePath":  "python-workers/embed_query.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  1219,
-                                             "sha256":  "8A80B63091786C9627FCEFBD9586F55C96226E5AB77A078B8FFCE06C3ED6BF10"
+                                             "sizeBytes":  1202,
+                                             "sha256":  "E06F292D4164426FD57D542F9DCB6A19EDFB0400BA59D7B13994220E1F23F202"
                                          },
                                          {
                                              "path":  "python-workers/events.py",
