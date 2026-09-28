@@ -5084,40 +5084,6 @@ pub fn repair_library(conn: &Connection) -> Result<LibraryRepairReport> {
     })
 }
 
-pub fn search_literal_transcripts(
-    conn: &Connection,
-    query: &str,
-    limit: usize,
-) -> Result<Vec<SearchResult>> {
-    let mut stmt = conn.prepare(
-        "SELECT ts.job_id, m.title, m.thumbnail, ts.text, ts.segment_index
-         FROM transcript_segments ts
-         LEFT JOIN media m ON ts.job_id = m.job_id
-         WHERE ts.text LIKE ?1 ESCAPE '\\'
-         LIMIT ?2",
-    )?;
-    let escaped_query = query
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
-    let pattern = format!("%{}%", escaped_query);
-    let rows = stmt.query_map(params![pattern, limit as i64], |row| {
-        Ok(SearchResult {
-            job_id: row.get(0)?,
-            title: row.get(1)?,
-            thumbnail: row.get(2)?,
-            chunk_text: row.get(3)?,
-            chunk_index: row.get(4)?,
-            similarity_score: 1.0,
-        })
-    })?;
-    let mut results = Vec::new();
-    for r in rows {
-        results.push(r?);
-    }
-    Ok(results)
-}
-
 pub fn get_search_result(conn: &Connection, job_id: i64, chunk_index: i64) -> Option<SearchResult> {
     if let Some(unit) = get_search_unit(conn, job_id, chunk_index) {
         return Some(SearchResult {
