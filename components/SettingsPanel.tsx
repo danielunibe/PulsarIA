@@ -1251,7 +1251,7 @@ export function SettingsPanel({
                         }`}
                     >
                         <FaBolt size={11} />
-                        <span className="truncate">Rendimiento</span>
+                        <span className="truncate text-[8.5px] tracking-tight">Rendimiento</span>
                     </button>
                     <button
                         type="button"
