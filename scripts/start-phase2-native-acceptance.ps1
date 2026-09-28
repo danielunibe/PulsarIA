@@ -1,11 +1,15 @@
 [CmdletBinding()]
 param(
-    [string]$ExecutablePath = (Join-Path $PSScriptRoot '..\target-tauri\release\pulsaria.exe'),
+    [string]$ExecutablePath,
     [ValidateRange(5, 120)]
     [int]$HealthTimeoutSeconds = 30
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    $ExecutablePath = Join-Path $PSScriptRoot '..\target-tauri\release\pulsaria.exe'
+}
 
 $executable = (Resolve-Path -LiteralPath $ExecutablePath).Path
 $existing = @(Get-Process -Name 'pulsaria' -ErrorAction SilentlyContinue)
