@@ -14,7 +14,7 @@ keeps its original license and copyright.
 | npm packages | `package-lock.json` and `npm sbom` | Exact npm dependency graph and registry license metadata are included in the aggregate release SPDX SBOM | Locked source graph; release SBOM required before publication |
 | Python runtime and packages | `src-tauri/resources/runtime-manifest.json` | Python 3.11.9; the aggregate SPDX inventories bundled distribution metadata | Included; manifest PASS (54 required files) |
 | Colorama | `colorama` 0.4.6 | BSD-3-Clause; full license text at `python/Lib/site-packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt` in the installed resource tree | Included; exact license file hash is recorded in the aggregate SPDX |
-| FFmpeg / FFprobe | `src-tauri/resources/bin` | GPLv3 notice in `FFMPEG-LICENSE.txt`; exact hashes recorded below | Included; hashes verified in current checkout |
+| FFmpeg / FFprobe | `8.1.2-full_build-www.gyan.dev`; exact binary hashes recorded below | GPLv3 build (`--enable-gpl --enable-version3`); license text at `src-tauri/resources/bin/FFMPEG-LICENSE.txt` | Included; corresponding source/build package has not yet been verified for the Beta release |
 | yt-dlp | `src-tauri/resources/python/Lib/site-packages/yt_dlp-2026.8.19.dist-info` | Package metadata and runtime manifest | Included; version 2026.8.19 |
 | Faster-Whisper | `src-tauri/resources/python/Lib/site-packages/faster_whisper-1.2.1.dist-info` | Package metadata and runtime manifest | Included; version 1.2.1 |
 | ONNX Runtime | `src-tauri/resources/python` and Rust dependency | Runtime manifest records version 1.29.0 and binary hashes | Included; version and hashes verified |
@@ -41,6 +41,12 @@ the custom Pulsaria source license, which remains for explicit owner review.
 <!-- COMPONENT_LICENSE_REVIEW_PENDING: rights holder must review the custom source license, generated SPDX and exact bundled notices before public release. -->
 
 ## Current media and model hashes
+
+### FFmpeg provenance and open review
+
+The bundled binary reports `ffmpeg version 8.1.2-full_build-www.gyan.dev` and its configure output includes `--enable-static`, `--enable-gpl` and `--enable-version3`. The upstream Windows build page lists version 8.1.2 and states that its builds are static and GPLv3: [Gyan.dev FFmpeg builds](https://www.gyan.dev/ffmpeg/builds/). FFmpeg's legal page explains that enabling GPL components places FFmpeg under GPL terms and describes source/build information to review against distributed binaries: [FFmpeg license and legal considerations](https://www.ffmpeg.org/legal.html).
+
+The direct-download workflow currently stages the installer, aggregate SPDX, this file, `LICENSE` and checksums. It does not stage a corresponding FFmpeg source/build package, and no such archive is present in this checkout. These facts do not determine whether Pulsaria's separate custom license conflicts with FFmpeg's component license. The rightsholder must review the component boundary, EULA wording and source/build obligations for the exact binary before removing `COMPONENT_LICENSE_REVIEW_PENDING` or publishing Beta 2.
 
 | File or model | Size | SHA-256 |
 | --- | ---: | --- |
