@@ -317,3 +317,28 @@ comprueba versión, inventario de los tres ecosistemas y cada hash de runtime.
 La publicación permanece bloqueada por el marcador humano de revisión de
 licencias/notices y los cuatro datos placeholder de titular, correo, domicilio
 y aprobación en `legal/release-manifest.json`.
+
+### Seguimiento actual — 2026-09-28
+
+El checkout `beta2-hardening` está en `6dd02497957369d78b8e070c090cde9bffb06f41`;
+el PR #2 sigue abierto, en borrador y `CLEAN`. `verify-canonical-source` pasó
+para ese head en Actions run `36383346900`. La release pública más reciente
+sigue siendo `v0.1.0-eval.3`; Beta 2 aún no está publicada.
+
+Se reconstruyó el instalador NSIS del head actual en
+`target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.2_x64-setup.exe`:
+687,857,246 bytes, SHA-256
+`B742EA6AD37358E17D8D36FEEFBD77DFC5D4A33BCE28C7FF084857F65CBCEAED`.
+`npm run verify:installed -- -Configuration release -Bundle nsis` terminó
+con salida 0. El smoke confirmó instalación y desinstalación, health antes y
+después de reiniciar, 54/54 recursos runtime, los 13 documentos legales, el
+aislamiento de runtime, preservación de datos de usuario y limpieza del
+entorno de prueba. El modo fue offline (`RunLive` omitido): ingestión, búsqueda,
+exports y staging limpio no se probaron; el campo `stagingContract.clean=false`
+es el valor predeterminado de ese modo y no constituye un resultado de staging.
+El binario permanece `NotSigned`, condición aceptada para esta prerelease.
+
+El gate de publicación sigue bloqueado por el marcador de revisión humana de
+licencias/notices y los placeholders de titular, correo de contacto, domicilio
+para notificaciones y aprobación en `legal/release-manifest.json`. El workflow
+de bootstrap desde el instalador semilla todavía no se ha ejecutado en Actions.
