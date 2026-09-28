@@ -131,9 +131,13 @@ pruebas Python PASS + 1 omitida para TikTok live (32 en total), 54/54 recursos,
 13 documentos legales empaquetados con hashes verificados y un smoke offline de
 instalación NSIS con health inicial/reinicio y preservación de datos.
 El flujo manual `Pulsaria direct GitHub prerelease` ya prepara una descarga NSIS
-gratuita sin Authenticode ni updater; sigue cerrado hasta completar los datos y
-la revisión legal, la revisión de notices del artefacto y configurar el runtime
-externo en el Environment protegido `direct-download`.
+gratuita sin Authenticode ni updater. Para el runtime usa como bootstrap el
+instalador público `v0.1.0-eval.3`, con SHA-256 fijado; la comparación de
+manifiestos encontró iguales sus 38/38 registros runtime no-worker y el build repone los
+workers desde el tag Beta 2. Falta ejecutar este bootstrap dentro del workflow.
+La publicación sigue cerrada hasta completar los datos y la revisión legal,
+revisar notices del artefacto y configurar la aprobación del Environment
+`direct-download`.
 Consulta los [checks del PR](https://github.com/danielunibe/PulsarIA/pull/2/checks)
 y el [plan de reparación](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md) para el
 estado actual y los límites pendientes. [PROJECT_TRUTH.md](PROJECT_TRUTH.md)
@@ -153,9 +157,9 @@ La ruta de descarga directa está en
 [direct-download-release.yml](.github/workflows/direct-download-release.yml).
 Es una ejecución manual para tags Beta/RC: genera SBOM SPDX agregado, valida
 el runtime, construye y prueba el instalador NSIS, adjunta hashes y notices y
-publica una prerelease gratis en GitHub. Requiere `DIRECT_DOWNLOAD_RELEASE_READY=true`,
-el runtime HTTPS con SHA-256 y todos los gates legales aprobados. La ejecución
-debe despacharse desde `main`; el tag tiene que apuntar a un commit ya integrado
+publica una prerelease gratis en GitHub. Requiere
+`DIRECT_DOWNLOAD_RELEASE_READY=true` y todos los gates legales aprobados. La
+ejecución debe despacharse desde `main`; el tag tiene que apuntar a un commit ya integrado
 en `main` y su versión debe coincidir con la fuente. No firma el instalador ni
 crea artefactos del updater.
 

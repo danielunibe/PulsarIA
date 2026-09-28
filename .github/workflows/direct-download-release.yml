@@ -71,24 +71,31 @@ jobs:
           npm run verify:versions
           if ($LASTEXITCODE -ne 0) { throw 'Source version contract failed.' }
 
-      - name: Prepare verified runtime bundle
-        env:
-          PULSAR_RUNTIME_BUNDLE_URL: ${{ vars.PULSAR_RUNTIME_BUNDLE_URL }}
-          PULSAR_RUNTIME_BUNDLE_SHA256: ${{ vars.PULSAR_RUNTIME_BUNDLE_SHA256 }}
+      - name: Prepare runtime from pinned public GitHub release
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:PULSAR_RUNTIME_BUNDLE_URL) -or [string]::IsNullOrWhiteSpace($env:PULSAR_RUNTIME_BUNDLE_SHA256)) {
-            throw 'External runtime bundle URL and SHA-256 are required; runtime files are not stored in Git.'
+          # The public eval.3 installer is only a runtime bootstrap. Its SHA-256
+          # is pinned, and the Beta 2 manifest gate verifies every extracted file.
+          # Its runtime manifest has 38/38 matching non-worker records; current Python
+          # workers come from the tagged source mappings in tauri.conf.json.
+          $bootstrapRelease = 'v0.1.0-eval.3'
+          $bootstrapInstallerName = 'Pulsaria_0.1.0_x64-setup.exe'
+          $bootstrapSha256 = '1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF'
+          $bootstrapUrl = "https://github.com/danielunibe/PulsarIA/releases/download/$bootstrapRelease/$bootstrapInstallerName"
+          $bootstrapInstallerPath = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bootstrap.exe'
+          $bootstrapInstallRoot = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bootstrap-install'
+          Invoke-WebRequest -Uri $bootstrapUrl -OutFile $bootstrapInstallerPath
+          $actualHash = (Get-FileHash -LiteralPath $bootstrapInstallerPath -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actualHash -ne $bootstrapSha256) { throw 'Pinned GitHub runtime bootstrap SHA-256 mismatch.' }
+          $install = Start-Process -FilePath $bootstrapInstallerPath -ArgumentList @('/S', "/D=$bootstrapInstallRoot") -WindowStyle Hidden -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Runtime bootstrap installer failed with exit code $($install.ExitCode)." }
+          $bootstrapResources = Join-Path $bootstrapInstallRoot 'resources'
+          foreach ($relative in @('python', 'assets/models', 'bin')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $bootstrapResources $relative) -PathType Container)) {
+              throw "Pinned runtime bootstrap is missing resources/$relative."
+            }
           }
-          if ($env:PULSAR_RUNTIME_BUNDLE_URL -notmatch '^https://') { throw 'Runtime bundle URL must use HTTPS.' }
-          if ($env:PULSAR_RUNTIME_BUNDLE_SHA256 -notmatch '^[A-Fa-f0-9]{64}$') { throw 'Runtime bundle SHA-256 must contain 64 hexadecimal characters.' }
-          $zipPath = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bundle.zip'
-          $bundlePath = Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bundle'
-          Invoke-WebRequest -Uri $env:PULSAR_RUNTIME_BUNDLE_URL -OutFile $zipPath
-          $actualHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToUpperInvariant()
-          if ($actualHash -ne $env:PULSAR_RUNTIME_BUNDLE_SHA256.ToUpperInvariant()) { throw 'External runtime SHA-256 mismatch.' }
-          Expand-Archive -LiteralPath $zipPath -DestinationPath $bundlePath -Force
-          npm run prepare:runtime -- -RuntimeBundle $bundlePath
-          if ($LASTEXITCODE -ne 0) { throw 'Runtime preparation failed.' }
+          npm run prepare:runtime -- -RuntimeBundle $bootstrapResources
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime preparation from pinned GitHub release failed.' }
 
       - name: Verify source, component inventory, and legal gate
         run: |
@@ -175,7 +182,8 @@ jobs:
         if: always()
         run: |
           foreach ($path in @(
-            (Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bundle.zip'),
+            (Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bootstrap.exe'),
+            (Join-Path $env:RUNNER_TEMP 'pulsaria-runtime-bootstrap-install'),
             (Join-Path $env:RUNNER_TEMP 'pulsaria-npm.spdx.json'),
             (Join-Path $env:RUNNER_TEMP 'pulsaria-release.spdx.json'),
             (Join-Path $env:RUNNER_TEMP 'pulsaria-direct-release-notes.md'),
