@@ -285,12 +285,14 @@ La matriz vigente de reparación, los gates repetidos y los bloqueos para
 publicar una descarga del código actual se mantienen en
 [docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md).
 La auditoría de producto, los hallazgos del preview web y la secuencia general
-de reparación están en
+de reparación, actualizados al 2026-09-28, están en
 [docs/AUDITORIA_INTEGRAL_Y_FASES.md](docs/AUDITORIA_INTEGRAL_Y_FASES.md).
 Este seguimiento suplementa las tablas históricas: la descarga GitHub más
-reciente todavía es `v0.1.0-eval.3`; el NSIS Beta 2 actual pasó el smoke
-aislado, el MSI prerelease no es compatible con el identificador
-`0.1.0-beta.2`, y la aprobación/datos legales siguen siendo un gate humano.
+reciente todavía es `v0.1.0-eval.3`; el último NSIS local reconstruido desde
+el código de aplicación `6dd02497` pasó un smoke aislado offline, no equivale
+a un paquete del head actual. El MSI prerelease no es compatible con el
+identificador `0.1.0-beta.2`, y la aprobación/datos legales siguen siendo un
+gate humano.
 
 El commit de código `5f888e5f` del PR #2 pasó `verify-canonical-source` el 2026-09-27 (Actions run `36374365114`). Las correcciones de Inicio y la ruta de descarga directa NSIS ya están en el PR borrador, pendientes de revisión y merge. El preview web no proporciona Tauri/SQLite y no sustituye la aceptación nativa.
 
@@ -320,13 +322,12 @@ y aprobación en `legal/release-manifest.json`.
 
 ### Seguimiento actual — 2026-09-28
 
-El checkout `beta2-hardening` está en `10a680fdbc5c631bf01470719ab0c04a30fd75b8`;
-el PR #2 sigue abierto, en borrador y `CLEAN`. `verify-canonical-source` pasó
-para ese head en Actions run `36443611705`, incluidos 103 tests Rust. El
-preflight completo del bootstrap fijado pasó sobre el head `5e723141` en run
-`36440084731` y verificó 54/54 recursos. En el head actual, run `36443611688`
-verificó el filtro de alcance y omitió la repetición pesada porque el último
-commit solo modificó ese filtro. La release pública más reciente sigue siendo
+El checkout `beta2-hardening` está en `4da185e2d49c786dca57aeab8d98ddd63b21e1e4`;
+el PR #2 sigue abierto y en borrador, con ambos checks en verde. CI canónico
+pasó en Actions run `36455508083`: estructura, frontend, accesibilidad, iconos,
+103 pruebas Rust y contratos Python. El preflight completo pasó en
+`36455508060`: instaló el bootstrap fijado `eval.3` y verificó 54/54 recursos.
+La release pública más reciente sigue siendo
 `v0.1.0-eval.3`; Beta 2 aún no está publicada.
 
 Se reconstruyó el instalador NSIS desde el código de aplicación del head
@@ -346,8 +347,11 @@ El binario permanece `NotSigned`, condición aceptada para esta prerelease.
 El gate de publicación sigue bloqueado por el marcador de revisión humana de
 licencias/notices y los placeholders de titular, correo de contacto, domicilio
 para notificaciones y aprobación en `legal/release-manifest.json`. El workflow
-de publicación desde `main` aún no se ha ejecutado. El preflight de PR sí validó
+de publicación desde `main` aún no se ha ejecutado. El preflight de PR validó
 la descarga/instalación del bootstrap `eval.3`, SHA-256
 `1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF`, runtime
-54/54 y limpieza temporal. Los workflows usan `actions/checkout@v7` y
-`actions/setup-node@v7`; el CI canónico pasó con esos cambios.
+54/54 y limpieza temporal; ese resultado completo corresponde al run
+`36455508060` sobre el head `4da185e2`. El preflight anterior `36449269415`
+sigue como evidencia histórica del mismo flujo. Los workflows usan
+`actions/checkout@v7` y `actions/setup-node@v7`; CI canónico pasó en
+`36455508083` incluyendo los contratos nuevos de accesibilidad e iconos.
