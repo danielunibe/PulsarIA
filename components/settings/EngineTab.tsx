@@ -4,8 +4,8 @@ import { FaMicrochip, FaTriangleExclamation, FaRotate, FaBrain } from '@/compone
 
 interface EngineTabProps {
     modelOnline: boolean | null;
-    hnswShards: number;
-    statsTotal: number;
+    defaultHnswShardCount: number;
+    processedVideoCount: number;
     similarityThreshold: number;
     setSimilarityThreshold: (val: number) => void;
     selectedWhisperModel: string;
@@ -50,8 +50,8 @@ interface EngineTabProps {
 
 export function EngineTab({
     modelOnline,
-    hnswShards,
-    statsTotal,
+    defaultHnswShardCount,
+    processedVideoCount,
     similarityThreshold,
     setSimilarityThreshold,
     selectedWhisperModel,
@@ -106,13 +106,13 @@ export function EngineTab({
                         <span className="text-[10px] font-mono text-[#25f4ee] font-bold">ONNX Runtime</span>
                     </div>
                     <p className="text-[11px] text-white/50 leading-relaxed">
-                        Pipeline neuronal acelerado por CPU/GPU para cálculo de embeddings densos y búsqueda vectorial instantánea.
+                        Modelo ONNX local para calcular embeddings densos y buscar por similitud; este runtime usa el proveedor CPU.
                     </p>
                     <div className="grid grid-cols-2 gap-2 pt-2 text-[10px] text-white/60">
                         <div><strong className="text-white/80">Dimensión:</strong> 384 dimensiones</div>
                         <div><strong className="text-white/80">Métrica:</strong> Distancia Coseno</div>
-                        <div><strong className="text-white/80">Shards HNSW:</strong> {hnswShards} particiones</div>
-                        <div><strong className="text-white/80">Embeddings:</strong> {statsTotal} vectores</div>
+                        <div><strong className="text-white/80">Shards HNSW predeterminados:</strong> {defaultHnswShardCount}</div>
+                        <div><strong className="text-white/80">Videos completados:</strong> {processedVideoCount}</div>
                     </div>
                 </div>
 

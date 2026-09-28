@@ -497,7 +497,7 @@ export function SettingsPanel({
     // Engine & Model State
     const [modelOnline, setModelOnline] = useState<boolean | null>(null);
     const [similarityThreshold, setSimilarityThreshold] = useState(0.45);
-    const [hnswShards] = useState(4);
+    const defaultHnswShardCount = 4;
     const [settingsError, setSettingsError] = useState<string | null>(null);
     const [sources, setSources] = useState<CollectionSource[]>([]);
     const [healthEvents, setHealthEvents] = useState<HealthEventRecord[]>([]);
@@ -1346,8 +1346,8 @@ export function SettingsPanel({
                 {activeTab === 'engine' && (
                     <EngineTab
                         modelOnline={modelOnline}
-                        hnswShards={hnswShards}
-                        statsTotal={stats.total}
+                        defaultHnswShardCount={defaultHnswShardCount}
+                        processedVideoCount={stats.total}
                         similarityThreshold={similarityThreshold}
                         setSimilarityThreshold={setSimilarityThreshold}
                         selectedWhisperModel={selectedWhisperModel}
