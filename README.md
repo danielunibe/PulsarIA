@@ -154,8 +154,10 @@ La ruta de descarga directa está en
 Es una ejecución manual para tags Beta/RC: genera SBOM SPDX agregado, valida
 el runtime, construye y prueba el instalador NSIS, adjunta hashes y notices y
 publica una prerelease gratis en GitHub. Requiere `DIRECT_DOWNLOAD_RELEASE_READY=true`,
-el runtime HTTPS con SHA-256 y todos los gates legales aprobados. No firma el
-instalador ni crea artefactos del updater.
+el runtime HTTPS con SHA-256 y todos los gates legales aprobados. La ejecución
+debe despacharse desde `main`; el tag tiene que apuntar a un commit ya integrado
+en `main` y su versión debe coincidir con la fuente. No firma el instalador ni
+crea artefactos del updater.
 
 La release de evaluación no activa el updater público. Una release estable
 requiere clave pública Tauri, clave privada, certificado Authenticode,

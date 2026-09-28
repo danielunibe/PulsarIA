@@ -49,6 +49,13 @@ archivos en una prerelease. El verificador exige que el instalador figure como
 GitHub avisan de SmartScreen y de la ausencia de auto-updater. La ruta sigue
 bloqueada por el gate legal y por el runtime externo del Environment
 `direct-download`.
+El inventario actual del repositorio solo muestra el Environment `github-pages`;
+`direct-download` todavía debe crearse con las variables de runtime y la puerta
+de aprobación humana necesarias.
+
+El workflow directo solo admite despacho desde `main`, exige que el checkout
+coincida con el tag solicitado y que ese tag ya sea ancestro de `main`; además,
+la versión del tag debe coincidir con la versión de todos los archivos fuente.
 
 ## Hallazgo del empaquetado y corrección
 
