@@ -1,0 +1,38 @@
+name: Fallo de Pulsaria
+description: Reportar un problema reproducible de la aplicación.
+title: "[Fallo] "
+body:
+  - type: markdown
+    attributes:
+      value: "No adjuntes credenciales, cookies, datos personales ni contenido privado. Para vulnerabilidades consulta SECURITY.md."
+  - type: input
+    id: version
+    attributes:
+      label: Versión de Pulsaria
+      placeholder: "0.1.0-beta.3"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Versión y compilación de Windows
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Pasos para reproducir
+      description: Incluye la pantalla o acción afectada y si ocurre tras reiniciar.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Resultado esperado y resultado observado
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Mensaje de error o diagnóstico sin datos privados
+      description: Revisa y oculta rutas personales y contenido antes de adjuntar capturas o logs.

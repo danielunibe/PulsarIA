@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "review_status": "pending",
+  "review_note": "Exact Gyan 8.1.2 corresponding source and build inputs, including external libraries, still require evidence and owner review. A GitHub source snapshot of Gyan's packaging repository is not that source package.",
+  "files": []
+}

@@ -2,7 +2,8 @@
 param(
     [string]$SourceRoot,
     [switch]$RequireSbom,
-    [string]$SbomPath
+    [string]$SbomPath,
+    [string]$MaterialsRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +43,31 @@ try {
     if ($license -match '(?im)^MIT License\s*$') { $blockers.Add('The old MIT license is still the root source license.') }
     $notices = Get-Content -LiteralPath (Join-Path $SourceRoot 'THIRD_PARTY_NOTICES.md') -Raw
     if ($notices -match 'COMPONENT_LICENSE_REVIEW_PENDING|REVIEW_REQUIRED|INVENTORY_REQUIRED|Pending release scan|Verify exact shipped build|Verify exact version|Verify model card/license|Verify during release build') { $blockers.Add('THIRD_PARTY_NOTICES.md still contains an unresolved component license review.') }
+    try {
+        $materials = Get-Content -LiteralPath (Join-Path $SourceRoot 'legal/third-party-materials.json') -Raw | ConvertFrom-Json
+        if ($materials.schema_version -ne 1 -or $materials.review_status -ne 'reviewed' -or @($materials.files).Count -eq 0) {
+            $blockers.Add('Exact third-party source/build materials are not reviewed in legal/third-party-materials.json.')
+        } else {
+            $materialNames = @{}
+            foreach ($file in $materials.files) {
+                $name = [string]$file.name
+                if ($name -notmatch '^third-party-[A-Za-z0-9][A-Za-z0-9._-]*\.(zip|tar\.gz|txt|md)$' -or $materialNames.ContainsKey($name) -or [string]$file.sha256 -notmatch '^[a-fA-F0-9]{64}$' -or [string]$file.url -notmatch '^https://') {
+                    $blockers.Add("Invalid or duplicate third-party material: $name")
+                    continue
+                }
+                $materialNames[$name] = $true
+                if ($RequireSbom) {
+                    if ([string]::IsNullOrWhiteSpace($MaterialsRoot)) { $blockers.Add("Third-party material staging directory was not supplied: $name") }
+                    else {
+                        $materialPath = Join-Path $MaterialsRoot $name
+                        if (-not (Test-Path -LiteralPath $materialPath -PathType Leaf) -or (Get-Sha256Hex $materialPath) -ne [string]$file.sha256) {
+                            $blockers.Add("Missing or incorrect third-party source/build asset: $name")
+                        }
+                    }
+                }
+            }
+        }
+    } catch { $blockers.Add('Third-party source/build material manifest is missing or invalid.') }
     if ($RequireSbom) {
         if ([string]::IsNullOrWhiteSpace($SbomPath) -or -not (Test-Path -LiteralPath $SbomPath -PathType Leaf)) { $blockers.Add('The release SBOM was not generated or supplied to the legal gate.') }
         else {

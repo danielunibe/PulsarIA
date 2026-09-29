@@ -1,8 +1,8 @@
-﻿{
+{
   "project": "Pulsaria",
   "name": "Pulsaria",
   "description": "Motor local-first de escritorio para procesar contenido audiovisual autorizado de TikTok, generar transcripciones y análisis, e indexar una biblioteca para búsqueda literal y semántica.",
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "language": "Rust + TypeScript",
   "framework": {
     "backend": "Tauri 2",

@@ -4,22 +4,23 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing prerelease tag to build and publish, for example v0.1.0-beta.2'
+        description: 'Reviewed tag already merged into main, for example v0.1.0-beta.3'
         required: true
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pulsaria-direct-download-release
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
-    environment:
-      name: direct-download
+    outputs:
+      source_commit: ${{ steps.source.outputs.commit }}
+      artifact_id: ${{ steps.assets.outputs.artifact-id }}
     defaults:
       run:
         shell: pwsh
@@ -39,18 +40,14 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Validate prerelease and publication gate
-        env:
-          DIRECT_DOWNLOAD_RELEASE_READY: ${{ vars.DIRECT_DOWNLOAD_RELEASE_READY }}
+      - name: Validate reviewed source and prerelease tag
+        id: source
         run: |
           if ($env:GITHUB_REF -ne 'refs/heads/main') {
             throw 'Dispatch this release workflow from the reviewed main branch.'
           }
           if ($env:PULSARIA_RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+-(beta|rc)\.\d+$') {
             throw 'Direct-download workflow accepts versioned beta/rc prerelease tags only.'
-          }
-          if ($env:DIRECT_DOWNLOAD_RELEASE_READY -ne 'true') {
-            throw 'Set DIRECT_DOWNLOAD_RELEASE_READY=true in the protected direct-download environment only after release review is complete.'
           }
           $tagCommit = git rev-parse "$env:PULSARIA_RELEASE_TAG^{commit}"
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tagCommit)) { throw 'The requested release tag does not resolve to a commit.' }
@@ -60,6 +57,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'The release tag must point to a commit already merged into main.' }
           $changes = git status --porcelain
           if ($LASTEXITCODE -ne 0 -or $changes) { throw 'Tagged release checkout must start clean.' }
+          "commit=$tagCommit" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install locked dependencies
         run: |
@@ -90,7 +88,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $npmSbomPath -PathType Leaf)) { throw 'npm SPDX generation failed.' }
           node scripts/create-release-sbom.mjs --npm-sbom $npmSbomPath --output $sbomPath
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sbomPath -PathType Leaf)) { throw 'Aggregate release SPDX generation failed.' }
-          npm run verify:legal-release -- -RequireSbom -SbomPath $sbomPath
+          $materialsRoot = Join-Path $env:RUNNER_TEMP 'pulsaria-third-party-materials'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-direct-release-materials.ps1 -DestinationRoot $materialsRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Third-party source/build preparation failed.' }
+          npm run verify:legal-release -- -RequireSbom -SbomPath $sbomPath -MaterialsRoot $materialsRoot
           if ($LASTEXITCODE -ne 0) { throw 'Legal and component review gate failed.' }
           npm run verify:local-llm
           if ($LASTEXITCODE -ne 0) { throw 'Local model and sidecar gate failed.' }
@@ -114,31 +115,77 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed NSIS smoke failed.' }
 
       - name: Stage and verify public assets
+        env:
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
         run: |
           $bundleRoot = Join-Path $env:GITHUB_WORKSPACE 'target-tauri/release/bundle'
           $stageRoot = Join-Path $bundleRoot 'direct-assets'
-          New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
           $installerName = "Pulsaria_$($env:PULSARIA_RELEASE_TAG -replace '^v', '')_x64-setup.exe"
           $installer = Join-Path $bundleRoot "nsis/$installerName"
           if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Versioned NSIS installer missing: $installerName" }
           $sbomPath = Join-Path $env:RUNNER_TEMP 'pulsaria-release.spdx.json'
-          foreach ($source in @(
-            @{ Path = $installer; Name = $installerName },
-            @{ Path = $sbomPath; Name = 'pulsaria-release.spdx.json' },
-            @{ Path = (Join-Path $env:GITHUB_WORKSPACE 'THIRD_PARTY_NOTICES.md'); Name = 'THIRD_PARTY_NOTICES.md' },
-            @{ Path = (Join-Path $env:GITHUB_WORKSPACE 'LICENSE'); Name = 'LICENSE' }
-          )) {
-            if (-not (Test-Path -LiteralPath $source.Path -PathType Leaf)) { throw "Release asset input missing: $($source.Path)" }
-            Copy-Item -LiteralPath $source.Path -Destination (Join-Path $stageRoot $source.Name) -Force
-          }
-          $checksums = foreach ($file in Get-ChildItem -LiteralPath $stageRoot -File | Sort-Object Name) {
-            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
-            "$hash  $($file.Name)"
-          }
-          $checksums | Set-Content -LiteralPath (Join-Path $stageRoot 'SHA256SUMS.txt') -Encoding utf8
-          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-direct-release-artifacts.ps1 -ArtifactRoot $stageRoot -ReleaseVersion ($env:PULSARIA_RELEASE_TAG -replace '^v', '')
+          # Tauri regenerates the runtime manifest. Inventory the final inputs.
+          node scripts/create-release-sbom.mjs --npm-sbom (Join-Path $env:RUNNER_TEMP 'pulsaria-npm.spdx.json') --output $sbomPath
+          if ($LASTEXITCODE -ne 0) { throw 'Final aggregate SPDX generation failed.' }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-direct-release.ps1 -ArtifactRoot $stageRoot -InstallerPath $installer -SbomPath $sbomPath -MaterialsRoot (Join-Path $env:RUNNER_TEMP 'pulsaria-third-party-materials') -ReleaseTag $env:PULSARIA_RELEASE_TAG -SourceCommit $env:SOURCE_COMMIT -RunId $env:GITHUB_RUN_ID
           if ($LASTEXITCODE -ne 0) { throw 'Direct-download artifact gate failed.' }
           "DIRECT_RELEASE_ASSET_ROOT=$stageRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Get-Content (Join-Path $stageRoot 'SHA256SUMS.txt') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Preserve the exact candidate for final acceptance
+        id: assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: pulsaria-direct-${{ inputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.DIRECT_RELEASE_ASSET_ROOT }}/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  publish:
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: read
+    environment:
+      name: direct-download
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PULSARIA_RELEASE_TAG: ${{ inputs.tag }}
+      SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+    steps:
+      - name: Check out the source that produced the accepted candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build.outputs.source_commit }}
+          fetch-depth: 0
+
+      - name: Enforce final publication approval
+        env:
+          DIRECT_DOWNLOAD_RELEASE_READY: ${{ vars.DIRECT_DOWNLOAD_RELEASE_READY }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main' -or $env:DIRECT_DOWNLOAD_RELEASE_READY -ne 'true') {
+            throw 'Publish from main only after legal review and acceptance of this exact artifact; DIRECT_DOWNLOAD_RELEASE_READY must be true.'
+          }
+          $tagCommit = git rev-parse "$env:PULSARIA_RELEASE_TAG^{commit}"
+          if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $env:SOURCE_COMMIT) { throw 'Release tag changed after construction.' }
+          git merge-base --is-ancestor $env:SOURCE_COMMIT refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Accepted source must remain integrated in main.' }
+
+      - name: Download the immutable artifact by its build output ID
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: accepted-assets
+          merge-multiple: true
+
+      - name: Verify the accepted assets without rebuilding
+        run: |
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-direct-release-artifacts.ps1 -ArtifactRoot ./accepted-assets -ReleaseVersion ($env:PULSARIA_RELEASE_TAG -replace '^v', '') -ExpectedCommit $env:SOURCE_COMMIT -ExpectedRunId $env:GITHUB_RUN_ID -AssetsOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Accepted release assets changed.' }
 
       - name: Publish free GitHub prerelease
         env:
@@ -146,29 +193,23 @@ jobs:
         run: |
           $version = $env:PULSARIA_RELEASE_TAG -replace '^v', ''
           $notesPath = Join-Path $env:RUNNER_TEMP 'pulsaria-direct-release-notes.md'
-          @(
-            "Pulsaria $version — descarga directa gratuita",
-            '',
-            'Instalador NSIS x64 probado con instalación, primer arranque, reinicio, runtime local y preservación de datos.',
-            '',
-            'Este candidato beta se distribuye sin firma Authenticode y no activa el actualizador automático. Windows puede mostrar una advertencia de SmartScreen. Verifica SHA256SUMS.txt antes de instalar.',
-            '',
-            'Se incluyen el inventario SPDX agregado y los notices de terceros. Usa Pulsaria sólo con contenido que tengas derecho o autorización suficiente para procesar.'
-          ) | Set-Content -LiteralPath $notesPath -Encoding utf8
-          $assets = @(Get-ChildItem -LiteralPath $env:DIRECT_RELEASE_ASSET_ROOT -File | Sort-Object Name | ForEach-Object { $_.FullName })
-          $arguments = @('release', 'create', $env:PULSARIA_RELEASE_TAG, '--repo', 'danielunibe/PulsarIA', '--title', "Pulsaria $version — Beta directa", '--notes-file', $notesPath, '--prerelease')
+          if (-not (Select-String -LiteralPath docs/BETA3_RELEASE_NOTES.md -Pattern $version -SimpleMatch -Quiet)) { throw 'Release notes must match the accepted version.' }
+          Copy-Item -LiteralPath docs/BETA3_RELEASE_NOTES.md -Destination $notesPath
+          $assets = @(Get-ChildItem -LiteralPath ./accepted-assets -File | Sort-Object Name | ForEach-Object { $_.FullName })
+          $arguments = @('release', 'create', $env:PULSARIA_RELEASE_TAG, '--repo', 'danielunibe/PulsarIA', '--title', 'Pulsaria Beta 3', '--notes-file', $notesPath, '--prerelease', '--verify-tag')
           $arguments += $assets
           & gh @arguments
           if ($LASTEXITCODE -ne 0) { throw 'GitHub prerelease publication failed.' }
 
-      - name: Clean temporary publication files
-        if: always()
+      - name: Verify the public download matches the accepted installer
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          foreach ($path in @(
-            (Join-Path $env:RUNNER_TEMP 'pulsaria-npm.spdx.json'),
-            (Join-Path $env:RUNNER_TEMP 'pulsaria-release.spdx.json'),
-            (Join-Path $env:RUNNER_TEMP 'pulsaria-direct-release-notes.md'),
-            (Join-Path $env:GITHUB_WORKSPACE 'target-tauri/release/bundle/direct-assets')
-          )) {
-            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }
-          }
+          $publicRoot = Join-Path $env:RUNNER_TEMP "pulsaria-public-$env:GITHUB_RUN_ID"
+          gh release download $env:PULSARIA_RELEASE_TAG --repo danielunibe/PulsarIA --dir $publicRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Public release download failed.' }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-direct-release-artifacts.ps1 -ArtifactRoot $publicRoot -ReleaseVersion ($env:PULSARIA_RELEASE_TAG -replace '^v', '') -ExpectedCommit $env:SOURCE_COMMIT -ExpectedRunId $env:GITHUB_RUN_ID -AssetsOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Public release verification failed.' }
+          $acceptedChecksums = Get-FileHash ./accepted-assets/SHA256SUMS.txt -Algorithm SHA256
+          $publicChecksums = Get-FileHash (Join-Path $publicRoot 'SHA256SUMS.txt') -Algorithm SHA256
+          if ($acceptedChecksums.Hash -ne $publicChecksums.Hash) { throw 'Public hashes differ from accepted hashes.' }

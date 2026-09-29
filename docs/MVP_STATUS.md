@@ -1,6 +1,12 @@
 # Pulsaria — línea base de cierre del MVP
 
-Fecha de actualización: 2026-09-13
+Estado activo: Beta 3, 2026-09-29. Consulta
+[BETA3_RELEASE_EVIDENCE.md](BETA3_RELEASE_EVIDENCE.md) y
+[BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) para los resultados actuales y
+pendientes de publicación. La matriz fechada debajo corresponde a la línea
+base histórica de 2026-09-13, no al instalador Beta 3.
+
+Fecha de la línea base histórica: 2026-09-13
 
 Este documento es la matriz operativa del MVP local. El checkout actual contiene
 cambios locales intencionales, archivos nuevos y eliminaciones; no se debe usar

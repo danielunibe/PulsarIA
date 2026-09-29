@@ -2,6 +2,10 @@
 
 ## Estado del artefacto y contrato runtime
 
+La descarga pública actual es `v0.1.0-eval.3`. El candidato `0.1.0-beta.3`
+sigue en preparación; consulta [su evidencia](BETA3_RELEASE_EVIDENCE.md) y no
+atribuyas al candidato las pruebas de instaladores anteriores.
+
 El instalador de evaluación disponible en GitHub Releases es un artefacto generado desde el checkout verificado. No es una release estable: todavía no tiene certificado Authenticode ni updater público. El nombre, tamaño y SHA-256 de cada artefacto deben conservarse en la evidencia de release.
 
 El contrato reproducible de recursos está en [`src-tauri/resources/runtime-manifest.json`](../src-tauri/resources/runtime-manifest.json). Incluye los hashes de Python embebido, módulos críticos, workers Python, ONNX/MiniLM, Whisper tiny, FFmpeg y FFprobe. El manifest excluye timestamps para que pueda regenerarse y compararse de forma determinista.
@@ -23,7 +27,7 @@ Get-FileHash .\Pulsaria_0.1.0_x64-setup.exe -Algorithm SHA256
 Para el instalador de evaluación `Pulsaria_0.1.0_x64-setup.exe`, el valor esperado es:
 
 ```text
-C1B8683BA5D5137DB319B68D2F849FCF629EB9F6F19D1607D80D30FE0F7D90B8
+1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF
 ```
 
 El instalador puede mostrar una advertencia de SmartScreen porque el candidato

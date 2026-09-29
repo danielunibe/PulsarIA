@@ -20,10 +20,11 @@ if (!args.has('npm-sbom') || !fs.existsSync(npmSbomPath)) {
   throw new Error('Pass an existing npm SPDX document with --npm-sbom.');
 }
 
-const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
-const tauri = JSON.parse(fs.readFileSync(path.join(projectRoot, 'src-tauri/tauri.conf.json'), 'utf8'));
-const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'src-tauri/resources/runtime-manifest.json'), 'utf8'));
-const npmSbom = JSON.parse(fs.readFileSync(npmSbomPath, 'utf8'));
+const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
+const packageJson = readJson(path.join(projectRoot, 'package.json'));
+const tauri = readJson(path.join(projectRoot, 'src-tauri/tauri.conf.json'));
+const manifest = readJson(path.join(projectRoot, 'src-tauri/resources/runtime-manifest.json'));
+const npmSbom = readJson(npmSbomPath);
 if (npmSbom.spdxVersion !== 'SPDX-2.3' || !Array.isArray(npmSbom.packages)) {
   throw new Error('npm sbom must be an SPDX-2.3 document.');
 }
@@ -41,6 +42,11 @@ const packagePurls = new Set(npmSbom.packages.flatMap((item) => (item.externalRe
 const rootPackage = npmSbom.packages.find((item) => (item.externalRefs ?? [])
   .some((reference) => reference.referenceType === 'purl' && reference.referenceLocator === rootPurl));
 if (!rootPackage) throw new Error(`npm SBOM root package does not match ${rootPurl}.`);
+const sourceLicenseId = 'LicenseRef-Pulsaria-Source-Visible-Beta';
+rootPackage.licenseDeclared = sourceLicenseId;
+// A declared license identifies the shipped text; it does not assert review
+// or compatibility of the full release and its third-party components.
+rootPackage.licenseConcluded = 'NOASSERTION';
 
 function packageComponent({ ecosystem, name, version, purl, license, downloadLocation, comment }) {
   const referenceLocator = purl;
@@ -208,6 +214,15 @@ const document = {
   },
   documentDescribes: [...described],
   packages: [...npmSbom.packages, ...extraPackages],
+  hasExtractedLicensingInfos: [
+    ...(npmSbom.hasExtractedLicensingInfos ?? []).filter((license) => license.licenseId !== sourceLicenseId),
+    {
+      licenseId: sourceLicenseId,
+      name: 'Pulsaria Source-Visible Beta License',
+      extractedText: fs.readFileSync(path.join(projectRoot, 'LICENSE'), 'utf8').replace(/^\uFEFF/, ''),
+      comment: 'Shipped source license text. Owner and component review remain governed by the legal release gate.',
+    },
+  ],
   files: [...(npmSbom.files ?? []), ...spdxFiles, ...legalFiles, ...thirdPartyLicenseFiles],
 };
 

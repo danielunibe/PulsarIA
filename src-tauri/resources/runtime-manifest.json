@@ -2,7 +2,7 @@
     "schemaVersion":  1,
     "manifestKind":  "pulsaria-runtime-resources",
     "productName":  "Pulsaria",
-    "version":  "0.1.0-beta.2",
+    "version":  "0.1.0-beta.3",
     "platform":  "windows-x86_64",
     "resourceRoot":  "resources",
     "generatedBy":  "scripts/generate-runtime-manifest.ps1",

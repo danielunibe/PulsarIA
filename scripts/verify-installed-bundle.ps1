@@ -156,8 +156,8 @@ $result = [ordered]@{
 }
 
 try {
-    if ($RunLive -and [string]::IsNullOrWhiteSpace($ApiToken)) {
-        throw 'RunLive requires the process-scoped API token from the native Tauri IPC harness.'
+    if ($RunLive) {
+        throw 'RunLive is not a validated acceptance path: the legacy script does not send or refresh process-scoped IPC credentials. Use the installed native UI and docs/BETA3_ACCEPTANCE.md. Offline installation smoke remains available without RunLive.'
     }
     New-Item -ItemType Directory -Path $installDir, $appDataRoot, $downloadsDir -Force | Out-Null
     if ($Bundle -eq 'msi') {
@@ -168,9 +168,9 @@ try {
             ('INSTALLDIR="{0}"' -f $installDir),
             '/L*v', ('"{0}"' -f $msiLog)
         )
-        $installResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiInstallArguments -Wait -PassThru
+        $installResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiInstallArguments -WindowStyle Hidden -Wait -PassThru
     } else {
-        $installResult = Start-Process -FilePath $bundlePath -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+        $installResult = Start-Process -FilePath $bundlePath -ArgumentList @('/S', "/D=$installDir") -WindowStyle Hidden -Wait -PassThru
     }
     $result.installExit = $installResult.ExitCode
     if ($Bundle -eq 'msi' -and $installResult.ExitCode -eq 1603) {
@@ -453,7 +453,7 @@ try {
                 '/norestart',
                 '/L*v', ('"{0}"' -f (Join-Path $installDir 'msiexec-uninstall.log'))
             )
-            $uninstallResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiUninstallArguments -Wait -PassThru
+            $uninstallResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiUninstallArguments -WindowStyle Hidden -Wait -PassThru
             $result.uninstallExit = $uninstallResult.ExitCode
             $result.userDataPreservedAfterUninstall =
                 $uninstallResult.ExitCode -in @(0, 3010) -and
@@ -468,7 +468,7 @@ try {
         $uninstallerPath = (Get-ChildItem -LiteralPath $installDir -Filter '*uninstall*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
         if ($uninstallerPath -and (Test-Path -LiteralPath $uninstallerPath -PathType Leaf)) {
         try {
-            $uninstallResult = Start-Process -FilePath $uninstallerPath -ArgumentList '/S' -Wait -PassThru
+            $uninstallResult = Start-Process -FilePath $uninstallerPath -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru
             $result.uninstallExit = $uninstallResult.ExitCode
             $result.userDataPreservedAfterUninstall =
                 $uninstallResult.ExitCode -eq 0 -and

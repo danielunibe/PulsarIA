@@ -121,30 +121,31 @@ No se deben copiar Python, modelos, FFmpeg, instaladores ni bases de datos al
 repositorio. La preparación externa y su SHA-256 se verifican mediante el
 workflow de release.
 
-## Estado de Beta 2
+## Estado de Beta 3
 
-La descarga `v0.1.0-eval.3` de arriba es la release pública; no contiene los
-cambios del candidato Beta 2. Ese candidato está en el
-[PR #2](https://github.com/danielunibe/PulsarIA/pull/2) y todavía no tiene una
-release propia. Su validación local incluye `npm run verify:mvp` (13/13), 31
-pruebas Python PASS + 1 omitida para TikTok live (32 en total), 54/54 recursos,
-13 documentos legales empaquetados con hashes verificados y un smoke offline de
-instalación NSIS con health inicial/reinicio y preservación de datos.
-El flujo manual `Pulsaria direct GitHub prerelease` ya prepara una descarga NSIS
-gratuita sin Authenticode ni updater. Para el runtime usa como bootstrap el
-instalador público `v0.1.0-eval.3`, con SHA-256 fijado; la comparación de
-manifiestos encontró iguales sus 38/38 registros runtime no-worker y el build repone los
-workers desde el tag Beta 2. Falta ejecutar este bootstrap dentro del workflow.
-La publicación sigue cerrada hasta completar los datos y la revisión legal y
-revisar notices del artefacto. El Environment `direct-download` ya exige
-aprobación humana, solo permite ejecuciones desde `main`, desactiva el bypass
-administrativo y mantiene `DIRECT_DOWNLOAD_RELEASE_READY=false`.
-Consulta los [checks del PR](https://github.com/danielunibe/PulsarIA/pull/2/checks)
-y el [plan de reparación](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md) para el
-estado actual y los límites pendientes. [PROJECT_TRUTH.md](PROJECT_TRUTH.md)
-define la autoridad técnica del producto. La revisión visual nativa, TikTok
-live y revisión legal siguen pendientes; Authenticode corresponde al canal
-estable, no a la Beta directa sin updater.
+El candidato actual es `0.1.0-beta.3`, preparado en el
+[PR #2](https://github.com/danielunibe/PulsarIA/pull/2). **Beta 3 todavía no está
+publicada**; la descarga pública continúa siendo `v0.1.0-eval.3`.
+
+La verificación local de Beta 3 pasó `verify:mvp` (13/13), 103 pruebas Rust,
+31 pruebas Python y 1 skip live, además de accesibilidad, iconos, modelo local
+y auditoría de producción sin vulnerabilidades. Estos resultados no sustituyen
+la aceptación del instalador definitivo ni la prueba TikTok autorizada.
+
+El flujo directo separa `build` y `publish`: conserva EXE, SPDX, notices,
+licencia, materiales revisados de terceros, procedencia y hashes como artifact
+de Actions. El Environment `direct-download` aprueba ese mismo artifact antes
+de publicarlo; no se recompila después de aceptar. La revisión legal y los datos
+públicos siguen pendientes, y `DIRECT_DOWNLOAD_RELEASE_READY` permanece en
+`false`.
+
+Consulta el [informe Beta 3](docs/BETA3_RELEASE_EVIDENCE.md), la
+[aceptación del instalador](docs/BETA3_ACCEPTANCE.md) y los
+[checks del PR](https://github.com/danielunibe/PulsarIA/pull/2/checks).
+[PROJECT_TRUTH.md](PROJECT_TRUTH.md) conserva la autoridad normativa.
+
+Para soporte utiliza las [plantillas de Issues](https://github.com/danielunibe/PulsarIA/issues/new/choose)
+sin adjuntar datos privados.
 
 ## Release y updater
 
@@ -156,10 +157,11 @@ release incompleto y quedan sin notificaciones de fallo.
 
 La ruta de descarga directa está en
 [direct-download-release.yml](.github/workflows/direct-download-release.yml).
-Es una ejecución manual para tags Beta/RC: genera SBOM SPDX agregado, valida
-el runtime, construye y prueba el instalador NSIS, adjunta hashes y notices y
-publica una prerelease gratis en GitHub. Requiere
-`DIRECT_DOWNLOAD_RELEASE_READY=true` y todos los gates legales aprobados. La
+Es una ejecución manual para un tag revisado: genera SPDX, valida
+el runtime y materiales de terceros, construye y prueba NSIS y guarda el paquete
+para aceptación. Solo el job de publicación requiere
+`DIRECT_DOWNLOAD_RELEASE_READY=true` y aprobación del Environment. Los gates
+legales deben pasar antes de construir el paquete público. La
 ejecución debe despacharse desde `main`; el tag tiene que apuntar a un commit ya integrado
 en `main` y su versión debe coincidir con la fuente. No firma el instalador ni
 crea artefactos del updater.

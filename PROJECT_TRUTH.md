@@ -6,6 +6,24 @@ actual, las pruebas reproducidas y esta definición de verdad.
 
 ## Objetivo y alcance
 
+### Estado activo de lanzamiento — 2026-09-29
+
+El candidato activo del PR #2 es **Beta 3, `0.1.0-beta.3`**. `main` sigue
+siendo canónico y la rama temporal conserva el nombre `beta2-hardening`.
+La release pública continúa en `v0.1.0-eval.3`; las secciones fechadas de Beta 2
+que siguen son evidencia histórica y no certifican el candidato Beta 3.
+
+La ruta acordada es NSIS Windows x64 gratuito, sin Authenticode ni updater.
+El workflow directo separa construcción y publicación; el Environment revisa
+el artifact exacto conservado por Actions. `DIRECT_DOWNLOAD_RELEASE_READY=false`
+se mantiene hasta revisión legal y aceptación. No se publica ni se elimina una
+protección para resolver un gate pendiente.
+
+Los resultados actuales y límites están en `docs/BETA3_RELEASE_EVIDENCE.md`.
+La aceptación instalada se registra con el recorrido de `docs/BETA3_ACCEPTANCE.md`.
+Titular, contacto/domicilio, revisión de documentos, materiales fuente de
+terceros y prueba live autorizada continúan pendientes hasta su evidencia.
+
 Pulsaria es un MVP local-first para Windows que importa contenido de TikTok que
 el usuario está autorizado a procesar, genera video/audio/transcripción/análisis
 visual, indexa localmente y permite búsqueda literal y semántica. Incluye IA

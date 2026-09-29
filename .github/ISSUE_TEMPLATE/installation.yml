@@ -1,0 +1,42 @@
+name: Problema de instalación
+description: Reportar instalación, actualización, primer arranque o desinstalación.
+title: "[Instalación] "
+body:
+  - type: markdown
+    attributes:
+      value: "Descarga únicamente desde GitHub Releases. No publiques datos de tu biblioteca ni credenciales."
+  - type: input
+    id: installer
+    attributes:
+      label: Nombre del instalador y enlace a la release
+    validations:
+      required: true
+  - type: input
+    id: checksum
+    attributes:
+      label: SHA-256 del EXE descargado
+      description: Obtenlo con Get-FileHash en PowerShell.
+  - type: input
+    id: windows
+    attributes:
+      label: Versión y compilación de Windows x64
+    validations:
+      required: true
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Operación afectada
+      options:
+        - Instalación nueva
+        - Actualización de una versión anterior
+        - Primer arranque
+        - Desinstalación
+    validations:
+      required: true
+  - type: textarea
+    id: failure
+    attributes:
+      label: Pasos y mensaje de error
+      description: Incluye si aparece un aviso de WebView2 o SmartScreen; oculta datos privados en las capturas.
+    validations:
+      required: true

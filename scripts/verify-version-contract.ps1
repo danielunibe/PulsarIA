@@ -20,6 +20,7 @@ $packageLockRaw = Get-Content -LiteralPath (Join-Path $ProjectRoot 'package-lock
 $tauri = Read-JsonFile 'src-tauri/tauri.conf.json'
 $projectManifest = Read-JsonFile 'PROJECT.manifest.json'
 $runtimeManifest = Read-JsonFile 'src-tauri/resources/runtime-manifest.json'
+$legalManifest = Read-JsonFile 'legal/release-manifest.json'
 $cargoToml = Get-Content -LiteralPath (Join-Path $ProjectRoot 'src-tauri/Cargo.toml') -Raw
 $cargoLock = Get-Content -LiteralPath (Join-Path $ProjectRoot 'src-tauri/Cargo.lock') -Raw
 
@@ -40,6 +41,7 @@ $checks = [ordered]@{
     'src-tauri/Cargo.toml' = if ($cargoPackageMatch.Success) { $cargoPackageMatch.Groups[1].Value } else { '' }
     'src-tauri/Cargo.lock' = if ($cargoLockPackageMatch.Success) { $cargoLockPackageMatch.Groups[1].Value } else { '' }
     'src-tauri/resources/runtime-manifest.json' = [string]$runtimeManifest.version
+    'legal/release-manifest.json' = [string]$legalManifest.release_version
 }
 
 $mismatches = @(

@@ -4,7 +4,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$canonicalMarker = 'pulsaria-frontend" content="beta2-canonical'
+$canonicalMarker = 'pulsaria-frontend" content="beta3-canonical'
 $packageJson = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
 $canonicalVersion = [string]$packageJson.version
 $canonicalVersionMarker = 'pulsaria-version" content="' + $canonicalVersion
@@ -70,7 +70,7 @@ try {
         }
     }
     if (-not $startupReady) {
-        throw "Next.js no sirvio el marcador beta2-canonical en el puerto $Port dentro del tiempo esperado."
+        throw "Next.js no sirvio el marcador beta3-canonical en el puerto $Port dentro del tiempo esperado."
     }
     Write-Host "Frontend canonico listo: http://127.0.0.1:$Port"
     $nextProcess.WaitForExit()
