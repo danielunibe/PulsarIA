@@ -1,6 +1,6 @@
 # Third-party notices — Pulsaria Beta
 
-Version: 0.1.0-beta.2 · 27 de septiembre de 2026
+Version: 0.1.0-beta.3 · 30 de septiembre de 2026
 
 Pulsaria contains third-party software and data. This file is an inventory
 required for a release, not a relicensing of those materials. Each component
@@ -33,10 +33,11 @@ currently reports 54/54 required files with PASS. Metadata and hashes support
 review but do not replace checking each component's license and required
 notices against the exact binary that ships.
 
-The aggregate built from this Beta 2 checkout inventories 34 production npm
+The aggregate built from this Beta 3 candidate inventories 34 production npm
 packages, 695 Cargo packages, 33 bundled Python distributions, 54 runtime
-files and 13 packaged legal documents. The package root uses `NOASSERTION` for
-the custom Pulsaria source license, which remains for explicit owner review.
+files and 13 packaged legal documents (762 packages and 68 files total). The
+Pulsaria package root declares `LicenseRef-Pulsaria-Source-Visible-Beta` and
+maps it to the exact text in `LICENSE`; owner review remains pending.
 
 <!-- COMPONENT_LICENSE_REVIEW_PENDING: rights holder must review the custom source license, generated SPDX and exact bundled notices before public release. -->
 
@@ -46,7 +47,7 @@ the custom Pulsaria source license, which remains for explicit owner review.
 
 The bundled binary reports `ffmpeg version 8.1.2-full_build-www.gyan.dev` and its configure output includes `--enable-static`, `--enable-gpl` and `--enable-version3`. The upstream Windows build page lists version 8.1.2 and states that its builds are static and GPLv3: [Gyan.dev FFmpeg builds](https://www.gyan.dev/ffmpeg/builds/). FFmpeg's legal page explains that enabling GPL components places FFmpeg under GPL terms and describes source/build information to review against distributed binaries: [FFmpeg license and legal considerations](https://www.ffmpeg.org/legal.html).
 
-The direct-download workflow currently stages the installer, aggregate SPDX, this file, `LICENSE` and checksums. It does not stage a corresponding FFmpeg source/build package, and no such archive is present in this checkout. The root `LICENSE` and both EULA translations already state that third-party terms control for those components and that the EULA does not restrict their licensed rights. These are useful safeguards, but they do not determine whether the package and source/build materials meet the obligations for this exact binary. The rightsholder must review that boundary and the corresponding source/build obligations before removing `COMPONENT_LICENSE_REVIEW_PENDING` or publishing Beta 2.
+The direct-download workflow currently stages the installer, aggregate SPDX, this file, `LICENSE` and checksums. It does not stage a corresponding FFmpeg source/build package, and no such archive is present in this checkout. The root `LICENSE` and both EULA translations already state that third-party terms control for those components and that the EULA does not restrict their licensed rights. These are useful safeguards, but they do not determine whether the package and source/build materials meet the obligations for this exact binary. The rightsholder must review that boundary and the corresponding source/build obligations before removing `COMPONENT_LICENSE_REVIEW_PENDING` or publishing Beta 3.
 
 The provenance check on 2026-09-28 narrowed the missing materials. The official Gyan page lists 8.1.2 as a previous release and labels its Windows builds static and GPLv3; the Gyan release points to FFmpeg source commit `38b88335f9`. Its uploaded release assets are binary archives for essentials, full and full-shared builds. The GitHub-generated source snapshot for Gyan's `8.1.2` tag contains `README.md` and `.github/FUNDING.yml`, not the FFmpeg build inputs. The official full-build ZIP has SHA-256 `b8cdefab5f50590a076c27c2b56b0294a0e6154faded28ba1ba05ebc4f801f57`; its extracted `bin/ffmpeg.exe` matches the bundled executable byte-for-byte (SHA-256 `AD8F211BC894755E0061C55AB280AE00E8D3D4F15A8CC4372B24CFA247B5942E`). The archive's `README.txt` identifies GPLv3, the FFmpeg commit, the full build configuration, and versions for its external libraries. This confirms the binary's Gyan package provenance and gives a version inventory, but the archive is still a binary package and does not supply those libraries' corresponding source trees. The local binary's `-buildconf` output also confirms `--enable-static`, `--enable-gpl` and `--enable-version3`. The matching binary and build metadata strengthen provenance; source materials and owner/counsel review remain open. This is an evidence gap, not a finding of incompatibility.
 
