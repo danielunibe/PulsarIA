@@ -61,10 +61,19 @@ Se consultó nuevamente la [release Gyan 8.1.2](https://github.com/GyanD/codexff
 1. `public_owner`, `legal_contact_email`, `notice_address` y `legal_approval` siguen pendientes. La delegación de presentación profesional no acredita identidad/titularidad, disponibilidad de un buzón o autorización de domicilio.
 2. Resolver `COMPONENT_LICENSE_REVIEW_PENDING` y registrar los materiales exactos aprobados de terceros con URL/hash. El gate legal detecta seis bloqueos, incluidos materiales y los cuatro campos.
 3. Completar [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) con el candidato definitivo descargado de Actions, Windows sin herramientas de desarrollo, WebView2, actualización, ventana nativa y URL TikTok autorizada con voz.
-4. Revisar CI del PR final, integrar en `main`, crear el tag nuevo y ejecutar el workflow. Mantener `DIRECT_DOWNLOAD_RELEASE_READY=false` hasta aceptación y revisión; no desactivar el Environment.
+4. Integrar el PR revisado en `main`, crear el tag nuevo y ejecutar el workflow. Los checks del código preparado ya pasaron, según el registro debajo. Mantener `DIRECT_DOWNLOAD_RELEASE_READY=false` hasta aceptación y revisión; no desactivar el Environment.
 5. Comprobar los assets públicos y sus hashes; después actualizar las descargas a Beta 3.
 
 La ejecución completa del workflow directo permanece sin verificar hasta resolver esos requisitos. Build local, tests, fixtures y preview web no certifican aceptación humana ni publicación.
+
+## Verificación del código en GitHub
+
+El commit `501bbb29d8337e070109d58a3525bfb1f7f04360` contiene la preparación técnica Beta 3. Ambos checks terminaron correctamente el 29 de septiembre de 2026:
+
+- [Canonical CI, ejecución 36642176395](https://github.com/danielunibe/PulsarIA/actions/runs/36642176395): `success`, finalizada a las 23:01:58 UTC.
+- [Pinned runtime bootstrap preflight, ejecución 36642176398](https://github.com/danielunibe/PulsarIA/actions/runs/36642176398): `success`, finalizada a las 23:08:09 UTC.
+
+Estos resultados corresponden al código del candidato y no a la publicación directa ni a una aceptación humana. El PR #2 continúa en borrador mientras se resuelven los pendientes descritos arriba.
 
 ## Candidato NSIS local construido
 
