@@ -97,3 +97,14 @@ El export servido para diagnóstico reprodujo el error de Next: `Expected docume
 Se añadió una regresión que preserva la comprobación `currentScript`, JavaScript y payloads RSC, comprueba URLs HTML/CSS e idempotencia. Debe construirse un candidato nuevo, registrar su hash y repetir pruebas instaladas.
 
 El usuario proporcionó y autorizó para la prueba la URL `https://www.tiktok.com/@liminalhabitats/video/7683192090443992353`. El requisito de recibir una URL está resuelto; descarga, contenido hablado, transcripción, búsqueda y exportación aún requieren ejecución y evidencia.
+
+### Rebuild Beta 3 tras la corrección de hidratación
+
+- El 2026-09-30 se reconstruyó desde el commit `57af9e3e40610bffc5d387d2dc9740d22f6b0ff4` con `npm run tauri build -- --bundles nsis`; terminó correctamente.
+- Nuevo instalador local: `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.3_x64-setup.exe`, **688,009,706 bytes**, SHA-256 **`AB13B5F654EE02B0FD4D960BD517BA6CCE26BA5B4FA66035736C883A230F69A8`**, Authenticode `NotSigned`. ProductVersion y FileVersion: `0.1.0-beta.3`.
+- Se actualizó el perfil temporal instalado desde eval.3 con este instalador; NSIS terminó con código 0. La verificación posterior confirma `PRAGMA integrity_check=ok`, relaciones SQLite válidas y sin cambios en los registros sintéticos de jobs, media, playlists y playlist_items, los ajustes `en-US`/`carbon` y dos archivos de fixture cuyos hashes coinciden.
+- **Alcance limitado:** los registros pertenecen a una biblioteca sintética marcada como fixture. Esta verificación confirma que el instalador reemplaza los binarios sin borrar esa biblioteca ni sus medios. No confirma todavía la migración de schema al primer arranque de Beta 3, el comportamiento de Ajustes en la ventana instalada ni la preservación de una biblioteca personal real. El lanzamiento de la app instalada para verificar esos puntos no se completó.
+- El verificador de manifiesto contra el directorio instalado pasó: 54 de 54 archivos críticos presentes y con hashes correctos, incluido FFmpeg/FFprobe/licencia.
+- El gate legal volvió a ejecutarse con el SPDX agregado recién generado y registrado en `target-tauri/beta3-hydration-legal-gate.log`. Continúa bloqueado por seis pendientes: revisión de `THIRD_PARTY_NOTICES.md`, materiales fuente/build FFmpeg aún no revisados y los campos `public_owner`, `legal_contact_email`, `notice_address` y `legal_approval`.
+- CI del commit `57af9e3e40610bffc5d387d2dc9740d22f6b0ff4`: [canonical CI](https://github.com/danielunibe/PulsarIA/actions/runs/36745995628) y [runtime preflight](https://github.com/danielunibe/PulsarIA/actions/runs/36745995714), ambos `success`. El commit también pasó `verify:mvp` 13/13, las tres pruebas Node de regresión y el typecheck local.
+- La aceptación nativa del nuevo hash, TikTok live, máquina sin herramientas de desarrollo y WebView2 continúan pendientes. Este instalador local no es aún el artefacto de Actions aprobado ni una descarga pública.
