@@ -19,6 +19,22 @@ el artifact exacto conservado por Actions. `DIRECT_DOWNLOAD_RELEASE_READY=false`
 se mantiene hasta revisión legal y aceptación. No se publica ni se elimina una
 protección para resolver un gate pendiente.
 
+El usuario proporcionó un domicilio de notificación y autorizó una URL TikTok
+para la prueba; el domicilio está registrado en `legal/release-manifest.json`
+y el enlace no se repite en documentación pública. No se inventó el código
+postal. El manifiesto de contacto no representa una confirmación de titularidad
+legal ni una aprobación de los avisos. El gate legal, regenerado con el SPDX
+actual, sigue bloqueado por la revisión de `THIRD_PARTY_NOTICES.md`, las fuentes
+y receta exactas del build Gyan/FFmpeg y la aprobación legal humana. El snapshot
+`media-autobuild_suite` `patch-7` se investigó por hash, pero no está vinculado
+al paquete 8.1.2 y no resuelve ese requisito.
+
+La prueba live de TikTok y la aceptación visual/funcional de la app instalada
+siguen pendientes. El directorio de datos predeterminado de Pulsaria ya existe;
+no se inspeccionó su contenido y no se inició la app con ese perfil. Completar
+la aceptación en un perfil o Windows de prueba aislado y con el artifact
+definitivo de Actions para preservar la biblioteca personal.
+
 El audit de producción actual detectó el aviso crítico
 [GHSA-vcvr-r3jv-pc5j](https://github.com/vercel/next.js/security/advisories/GHSA-vcvr-r3jv-pc5j)
 en Next.js 16.3.5. El candidato Beta 3 se actualizó a Next.js 16.3.8 y alineó
@@ -32,9 +48,9 @@ La aceptación instalada se registra con el recorrido de `docs/BETA3_ACCEPTANCE.
 Por delegación del usuario se eligió para la presentación pública “Daniel
 Unibe”, denominación ya usada en el PR #2, y como correo el que aparece en su
 perfil público de GitHub. Estos datos no acreditan identidad legal, control del
-buzón ni titularidad. Domicilio de notificación, revisión legal y de materiales
-de terceros, y aceptación funcional/live siguen pendientes hasta tener
-evidencia.
+buzón ni titularidad. El domicilio y la URL de prueba se recibieron después
+del corte inicial; su registro no sustituye la revisión legal, la aceptación de
+materiales de terceros ni la ejecución del recorrido live.
 
 Pulsaria es un MVP local-first para Windows que importa contenido de TikTok que
 el usuario está autorizado a procesar, genera video/audio/transcripción/análisis
