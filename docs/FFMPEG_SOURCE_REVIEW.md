@@ -8,11 +8,26 @@ Ya se reunió la fuente del núcleo FFmpeg del commit `38b88335f99e76ed89ff3c93f
 
 El 2026-09-30 se revisó también el [fork de media-autobuild_suite del proveedor](https://github.com/GyanD/media-autobuild_suite). Su rama `master` apunta a `05070f3f3151140a5c644ccd175c824cbf3513c9`, cuya fecha de commit es 2020-12-20. El repositorio de distribución `GyanD/codexffmpeg` contiene README y configuración de GitHub. Ninguno de esos hallazgos vincula una receta completa al build 8.1.2 de Pulsaria; no se incorporaron como materiales aprobados.
 
+### Snapshot candidato de la suite — no vinculado al build 8.1.2
+
+Se encontró una rama más reciente, `patch-7`, en el commit [`1ce81b161a96c9757b7eb94170639b963fccd280`](https://github.com/GyanD/media-autobuild_suite/tree/1ce81b161a96c9757b7eb94170639b963fccd280), fechado 2026-05-31. Se descargaron cuatro scripts desde ese commit y se cotejó cada archivo con su URL `raw.githubusercontent.com`; los hashes SHA-256 son:
+
+| Archivo en `build/` | SHA-256 |
+| --- | --- |
+| `media-suite_compile.sh` | `3F2BA53D87F550A907D40B4032D5246EDD081B7D10904BD144C88BBC06EB4C4A` |
+| `media-suite_deps.sh` | `CA18F1E6B6B2515194B6061F2BB19F88C1AC178BD7E60541236FBFDF584D7B52` |
+| `media-suite_helper.sh` | `5CF53B6A88C4C970DDAAFDCD73EE461A0703901241FB918727A896295F1A593C` |
+| `media-suite_update.sh` | `663B6AFF9D16C6C18121087F974FFF972A30EB64478A3B9E325569CD7D749A48` |
+
+La revisión estática muestra que la suite obtiene numerosos repositorios mediante etiquetas móviles; por ejemplo, `media-suite_deps.sh` declara `SOURCE_REPO_OPENAL=...#tag=latest`, y `media-suite_helper.sh` resuelve la etiqueta más reciente al preparar una compilación. El snapshot, por tanto, no fija por sí mismo las revisiones exactas ni los parches usados para el paquete 8.1.2. Su fecha cercana a la release y su contenido lo hacen una pista útil, pero no hay manifiesto, log de compilación o declaración del proveedor que lo vincule a `ffmpeg-8.1.2-full_build.zip`.
+
+Estos scripts **no** acreditan la receta efectiva del binario, la configuración completa seleccionada, el toolchain empleado ni las fuentes exactas de cada biblioteca. Se conservan como evidencia de investigación, no como materiales aprobados; `legal/third-party-materials.json` debe seguir `pending` y vacío hasta recibir y revisar materiales vinculados al paquete exacto.
+
 ### Comprobación de procedencia pública — 2026-09-30
 
 La [release oficial 8.1.2](https://github.com/GyanD/codexffmpeg/releases/tag/8.1.2), publicada el 2026-06-27, identifica el commit de FFmpeg `38b88335f9`. Sus seis assets de release publicados son variantes `.7z`/`.zip` de los bundles essentials/full; no son paquetes de fuentes. GitHub genera además snapshots del repositorio `codexffmpeg`, pero ese repositorio de empaquetado no equivale a las fuentes del núcleo FFmpeg ni a las dependencias enlazadas.
 
-La [página actual de builds](https://www.gyan.dev/ffmpeg/builds/) mantiene 8.1.2 como release anterior y describe estas builds como estáticas y GPLv3. Esa página aporta clasificación y listado de funciones, pero no entrega las fuentes exactas, parches ni receta reproducible de sus bibliotecas externas para este binario. El `master` del fork `GyanD/media-autobuild_suite` aún apunta al commit de 2020 señalado arriba; no existe en la evidencia reunida un vínculo verificable entre ese snapshot y la release de 2026.
+La [página actual de builds](https://www.gyan.dev/ffmpeg/builds/) mantiene 8.1.2 como release anterior y describe estas builds como estáticas y GPLv3. Esa página aporta clasificación y listado de funciones, pero no entrega las fuentes exactas, parches ni receta reproducible de sus bibliotecas externas para este binario. Además del `master` antiguo, el snapshot `patch-7` cercano en fecha tiene dependencias móviles y tampoco está vinculado al artefacto. No existe en la evidencia reunida una receta verificable que corresponda a la release de 2026.
 
 Conclusión de procedencia: se acredita la fuente del núcleo FFmpeg y se identifica con hash el paquete binario del proveedor que contiene el ejecutable distribuido. No se acredita la fuente exacta de cada biblioteca enlazada ni las entradas usadas para producir ese bundle. Se conserva el runtime actual y el gate de redistribución sigue bloqueado; no se trata esta investigación como aprobación legal.
 

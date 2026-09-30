@@ -40,7 +40,7 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 | Smoke offline del primer candidato | PASS histórico, hash rechazado | El health check pasó con F151…, pero la inspección de la ventana detectó que React no hidrataba; no certifica el candidato activo |
 | Actualización desde eval.3 | PARCIAL en fixture | NSIS preservó SQLite, ajustes y archivos sintéticos. No se inició la app tras actualizar; no certifica migración ni biblioteca personal |
 | Aceptación nativa y TikTok live | Pendiente | La corrección de hidratación se verificó en navegador, no en la app instalada. El lanzamiento de la build instalada quedó rechazado por revisión automática de herramientas; TikTok, idiomas, Cinema y Ajustes no están aceptados |
-| Gate legal con SPDX | BLOCKED por cuatro asuntos | El inventario y la sintaxis SPDX pasan. Siguen pendientes revisión de notices, materiales FFmpeg, domicilio y aprobación legal |
+| Gate legal con SPDX | BLOCKED por tres asuntos | El inventario y la sintaxis SPDX pasan. El domicilio de notificación proporcionado por el usuario ya está en el manifiesto; siguen pendientes la revisión de notices/materiales FFmpeg y la aprobación legal humana |
 | Integración, tag y descarga pública | Pendiente | No se publican antes de revisar el candidato |
 
 ## Materiales FFmpeg reunidos
@@ -59,8 +59,8 @@ Se consultó nuevamente la [release Gyan 8.1.2](https://github.com/GyanD/codexff
 
 ## Pendientes que impiden declarar el lanzamiento cerrado
 
-1. `public_owner` se presenta como “Daniel Unibe”, denominación ya usada en el PR #2; por delegación del usuario, se eligió como contacto `danielunibe10@gmail.com`, correo que aparece en el perfil público de GitHub. No acreditan identidad legal ni control del buzón. Siguen pendientes el domicilio autorizado y la aprobación legal humana.
-2. Resolver `COMPONENT_LICENSE_REVIEW_PENDING` y registrar los materiales exactos aprobados de terceros con URL/hash. El gate legal actual informa cuatro bloqueos: estos dos asuntos de terceros, domicilio y aprobación legal.
+1. `public_owner` se presenta como “Daniel Unibe”, denominación ya usada en el PR #2; por delegación del usuario, se eligió como contacto `danielunibe10@gmail.com`, correo que aparece en el perfil público de GitHub. El usuario proporcionó el domicilio de notificación, ya registrado en `legal/release-manifest.json`. Estos datos no acreditan identidad legal ni control del buzón. La aprobación legal humana sigue pendiente.
+2. Resolver `COMPONENT_LICENSE_REVIEW_PENDING` y registrar los materiales exactos aprobados de terceros con URL/hash. El gate legal actual informa tres bloqueos: revisión de notices/licencias, materiales fuente/build FFmpeg y aprobación legal humana.
 3. Completar [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) con el artifact definitivo de Actions, Windows sin herramientas de desarrollo, WebView2, actualización, ventana nativa y prueba live de la URL autorizada.
 4. Los documentos públicos de contacto cambiaron después de construir `AB13…`; ese instalador ya no representa el árbol fuente actual y no puede aprobarse. Tras cerrar los asuntos legales, construir y aceptar un candidato nuevo.
 5. Integrar el PR revisado en `main`, crear el tag nuevo y ejecutar el workflow. Mantener `DIRECT_DOWNLOAD_RELEASE_READY=false` hasta aceptación y revisión; no desactivar el Environment.
@@ -140,4 +140,9 @@ La auditoría detectó 55 declaraciones Cargo con el separador histórico `/` de
 - El frontend Tauri no importa `next/og` ni `ImageResponse`; aun así, el paquete vulnerable se actualizó para eliminar el hallazgo de producción. `npm audit --omit=dev --audit-level=low` ahora informa **0 vulnerabilidades**.
 - `npm run verify:mvp` volvió a pasar 13/13 con Next `16.3.8`: build estático, TypeScript, lint, 103 pruebas Rust y 32 pruebas Python (1 skip live intencional), además de los gates de seguridad, runtime, estructura y onboarding. También pasan `verify:versions`, `verify:spdx`, `verify:canonical`, accesibilidad, iconos, modelo local y API loopback.
 - El SPDX agregado se regeneró después del cambio de dependencias y conserva 762 paquetes, 68 archivos y 42 expresiones SPDX únicas válidas. Al volver a ejecutar el gate legal sobre ese SBOM continúan exactamente cuatro bloqueos: revisión de notices/licencias, materiales fuente/build, `notice_address` y `legal_approval`.
+
+### Investigación adicional de procedencia — 2026-09-30
+
+- Se identificó y fijó por hash el snapshot `GyanD/media-autobuild_suite` `patch-7` (`1ce81b161a96c9757b7eb94170639b963fccd280`); sus cuatro scripts cotejados se registran en [FFMPEG_SOURCE_REVIEW.md](FFMPEG_SOURCE_REVIEW.md). Los scripts resuelven dependencias móviles y no acreditan que esa receta se usara para el paquete 8.1.2. El gate de materiales exactos sigue bloqueado.
+- El usuario confirmó el domicilio de notificación y se actualizó `legal/release-manifest.json`. Se debe regenerar el SPDX y repetir el gate sobre el paquete candidato vigente; el `legal_approval` continúa pendiente y esta actualización no autoriza redistribución ni publicación.
 - El commit `7f192c6f` con Next.js `16.3.8` pasó [canonical CI, ejecución 36761889455](https://github.com/danielunibe/PulsarIA/actions/runs/36761889455) y [runtime bootstrap preflight, ejecución 36761889297](https://github.com/danielunibe/PulsarIA/actions/runs/36761889297). Esos resultados validan los contratos de código y runtime de ese commit, no la aprobación legal, la aceptación humana ni un instalador reconstruido después.
