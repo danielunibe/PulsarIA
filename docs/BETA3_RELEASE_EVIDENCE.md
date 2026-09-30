@@ -38,7 +38,7 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 | Instalador Beta 3 | PASS build local | `npm run tauri build -- --bundles nsis`, exit 0; candidato descrito abajo |
 | Smoke instalado Beta 3 | PASS offline local | Instalación/desinstalación exit 0, health inicial y tras reinicio `ok` / `0.1.0-beta.3`, recursos y documentos verificados, marker preservado y cleanup PASS; no incluye live, upgrade ni inspección visual |
 | Actualización desde eval.3 | Pendiente humano | Ejecutar en copia de biblioteca de prueba; el marker de desinstalación no certifica una actualización completa |
-| Aceptación nativa y TikTok live | Pendiente humano | Ventana/capturas, voz reconocible, búsqueda y exportación; URL autorizada no recibida |
+| Aceptación nativa y TikTok live | BLOCKED por candidato anterior | El 2026-09-30 se obtuvo acceso a inspección nativa y URL autorizada; se detectó falta de hidratación. Repetir con instalador corregido, según el hallazgo posterior |
 | Gate legal con SPDX | BLOCKED | Ver `target-tauri/beta3-legal-spdx.log` y pendientes debajo |
 | Integración, tag y descarga pública | Pendiente | No se publican antes de revisar el candidato |
 
@@ -85,3 +85,15 @@ Estos resultados corresponden al código del candidato y no a la publicación di
 - Evidencia local: `target-tauri/beta3-build.log`, `beta3-installer-evidence.json`, `beta3-release.spdx.json` y `beta3-installed-smoke.log`.
 - Smoke instalado: `installExit=0`, `uninstallExit=0`, `error=null`, 13 documentos legales cotejados, `/health` inicial y tras reinicio en `0.1.0-beta.3`, `APPDATA` temporal, `PATH` y overrides externos retirados, marcador de datos conservado antes de limpiar el perfil de prueba. No afirma preservación de una biblioteca completa tras upgrade ni prueba en una máquina sin WebView2 previo.
 - Procedencia: working tree de esta preparación sobre `1bb33899`, antes de integrar/taggear. No es un artifact final de Actions ni una descarga pública. Cambiar documentos legales o recursos exige reconstruir y repetir la aceptación.
+
+## Hallazgo nativo posterior — 2026-09-30
+
+**Candidato local anterior RECHAZADO para aceptación funcional:** el SHA-256 `F1515FF7FCBA67EA90832711FE5A6FA2B43B567F7B01ACA9AF45FC69DE3CC212` pasó el smoke offline del backend, pero la inspección de la ventana instalada a 1280 × 800 demostró que el frontend no se hidrataba. Marcar la casilla no habilitaba «Aceptar y continuar» y Ajustes no respondía. El PASS offline histórico no acredita funcionamiento de la interfaz.
+
+Computer Use de Windows permitió inspeccionar la app instalada con `APPDATA`, `LOCALAPPDATA` y descargas temporales, sin procesos Pulsaria previos ni herramientas globales en `PATH`. Evidencia local: `target-tauri/beta3-native-evidence/rejected-onboarding.png` y `.txt`; perfil identificado en `target-tauri/beta3-native-context.json`.
+
+El export servido para diagnóstico reprodujo el error de Next: `Expected document.currentScript src to contain './_next/'`. El preparador alteraba JavaScript generado e identificadores de chunks. La corrección usa `assetPrefix: '.'` en compilación de producción y limita la preparación posterior a URLs de atributos HTML y CSS, preservando JavaScript y payloads RSC. Tras reconstruir, la casilla habilitó el botón y Ajustes abrió en el export de diagnóstico. Esta verificación web no sustituye repetir el recorrido en el instalador nuevo.
+
+Se añadió una regresión que preserva la comprobación `currentScript`, JavaScript y payloads RSC, comprueba URLs HTML/CSS e idempotencia. Debe construirse un candidato nuevo, registrar su hash y repetir pruebas instaladas.
+
+El usuario proporcionó y autorizó para la prueba la URL `https://www.tiktok.com/@liminalhabitats/video/7683192090443992353`. El requisito de recibir una URL está resuelto; descarga, contenido hablado, transcripción, búsqueda y exportación aún requieren ejecución y evidencia.

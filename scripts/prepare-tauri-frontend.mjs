@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outputRoot = path.join(projectRoot, 'out');
-const rewritableExtensions = new Set(['.css', '.html', '.js', '.json', '.txt']);
+// JavaScript contains runtime invariants (including Next's currentScript
+// prefix detection), not just asset URLs. Rewriting it prevents hydration.
+const rewritableExtensions = new Set(['.css', '.html']);
 
 async function collectFiles(directory) {
     const entries = await readdir(directory, { withFileTypes: true });
@@ -34,8 +36,7 @@ for (const filePath of files) {
             .replace(/\.\.\/_next\/static\/media\//g, '../media/')
             .replace(/\/_next\/static\/media\//g, '../media/')
         : before
-            .replaceAll('../_next/', './_next/')
-            .replace(/(?<!\.)\/_next\//g, './_next/');
+            .replace(/((?:src|href)=["'])(?:\.\.\/|\/)_next\//g, '$1./_next/');
 
     if (after !== before) {
         await writeFile(filePath, after, 'utf8');

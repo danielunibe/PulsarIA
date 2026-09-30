@@ -44,4 +44,8 @@ El smoke TikTok se hace desde la app instalada mediante el cliente IPC autentica
 
 ## Entradas aún necesarias
 
-Titular legal confirmado, correo de notificaciones controlado, domicilio autorizado, revisión de documentos y URL TikTok autorizada con voz. La marca pública “Pulsaria — Daniel Unibe” y GitHub Issues son presentación/soporte; no acreditan por sí solos esos datos legales.
+Titular legal confirmado, correo de notificaciones controlado, domicilio autorizado y revisión de documentos. La marca pública “Pulsaria — Daniel Unibe” y GitHub Issues son presentación/soporte; no acreditan por sí solos esos datos legales.
+
+El 2026-09-30 el usuario autorizó `https://www.tiktok.com/@liminalhabitats/video/7683192090443992353` para la prueba. Debe comprobarse si contiene voz en español; recibir el enlace no demuestra descarga ni transcripción.
+
+El candidato local con hash `F1515FF7FCBA67EA90832711FE5A6FA2B43B567F7B01ACA9AF45FC69DE3CC212` fue rechazado en inspección nativa por falta de hidratación del frontend. Repetir el recorrido con el instalador corregido; ver `BETA3_RELEASE_EVIDENCE.md`.

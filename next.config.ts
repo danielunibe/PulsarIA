@@ -14,6 +14,9 @@ const packageVersion = JSON.parse(
 const nextConfig: NextConfig = {
     // Static export para empaquetado Tauri (tauri.conf.json -> frontendDist: ../out)
     output: 'export',
+    // Let the compiler generate matching script URLs and Turbopack chunk
+    // identifiers. Post-build string rewriting cannot safely do that.
+    assetPrefix: process.env.NODE_ENV === 'production' ? '.' : undefined,
     // Verification can isolate its generated output from an active next dev
     // process in the shared checkout.
     distDir: process.env.NEXT_DIST_DIR || '.next',
