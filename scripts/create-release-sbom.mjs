@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { normalizeCargoLicenseExpression } from './spdx-license-expression.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = new Map();
@@ -80,11 +81,11 @@ for (const item of cargo.packages) {
     name: item.name,
     version: item.version,
     purl,
-    license: item.license || 'NOASSERTION',
+    license: normalizeCargoLicenseExpression(item.license),
     downloadLocation: item.source.startsWith('registry+')
       ? `https://crates.io/crates/${encodeURIComponent(item.name)}/${item.version}`
       : 'NOASSERTION',
-    comment: `Cargo.lock package id: ${item.id}; declared license: ${item.license || 'NOASSERTION'}.`,
+    comment: `Cargo.lock package id: ${item.id}; declared license: ${item.license || 'NOASSERTION'}; SPDX license expression: ${normalizeCargoLicenseExpression(item.license)}.`,
   });
   if (component) extraPackages.push(component);
 }

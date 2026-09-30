@@ -32,14 +32,14 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 | Dependencias de producción | PASS | `npm audit --omit=dev --audit-level=low`: 0 vulnerabilidades |
 | Herramienta de versionado | PASS | 2 regresiones: BOM/idempotencia y fallo de entrada sin escrituras parciales |
 | Verificador de release | PASS unitario | 6 casos con fixture; no prueba un instalador real |
-| Workflows e Issues | PASS estático | YAML parseado; actionlint 1.7.12 validó los tres workflows modificados |
+| Workflows e Issues | PASS sintaxis, actionlint parcial | El parser YAML valida los dos workflows cambiados en esta revisión; `actionlint` no está disponible en este checkout y los checks de Actions deben repetirse sobre el nuevo commit |
 | Sitio y estructura canónica | PASS | `verify:website`, `verify:canonical` |
-| SPDX agregado | PASS inventario | 34 npm, 695 Cargo, 33 Python, 54 runtime, 13 documentos legales y 1 licencia de tercero; no equivale a revisión de todas las licencias |
+| SPDX agregado | PASS inventario y sintaxis | 762 paquetes, 68 archivos, 42 expresiones únicas validadas; 34 npm, 695 Cargo, 33 Python, 54 runtime, 13 documentos legales y 1 licencia de tercero. No equivale a revisión de licencias |
 | Instalador Beta 3 | PASS build local | `npm run tauri build -- --bundles nsis`, exit 0; candidato descrito abajo |
 | Smoke offline del primer candidato | PASS histórico, hash rechazado | El health check pasó con F151…, pero la inspección de la ventana detectó que React no hidrataba; no certifica el candidato activo |
 | Actualización desde eval.3 | PARCIAL en fixture | NSIS preservó SQLite, ajustes y archivos sintéticos. No se inició la app tras actualizar; no certifica migración ni biblioteca personal |
 | Aceptación nativa y TikTok live | Pendiente | La corrección de hidratación se verificó en navegador, no en la app instalada. El lanzamiento de la build instalada quedó rechazado por revisión automática de herramientas; TikTok, idiomas, Cinema y Ajustes no están aceptados |
-| Gate legal con SPDX | BLOCKED por cuatro asuntos | SBOM agregado actual pasa. Siguen pendientes revisión de notices, materiales FFmpeg, domicilio y aprobación legal |
+| Gate legal con SPDX | BLOCKED por cuatro asuntos | El inventario y la sintaxis SPDX pasan. Siguen pendientes revisión de notices, materiales FFmpeg, domicilio y aprobación legal |
 | Integración, tag y descarga pública | Pendiente | No se publican antes de revisar el candidato |
 
 ## Materiales FFmpeg reunidos
@@ -114,6 +114,15 @@ El usuario proporcionó y autorizó una URL TikTok para la prueba. Para proteger
 
 - Por delegación expresa del usuario se usó como nombre público “Daniel Unibe”, denominación ya presente en el PR #2, y como correo el que figura públicamente en su perfil de GitHub. No se expuso un domicilio residencial ni se infirió una entidad jurídica.
 - `legal/release-manifest.json` contiene esos valores de presentación/contacto. El domicilio y la aprobación legal continúan como placeholders; el gate correctamente informa cuatro bloqueos en total, incluidos la revisión de FFmpeg/notices y los materiales fuente/build.
-- El SPDX agregado actual se regeneró desde los documentos cambiados y pasó su gate estructural. El bloqueo legal no se eliminó. `AB13B5F654EE02B0FD4D960BD517BA6CCE26BA5B4FA66035736C883A230F69A8` fue construido antes de estas modificaciones de documentos y queda como evidencia de un candidato anterior, no el instalador actual.
+- El SPDX agregado actual se regeneró desde los documentos cambiados y pasó su gate de inventario; `AB13B5F654EE02B0FD4D960BD517BA6CCE26BA5B4FA66035736C883A230F69A8` fue construido antes de estas modificaciones de documentos y queda como evidencia de un candidato anterior, no el instalador actual.
 - El PR #2 permanece en borrador. En el head `b2e6ed236c9754d9629c578209000a9dec1ac204`, canonical CI `36749881432` y runtime preflight `36749881371` terminaron en success. Los cambios documentales de este update requieren un nuevo ciclo de CI.
 - No existe tag ni release Beta 3. El perfil temporal contiene solamente datos sintéticos. La aceptación nativa de la build posterior a la corrección y el TikTok autorizado siguen sin evidencia.
+
+### Corrección y validación del SPDX agregado — 2026-09-30
+
+La auditoría detectó 55 declaraciones Cargo con el separador histórico `/` dentro de un documento SPDX-2.3. La [guía de estilo de Cargo](https://doc.rust-lang.org/style-guide/cargo.html) documenta `/` como separador antiguo para alternativas de licencia; SPDX-2.3 expresa esas alternativas con `OR` según su [gramática de expresiones](https://spdx.github.io/spdx-spec/v2.3/SPDX-license-expressions/). Se corrigió el generador para convertir únicamente listas simples separadas por `/`, conservar en `comment` el valor original de Cargo y fallar ante sintaxis ambigua. Las declaraciones sin `/` quedan intactas.
+
+- El SBOM agregado regenerado contiene 762 paquetes y 68 archivos. El parser `spdx-expression-parse` valida 42 expresiones únicas presentes en declaraciones y campos de licencia; no quedan expresiones inválidas ni declaraciones con `/`.
+- Las pruebas de regresión cubren normalización, expresiones ya válidas, datos ausentes y separadores ambiguos; 6 pruebas Node relevantes pasaron. El parser está fijado como dependencia de desarrollo y el generador de release valida el SPDX inicial y el que se vuelve a crear después del build.
+- `npm run verify:versions` también pasó para `0.1.0-beta.3`. El cambio requiere un ciclo nuevo de CI; los checks vigentes pertenecen al commit anterior.
+- El gate legal se volvió a ejecutar sobre este SBOM y permanece **BLOCKED** por cuatro asuntos: `THIRD_PARTY_NOTICES.md` sin revisión, materiales fuente/build de terceros sin aprobación, `notice_address` pendiente y `legal_approval` pendiente. La salida local está en `target-tauri/beta3-spdx-legal-gate.log`; validar la sintaxis SPDX no resuelve la revisión de licencias ni habilita la redistribución.

@@ -88,6 +88,8 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $npmSbomPath -PathType Leaf)) { throw 'npm SPDX generation failed.' }
           node scripts/create-release-sbom.mjs --npm-sbom $npmSbomPath --output $sbomPath
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sbomPath -PathType Leaf)) { throw 'Aggregate release SPDX generation failed.' }
+          npm run verify:spdx -- --sbom $sbomPath
+          if ($LASTEXITCODE -ne 0) { throw 'Aggregate SPDX license expressions are invalid.' }
           $materialsRoot = Join-Path $env:RUNNER_TEMP 'pulsaria-third-party-materials'
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-direct-release-materials.ps1 -DestinationRoot $materialsRoot
           if ($LASTEXITCODE -ne 0) { throw 'Third-party source/build preparation failed.' }
@@ -127,6 +129,8 @@ jobs:
           # Tauri regenerates the runtime manifest. Inventory the final inputs.
           node scripts/create-release-sbom.mjs --npm-sbom (Join-Path $env:RUNNER_TEMP 'pulsaria-npm.spdx.json') --output $sbomPath
           if ($LASTEXITCODE -ne 0) { throw 'Final aggregate SPDX generation failed.' }
+          npm run verify:spdx -- --sbom $sbomPath
+          if ($LASTEXITCODE -ne 0) { throw 'Final aggregate SPDX license expressions are invalid.' }
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-direct-release.ps1 -ArtifactRoot $stageRoot -InstallerPath $installer -SbomPath $sbomPath -MaterialsRoot (Join-Path $env:RUNNER_TEMP 'pulsaria-third-party-materials') -ReleaseTag $env:PULSARIA_RELEASE_TAG -SourceCommit $env:SOURCE_COMMIT -RunId $env:GITHUB_RUN_ID
           if ($LASTEXITCODE -ne 0) { throw 'Direct-download artifact gate failed.' }
           "DIRECT_RELEASE_ASSET_ROOT=$stageRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
