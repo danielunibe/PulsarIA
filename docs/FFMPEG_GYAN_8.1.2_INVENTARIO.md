@@ -43,7 +43,7 @@ Este inventario se generó desde `README.txt` dentro del ZIP oficial full-build.
 | libssh | 0.12.0 | Pendiente de revisar |
 | libtheora | v1.2.0 | Pendiente de revisar |
 | libwebp | v1.6.0-192-g3757b8a | Pendiente de revisar |
-| openal-soft | latest | Pendiente de revisar |
+| openal-soft | `latest` en el README; el binario incluye las cadenas OpenAL Soft `1.25.2`, `b472600`, `ab-suite` | Fuente candidata reconstruida desde el tag `1.25.2` y dos parches públicos; el commit no coincide con `b472600` y falta confirmar la build exacta y revisar obligaciones de redistribución |
 | openapv | v0.2.1.3-fix-5-g9825fa0 | Pendiente de revisar |
 | openmpt | libopenmpt-0.6.28-25-g1d77fab8 | Pendiente de revisar |
 | opus | v1.6.1-50-g3da9f7a6 | Pendiente de revisar |

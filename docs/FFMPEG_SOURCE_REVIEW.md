@@ -35,6 +35,16 @@ También se inspeccionó el archivo [`x86_64.yml`](https://github.com/GyanD/medi
 
 La [página actual de builds](https://www.gyan.dev/ffmpeg/builds/) mantiene 8.1.2 como release anterior y describe estas builds como estáticas y GPLv3. Esa página aporta clasificación y listado de funciones, pero no entrega las fuentes exactas, parches ni receta reproducible de sus bibliotecas externas para este binario. Además del `master` antiguo, el snapshot `patch-7` cercano en fecha tiene dependencias móviles y tampoco está vinculado al artefacto. No existe en la evidencia reunida una receta verificable que corresponda a la release de 2026.
 
+### OpenAL Soft 1.25.2 — reconstrucción candidata, no atribución exacta
+
+El inventario original transcribe `openal-soft latest` del README incluido en el paquete Gyan. La tabla de cadenas del `ffmpeg.exe` exacto también contiene `1.25.2`, `b472600` y `ab-suite`. La release oficial de OpenAL Soft `1.25.2` fue publicada el 2026-05-12, antes que Gyan 8.1.2 el 2026-06-27; GitHub informa actualmente `1.25.2` como la última release. Esto hace que el tag sea una explicación plausible de `latest`, pero no demuestra qué resolución de dependencias hizo el proveedor.
+
+Se reprodujo en un clon aislado la secuencia que muestran los scripts públicos de `patch-7`: crear `ab-suite` desde el tag OpenAL `1.25.2` (`b2c48f7718ef3fcf67921a8b6534c4914e328970`) y aplicar con `git am -3 --ignore-whitespace --no-gpg-sign` los parches de `m-ab-s/mabs-patches` fijados a `2e8258bb65e235a1e2cf176c15c3c63d5c020a3f` y `73702d1673a84b69fe87edad647c5141669c687f`. Ambos eran las revisiones más recientes de sus rutas en el historial consultado. La reconstrucción produjo el commit `4d23239fac1bb912129aa3917fc385fd135725d8` y el árbol `c31de4b84ea876a060eec0171d883f3ecaf781f8`.
+
+El código embebido `b472600` **no coincide** con el prefijo del commit reconstruido (`4d23239`). Por tanto, esta reconstrucción no acredita que Gyan haya usado exactamente ese commit o ese árbol. Se conserva como candidato reproducible, no como fuente verificada del binario. Su archivo `COPYING` identifica la GNU Library General Public License, versión 2 de junio de 1991; identificar ese texto no resuelve por sí solo los requisitos derivados de su inclusión estática en FFmpeg.
+
+El paquete local `target-tauri/beta3-third-party-review/openal-reconstruction-1.25.2/openal-soft-1.25.2-reconstructed-source.zip` incluye la fuente reconstruida, los dos parches y esta delimitación de procedencia. Su SHA-256 es `157D1FEC81FBA1E1C55992861EC17D721B8D06B3BBF06D970EB00D773CB96D6A`. Está bajo `target-tauri/`, ruta ignorada por Git, y no forma parte de los materiales aprobados para la release. Persisten el enlace entre este candidato y el binario de Gyan, la receta/toolchain completos y la revisión de obligaciones y notices.
+
 Conclusión de procedencia: se acredita la fuente del núcleo FFmpeg y se identifica con hash el paquete binario del proveedor que contiene el ejecutable distribuido. No se acredita la fuente exacta de cada biblioteca enlazada ni las entradas usadas para producir ese bundle. Se conserva el runtime actual y el gate de redistribución sigue bloqueado; no se trata esta investigación como aprobación legal.
 
 ## Información que debe acreditarse
