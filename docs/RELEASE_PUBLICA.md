@@ -1,5 +1,11 @@
 # Pulsaria — runbook de release pública
 
+> **Alcance histórico:** este runbook conserva la ruta eval.3/0.1.1 y su
+> aceptación de instaladores anteriores. No describe el candidato Beta 3
+> actual ni habilita su publicación. Para ese cierre prevalecen
+> [PROJECT_TRUTH.md](../PROJECT_TRUTH.md) y
+> [BETA3_RELEASE_EVIDENCE.md](BETA3_RELEASE_EVIDENCE.md).
+
 Este runbook define el cierre de `0.1.0` como baseline, `0.1.1-rc.1` como candidato y `0.1.1` como release estable para `danielunibe/PulsarIA`. La aplicación sigue siendo desktop-first y el gateway REST permanece enlazado exclusivamente a `127.0.0.1`.
 
 La base canónica es `main`; la landing pública se sirve desde `website/` por

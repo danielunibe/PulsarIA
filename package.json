@@ -44,7 +44,7 @@
         "motion": "^12.43.0",
         "motion-dom": "^12.43.0",
         "motion-utils": "^12.39.0",
-        "next": "16.3.5",
+        "next": "16.3.8",
         "react": "^19.2.1",
         "react-dom": "^19.2.1",
         "sonner": "^2.0.7",
@@ -52,7 +52,7 @@
         "three": "^0.183.2"
     },
     "devDependencies": {
-        "@next/eslint-plugin-next": "16.3.5",
+        "@next/eslint-plugin-next": "16.3.8",
         "@tailwindcss/postcss": "4.1.11",
         "@tailwindcss/typography": "^0.5.19",
         "@tauri-apps/api": "2.10.1",
@@ -65,7 +65,7 @@
         "@typescript-eslint/parser": "8.70.0",
         "autoprefixer": "10.4.27",
         "eslint": "9.39.1",
-        "eslint-config-next": "16.3.5",
+        "eslint-config-next": "16.3.8",
         "eslint-plugin-import": "2.32.0",
         "eslint-plugin-jsx-a11y": "6.10.2",
         "eslint-plugin-react": "7.37.5",
@@ -82,7 +82,7 @@
         "typescript": "5.9.3"
     },
     "optionalDependencies": {
-        "@next/swc-win32-x64-msvc": "16.3.5",
+        "@next/swc-win32-x64-msvc": "16.3.8",
         "@tailwindcss/oxide-win32-x64-msvc": "^4.3.3",
         "lightningcss-win32-x64-msvc": "^1.33.0"
     },

@@ -9,6 +9,7 @@ Actualizado: 2026-09-30. Versión del candidato: **0.1.0-beta.3**.
 Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR [#2](https://github.com/danielunibe/PulsarIA/pull/2). Se incorporó por fast-forward `1bb338992381fe5825924d53e93128a30a92fd92`; se preservó `scratch/` y no se borraron ramas ni bibliotecas. `main` mantiene la autoridad.
 
 - Versionado Beta 3 sincronizado en npm, Cargo, Tauri y manifiestos. El versionador tolera BOM, valida todas sus entradas antes de escribir, preserva formato y admite ejecuciones repetidas. El contrato incluye ahora el manifiesto legal.
+- Next.js y sus paquetes de lint se fijaron en `16.3.8`; el guard de estructura, `PROJECT.manifest.json` y `AGENTS.md` reflejan el parche aprobado por el audit actual.
 - Marcador activo `beta3-canonical` en frontend y launcher; referencias Beta 2 históricas conservadas.
 - Workflow directo dividido en `build` y `publish`. El build conserva un artifact identificado por ID; publicación descarga ese ID, valida procedencia/hashes y no reconstruye el instalador. La aprobación del Environment permanece activa.
 - Workflow preparado para empaquetar SPDX, notices, licencia, materiales de terceros aprobados, procedencia y hashes de todos los assets. La revisión de materiales todavía no pasó, por lo que no se ha generado un artifact aceptable para publicar.
@@ -22,7 +23,7 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 
 | Gate | Resultado | Evidencia y límites |
 | --- | --- | --- |
-| `verify:mvp` | PASS 13/13 | `target-tauri/beta3-verify-mvp.log`; incluye lint, TypeScript, build, locale, Rust, Python, seguridad, estructura, runtime y onboarding |
+| `verify:mvp` | PASS 13/13 | `target-tauri/beta3-verify-mvp-next-16.3.8.log`; incluye lint, TypeScript, build, locale, Rust, Python, seguridad, estructura, runtime y onboarding |
 | Rust | PASS | 103 tests; 0 fallos |
 | Python | PASS offline | 31 tests PASS y 1 skip live; 32 en total |
 | Runtime fuente | PASS | 54 archivos críticos del manifiesto verificados; no son el total de archivos empaquetados ni certifican instalación limpia |
@@ -132,3 +133,11 @@ La auditoría detectó 55 declaraciones Cargo con el separador histórico `/` de
 - Se actualizó el encabezado de `THIRD_PARTY_NOTICES.md` a `0.1.0-beta.3` y se corrigió el inventario SPDX para reflejar el SBOM agregado actual: 762 paquetes y 68 archivos; el paquete raíz declara `LicenseRef-Pulsaria-Source-Visible-Beta`, mapeado a `LICENSE`.
 - Se corrigió la referencia de publicación heredada a Beta 2. El marcador `COMPONENT_LICENSE_REVIEW_PENDING` se conserva porque todavía faltan revisión del titular y materiales fuente/build correspondientes para FFmpeg/Gyan. También siguen pendientes `notice_address` y `legal_approval`; esta edición documental no habilita la publicación.
 - Al modificar el aviso legal y la evidencia, cualquier instalador anterior deja de representar el paquete documental actual. Se debe volver a construir y revisar el candidato final después de resolver todos los gates legales.
+
+### Actualización de seguridad de Next.js — 2026-09-30
+
+- `npm audit --omit=dev --audit-level=low` identificó GHSA-vcvr-r3jv-pc5j en el pin previo Next.js `16.3.5`. El aviso oficial marca vulnerables las versiones desde `16.2.0` hasta antes de `16.3.6`; se eligió `16.3.8`, una versión estable de la misma línea, y se alinearon `@next/eslint-plugin-next`, `eslint-config-next` y el SWC Windows x64.
+- El frontend Tauri no importa `next/og` ni `ImageResponse`; aun así, el paquete vulnerable se actualizó para eliminar el hallazgo de producción. `npm audit --omit=dev --audit-level=low` ahora informa **0 vulnerabilidades**.
+- `npm run verify:mvp` volvió a pasar 13/13 con Next `16.3.8`: build estático, TypeScript, lint, 103 pruebas Rust y 32 pruebas Python (1 skip live intencional), además de los gates de seguridad, runtime, estructura y onboarding. También pasan `verify:versions`, `verify:spdx`, `verify:canonical`, accesibilidad, iconos, modelo local y API loopback.
+- El SPDX agregado se regeneró después del cambio de dependencias y conserva 762 paquetes, 68 archivos y 42 expresiones SPDX únicas válidas. Al volver a ejecutar el gate legal sobre ese SBOM continúan exactamente cuatro bloqueos: revisión de notices/licencias, materiales fuente/build, `notice_address` y `legal_approval`.
+- La ejecución de CI sobre el commit `cfdc110e` precede este cambio de dependencias y no lo certifica. Deben pasar los checks del nuevo head; cualquier instalador previo también requiere nueva construcción y aceptación con su hash exacto.

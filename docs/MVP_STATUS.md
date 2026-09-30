@@ -1,6 +1,6 @@
 # Pulsaria — línea base de cierre del MVP
 
-Estado activo: Beta 3, 2026-09-29. Consulta
+Estado activo: Beta 3, 2026-09-30. Consulta
 [BETA3_RELEASE_EVIDENCE.md](BETA3_RELEASE_EVIDENCE.md) y
 [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) para los resultados actuales y
 pendientes de publicación. La matriz fechada debajo corresponde a la línea

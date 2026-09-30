@@ -19,6 +19,14 @@ el artifact exacto conservado por Actions. `DIRECT_DOWNLOAD_RELEASE_READY=false`
 se mantiene hasta revisión legal y aceptación. No se publica ni se elimina una
 protección para resolver un gate pendiente.
 
+El audit de producción actual detectó el aviso crítico
+[GHSA-vcvr-r3jv-pc5j](https://github.com/vercel/next.js/security/advisories/GHSA-vcvr-r3jv-pc5j)
+en Next.js 16.3.5. El candidato Beta 3 se actualizó a Next.js 16.3.8 y alineó
+sus paquetes de lint y SWC; `npm audit --omit=dev --audit-level=low` volvió a
+dar cero vulnerabilidades y `verify:mvp` pasó 13/13 sobre esa versión. Este
+resultado actualiza las matrices fechadas anteriores que registran otros
+conteos; los detalles y límites están en la evidencia Beta 3.
+
 Los resultados actuales y límites están en `docs/BETA3_RELEASE_EVIDENCE.md`.
 La aceptación instalada se registra con el recorrido de `docs/BETA3_ACCEPTANCE.md`.
 Por delegación del usuario se eligió para la presentación pública “Daniel

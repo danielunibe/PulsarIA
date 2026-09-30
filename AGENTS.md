@@ -22,7 +22,7 @@ Pulsaria/
 │   │   ├── api/         ← REST API gateway
 │   │   └── ...
 │   └── Cargo.toml
-├── app/                 ← Next.js 16.3.5 frontend
+├── app/                 ← Next.js 16.3.8 frontend
 │   ├── page.tsx         ← Main dashboard
 │   ├── components/      ← React components
 │   ├── hooks/           ← Custom hooks

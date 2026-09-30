@@ -147,8 +147,8 @@ foreach ($table in @('collection_sources', 'collection_source_items', 'collectio
     }
 }
 $packageJson = Get-Content -LiteralPath (Join-Path $ProjectRoot 'package.json') -Raw | ConvertFrom-Json
-if ($packageJson.dependencies.next -ne '16.3.5') {
-    Add-Blocker "Canonical frontend must use Next 16.3.5; found $($packageJson.dependencies.next)"
+if ($packageJson.dependencies.next -ne '16.3.8') {
+    Add-Blocker "Canonical frontend must use Next 16.3.8; found $($packageJson.dependencies.next)"
 }
 $versionContract = Join-Path $ProjectRoot 'scripts/verify-version-contract.ps1'
 if (Test-Path -LiteralPath $versionContract -PathType Leaf) {

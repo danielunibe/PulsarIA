@@ -6,7 +6,7 @@
   "language": "Rust + TypeScript",
   "framework": {
     "backend": "Tauri 2",
-    "frontend": "Next.js 16.3.5 / React 19",
+    "frontend": "Next.js 16.3.8 / React 19",
     "workers": "Python (faster-whisper, yt-dlp, ffmpeg)"
   },
   "domains": [
