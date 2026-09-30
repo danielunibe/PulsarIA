@@ -29,6 +29,12 @@ y receta exactas del build Gyan/FFmpeg y la aprobación legal humana. El snapsho
 `media-autobuild_suite` `patch-7` se investigó por hash, pero no está vinculado
 al paquete 8.1.2 y no resuelve ese requisito.
 
+El 2026-09-30 se envió desde el contacto público de Pulsaria una solicitud a
+`builds@gyan.dev` para obtener los materiales fuente/build exactos del paquete
+Gyan 8.1.2; el correo está confirmado en Enviados y aún no aparece respuesta.
+`legal/third-party-materials.json` continúa en `pending`: el contacto enviado
+no equivale a la entrega ni a la revisión de materiales.
+
 La prueba live de TikTok y la aceptación visual/funcional de la app instalada
 siguen pendientes. El directorio de datos predeterminado de Pulsaria ya existe;
 no se inspeccionó su contenido y no se inició la app con ese perfil. Completar

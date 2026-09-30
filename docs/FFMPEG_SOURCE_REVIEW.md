@@ -55,8 +55,8 @@ Conclusión de procedencia: se acredita la fuente del núcleo FFmpeg y se identi
 - Materiales con URLs y SHA-256 que permitan conservar y distribuir lo revisado junto al paquete.
 - Revisión del titular sobre los documentos y la suficiencia de esos materiales, registrada explícitamente antes de cambiar `review_status`.
 
-## Solicitud preparada al proveedor — no enviada
+## Solicitud enviada al proveedor — respuesta pendiente
 
-> We are preparing to redistribute ffmpeg.exe and ffprobe.exe from your exact ffmpeg-8.1.2-full_build.zip package as separate command-line programs in a Windows application. We have the package README, embedded build configuration and FFmpeg core commit 38b88335f99e76ed89ff3c93f877fdefce736c13. Could you provide or identify the corresponding sources for the external libraries, exact revisions, applied patches, build scripts/configuration and toolchain inputs for this package, including the component listed as openal-soft “latest”? We need to retain the exact materials and applicable license notices with our distribution.
+El 2026-09-30 se envió desde el contacto público de Pulsaria a `builds@gyan.dev` el asunto “Source and build materials for Gyan FFmpeg 8.1.2 full build”. Se pidió la fuente, revisiones, parches, scripts/configuración y versión del toolchain correspondientes al paquete exacto, con foco en OpenAL Soft 1.25.2. El destinatario sigue el canal oficial que publica Gyan para consultas sobre builds: correo a “builds” en el dominio `gyan.dev` ([página de builds](https://www.gyan.dev/ffmpeg/builds/)).
 
-El proveedor indica canales de consulta en su página. Este texto queda preparado para revisión; no se envió un correo ni se abrió un Issue externo en nombre del usuario.
+Gmail confirma el mensaje en Enviados; en la conversación revisada no había respuesta. No se adjuntó la reconstrucción candidata ni se compartió el domicilio de notificación. Hasta recibir materiales que puedan vincularse al binario y revisarlos, `legal/third-party-materials.json` permanece `pending` y el gate de redistribución bloqueado.
