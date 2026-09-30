@@ -6,7 +6,9 @@ Versión: 1.0 · 12 de septiembre de 2026
 
 Responsable: el titular identificado en el release correspondiente.
 
-Domicilio y contacto para privacidad: COMPLETAR ANTES DEL RELEASE.
+Domicilio físico para privacidad y notificaciones: pendiente de confirmar y
+revisar antes del primer release.
+Contacto público y solicitudes de privacidad/ARCO: danielunibe10@gmail.com.
 
 Este aviso está preparado para un beta de escritorio distribuido desde
 GitHub. Debe revisarse y completarse con los datos reales del responsable

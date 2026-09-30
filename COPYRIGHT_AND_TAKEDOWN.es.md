@@ -34,6 +34,9 @@ podrán ser rechazadas o remitidas al servicio correspondiente.
 
 ## Contacto
 
-Contacto legal: COMPLETAR ANTES DEL RELEASE.
+Contacto legal: danielunibe10@gmail.com.
+
+Domicilio físico para notificaciones: pendiente de confirmación y revisión
+antes del primer release.
 
 Repositorio oficial: https://github.com/danielunibe/PulsarIA

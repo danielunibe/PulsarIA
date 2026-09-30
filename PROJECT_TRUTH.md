@@ -6,7 +6,7 @@ actual, las pruebas reproducidas y esta definición de verdad.
 
 ## Objetivo y alcance
 
-### Estado activo de lanzamiento — 2026-09-29
+### Estado activo de lanzamiento — 2026-09-30
 
 El candidato activo del PR #2 es **Beta 3, `0.1.0-beta.3`**. `main` sigue
 siendo canónico y la rama temporal conserva el nombre `beta2-hardening`.
@@ -21,8 +21,11 @@ protección para resolver un gate pendiente.
 
 Los resultados actuales y límites están en `docs/BETA3_RELEASE_EVIDENCE.md`.
 La aceptación instalada se registra con el recorrido de `docs/BETA3_ACCEPTANCE.md`.
-Titular, contacto/domicilio, revisión de documentos, materiales fuente de
-terceros y prueba live autorizada continúan pendientes hasta su evidencia.
+Por delegación del usuario se eligieron para la presentación pública “Daniel
+Unibe” y el correo visible en su perfil de GitHub; estos datos no acreditan
+identidad legal, control del buzón ni titularidad. Domicilio de notificación,
+revisión legal y de materiales de terceros, y aceptación funcional/live siguen
+pendientes hasta tener evidencia.
 
 Pulsaria es un MVP local-first para Windows que importa contenido de TikTok que
 el usuario está autorizado a procesar, genera video/audio/transcripción/análisis
@@ -192,7 +195,7 @@ en español, OCR, chat RAG, playlists inteligentes, expansión multiplataforma y
 release pública firmada. Gemini permanece disponible únicamente como síntesis
 manual opcional y no es un requisito del procesamiento local.
 
-## Beta 2 — integración canónica activa
+## Beta 2 — contexto histórico de integración
 
 La propuesta de integración Beta 2 está en la rama temporal `beta2-hardening`,
 base del PR #2 contra la punta `0b5d02ce` de `origin/main`. `main` conserva la

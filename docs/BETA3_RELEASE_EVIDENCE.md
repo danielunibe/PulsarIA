@@ -1,6 +1,6 @@
 # Pulsaria Beta 3 — evidencia y pendientes de cierre
 
-Fecha: 2026-09-29. Versión del candidato: **0.1.0-beta.3**.
+Actualizado: 2026-09-30. Versión del candidato: **0.1.0-beta.3**.
 
 **Estado: preparación técnica; publicación bloqueada por entradas y aceptación pendientes.** La última descarga pública sigue siendo `v0.1.0-eval.3`. No existe una release pública Beta 3 ni se ha creado su tag.
 
@@ -11,7 +11,7 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 - Versionado Beta 3 sincronizado en npm, Cargo, Tauri y manifiestos. El versionador tolera BOM, valida todas sus entradas antes de escribir, preserva formato y admite ejecuciones repetidas. El contrato incluye ahora el manifiesto legal.
 - Marcador activo `beta3-canonical` en frontend y launcher; referencias Beta 2 históricas conservadas.
 - Workflow directo dividido en `build` y `publish`. El build conserva un artifact identificado por ID; publicación descarga ese ID, valida procedencia/hashes y no reconstruye el instalador. La aprobación del Environment permanece activa.
-- Paquete con SPDX final, notices, licencia, materiales de terceros revisados, procedencia y hashes de todos los assets. El SPDX se regenera tras construir para reflejar el manifiesto runtime final.
+- Workflow preparado para empaquetar SPDX, notices, licencia, materiales de terceros aprobados, procedencia y hashes de todos los assets. La revisión de materiales todavía no pasó, por lo que no se ha generado un artifact aceptable para publicar.
 - El SPDX identifica la licencia propia con `LicenseRef-Pulsaria-Source-Visible-Beta` y el texto exacto de `LICENSE`; esto no marca revisados ni compatibles los componentes.
 - Verificador con rechazo de hash alterado, commit/run distinto, archivos inesperados, enlaces/directorios y nombres con rutas. El modo `AssetsOnly` permite comprobar el paquete transferido sin fabricar un runtime en el runner de publicación.
 - Plantillas de Issues, notas de release y recorrido de aceptación añadidos. El README y el sitio mantienen la descarga pública existente hasta verificar Beta 3.
@@ -36,10 +36,10 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 | Sitio y estructura canónica | PASS | `verify:website`, `verify:canonical` |
 | SPDX agregado | PASS inventario | 34 npm, 695 Cargo, 33 Python, 54 runtime, 13 documentos legales y 1 licencia de tercero; no equivale a revisión de todas las licencias |
 | Instalador Beta 3 | PASS build local | `npm run tauri build -- --bundles nsis`, exit 0; candidato descrito abajo |
-| Smoke instalado Beta 3 | PASS offline local | Instalación/desinstalación exit 0, health inicial y tras reinicio `ok` / `0.1.0-beta.3`, recursos y documentos verificados, marker preservado y cleanup PASS; no incluye live, upgrade ni inspección visual |
-| Actualización desde eval.3 | Pendiente humano | Ejecutar en copia de biblioteca de prueba; el marker de desinstalación no certifica una actualización completa |
-| Aceptación nativa y TikTok live | BLOCKED por candidato anterior | El 2026-09-30 se obtuvo acceso a inspección nativa y URL autorizada; se detectó falta de hidratación. Repetir con instalador corregido, según el hallazgo posterior |
-| Gate legal con SPDX | BLOCKED | Ver `target-tauri/beta3-legal-spdx.log` y pendientes debajo |
+| Smoke offline del primer candidato | PASS histórico, hash rechazado | El health check pasó con F151…, pero la inspección de la ventana detectó que React no hidrataba; no certifica el candidato activo |
+| Actualización desde eval.3 | PARCIAL en fixture | NSIS preservó SQLite, ajustes y archivos sintéticos. No se inició la app tras actualizar; no certifica migración ni biblioteca personal |
+| Aceptación nativa y TikTok live | Pendiente | La corrección de hidratación se verificó en navegador, no en la app instalada. El lanzamiento de la build instalada quedó rechazado por revisión automática de herramientas; TikTok, idiomas, Cinema y Ajustes no están aceptados |
+| Gate legal con SPDX | BLOCKED por cuatro asuntos | SBOM agregado actual pasa. Siguen pendientes revisión de notices, materiales FFmpeg, domicilio y aprobación legal |
 | Integración, tag y descarga pública | Pendiente | No se publican antes de revisar el candidato |
 
 ## Materiales FFmpeg reunidos
@@ -58,11 +58,12 @@ Se consultó nuevamente la [release Gyan 8.1.2](https://github.com/GyanD/codexff
 
 ## Pendientes que impiden declarar el lanzamiento cerrado
 
-1. `public_owner`, `legal_contact_email`, `notice_address` y `legal_approval` siguen pendientes. La delegación de presentación profesional no acredita identidad/titularidad, disponibilidad de un buzón o autorización de domicilio.
-2. Resolver `COMPONENT_LICENSE_REVIEW_PENDING` y registrar los materiales exactos aprobados de terceros con URL/hash. El gate legal detecta seis bloqueos, incluidos materiales y los cuatro campos.
-3. Completar [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) con el candidato definitivo descargado de Actions, Windows sin herramientas de desarrollo, WebView2, actualización, ventana nativa y URL TikTok autorizada con voz.
-4. Integrar el PR revisado en `main`, crear el tag nuevo y ejecutar el workflow. Los checks del código preparado ya pasaron, según el registro debajo. Mantener `DIRECT_DOWNLOAD_RELEASE_READY=false` hasta aceptación y revisión; no desactivar el Environment.
-5. Comprobar los assets públicos y sus hashes; después actualizar las descargas a Beta 3.
+1. `public_owner` se presenta como “Daniel Unibe” y el correo como `danielunibe10@gmail.com`, elegidos desde el perfil público de GitHub por delegación del usuario. No acreditan identidad legal ni control del buzón. Siguen pendientes el domicilio autorizado y la aprobación legal humana.
+2. Resolver `COMPONENT_LICENSE_REVIEW_PENDING` y registrar los materiales exactos aprobados de terceros con URL/hash. El gate legal actual informa cuatro bloqueos: estos dos asuntos de terceros, domicilio y aprobación legal.
+3. Completar [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) con el artifact definitivo de Actions, Windows sin herramientas de desarrollo, WebView2, actualización, ventana nativa y prueba live de la URL autorizada.
+4. Los documentos públicos de contacto cambiaron después de construir `AB13…`; ese instalador ya no representa el árbol fuente actual y no puede aprobarse. Tras cerrar los asuntos legales, construir y aceptar un candidato nuevo.
+5. Integrar el PR revisado en `main`, crear el tag nuevo y ejecutar el workflow. Mantener `DIRECT_DOWNLOAD_RELEASE_READY=false` hasta aceptación y revisión; no desactivar el Environment.
+6. Comprobar los assets públicos y sus hashes; después actualizar las descargas a Beta 3.
 
 La ejecución completa del workflow directo permanece sin verificar hasta resolver esos requisitos. Build local, tests, fixtures y preview web no certifican aceptación humana ni publicación.
 
@@ -75,7 +76,7 @@ El commit `501bbb29d8337e070109d58a3525bfb1f7f04360` contiene la preparación t�
 
 Estos resultados corresponden al código del candidato y no a la publicación directa ni a una aceptación humana. El PR #2 continúa en borrador mientras se resuelven los pendientes descritos arriba.
 
-## Candidato NSIS local construido
+## Primer candidato NSIS local — rechazado por hidratación
 
 - Archivo: `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.3_x64-setup.exe`.
 - Tamaño: **688,046,880 bytes**.
@@ -96,7 +97,7 @@ El export servido para diagnóstico reprodujo el error de Next: `Expected docume
 
 Se añadió una regresión que preserva la comprobación `currentScript`, JavaScript y payloads RSC, comprueba URLs HTML/CSS e idempotencia. Debe construirse un candidato nuevo, registrar su hash y repetir pruebas instaladas.
 
-El usuario proporcionó y autorizó para la prueba la URL `https://www.tiktok.com/@liminalhabitats/video/7683192090443992353`. El requisito de recibir una URL está resuelto; descarga, contenido hablado, transcripción, búsqueda y exportación aún requieren ejecución y evidencia.
+El usuario proporcionó y autorizó una URL TikTok para la prueba. Para proteger la privacidad, el enlace concreto no se reproduce en este documento público. Descarga, contenido hablado, transcripción, búsqueda y exportación aún requieren ejecución y evidencia.
 
 ### Rebuild Beta 3 tras la corrección de hidratación
 
@@ -105,6 +106,14 @@ El usuario proporcionó y autorizó para la prueba la URL `https://www.tiktok.co
 - Se actualizó el perfil temporal instalado desde eval.3 con este instalador; NSIS terminó con código 0. La verificación posterior confirma `PRAGMA integrity_check=ok`, relaciones SQLite válidas y sin cambios en los registros sintéticos de jobs, media, playlists y playlist_items, los ajustes `en-US`/`carbon` y dos archivos de fixture cuyos hashes coinciden.
 - **Alcance limitado:** los registros pertenecen a una biblioteca sintética marcada como fixture. Esta verificación confirma que el instalador reemplaza los binarios sin borrar esa biblioteca ni sus medios. No confirma todavía la migración de schema al primer arranque de Beta 3, el comportamiento de Ajustes en la ventana instalada ni la preservación de una biblioteca personal real. El lanzamiento de la app instalada para verificar esos puntos no se completó.
 - El verificador de manifiesto contra el directorio instalado pasó: 54 de 54 archivos críticos presentes y con hashes correctos, incluido FFmpeg/FFprobe/licencia.
-- El gate legal volvió a ejecutarse con el SPDX agregado recién generado y registrado en `target-tauri/beta3-hydration-legal-gate.log`. Continúa bloqueado por seis pendientes: revisión de `THIRD_PARTY_NOTICES.md`, materiales fuente/build FFmpeg aún no revisados y los campos `public_owner`, `legal_contact_email`, `notice_address` y `legal_approval`.
+- El gate legal volvió a ejecutarse con el SPDX agregado recién generado y registrado en `target-tauri/beta3-hydration-legal-gate.log`. En ese momento, antes de elegir el contacto público, reportó seis pendientes: revisión de `THIRD_PARTY_NOTICES.md`, materiales fuente/build FFmpeg aún no revisados y los cuatro campos del manifiesto.
 - CI del commit `57af9e3e40610bffc5d387d2dc9740d22f6b0ff4`: [canonical CI](https://github.com/danielunibe/PulsarIA/actions/runs/36745995628) y [runtime preflight](https://github.com/danielunibe/PulsarIA/actions/runs/36745995714), ambos `success`. El commit también pasó `verify:mvp` 13/13, las tres pruebas Node de regresión y el typecheck local.
 - La aceptación nativa del nuevo hash, TikTok live, máquina sin herramientas de desarrollo y WebView2 continúan pendientes. Este instalador local no es aún el artefacto de Actions aprobado ni una descarga pública.
+
+### Estado posterior al cambio de contacto — 2026-09-30
+
+- Por delegación expresa del usuario se usaron el nombre público “Daniel Unibe” y el correo que figura públicamente en su perfil de GitHub. No se expuso un domicilio residencial ni se infirió una entidad jurídica.
+- `legal/release-manifest.json` contiene esos valores de presentación/contacto. El domicilio y la aprobación legal continúan como placeholders; el gate correctamente informa cuatro bloqueos en total, incluidos la revisión de FFmpeg/notices y los materiales fuente/build.
+- El SPDX agregado actual se regeneró desde los documentos cambiados y pasó su gate estructural. El bloqueo legal no se eliminó. `AB13B5F654EE02B0FD4D960BD517BA6CCE26BA5B4FA66035736C883A230F69A8` fue construido antes de estas modificaciones de documentos y queda como evidencia de un candidato anterior, no el instalador actual.
+- El PR #2 permanece en borrador. En el head `b2e6ed236c9754d9629c578209000a9dec1ac204`, canonical CI `36749881432` y runtime preflight `36749881371` terminaron en success. Los cambios documentales de este update requieren un nuevo ciclo de CI.
+- No existe tag ni release Beta 3. El perfil temporal contiene solamente datos sintéticos. La aceptación nativa de la build posterior a la corrección y el TikTok autorizado siguen sin evidencia.

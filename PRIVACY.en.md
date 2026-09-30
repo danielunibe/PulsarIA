@@ -6,7 +6,9 @@ Version: 1.0 · September 12, 2026
 
 Controller: the rights holder identified in the applicable release.
 
-Privacy address and contact: TO BE COMPLETED BEFORE RELEASE.
+Physical privacy and notice address: pending confirmation and review before
+the first release.
+Public contact and privacy requests: danielunibe10@gmail.com.
 
 This notice is prepared for a desktop beta distributed through GitHub. It
 must be reviewed and completed with the controller's real details before
@@ -100,7 +102,7 @@ If Pulsaria later receives personal data directly through a support channel,
 it will handle access, rectification, cancellation, and objection requests in
 accordance with applicable law.
 
-Privacy and ARCO requests: TO BE COMPLETED BEFORE RELEASE.
+Privacy and ARCO requests: danielunibe10@gmail.com.
 
 Do not send videos, transcripts, cookies, or confidential information through
 public GitHub issues.

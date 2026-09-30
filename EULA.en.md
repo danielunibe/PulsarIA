@@ -103,7 +103,10 @@ applicable.
 The Spanish version controls for users in Mexico. This EULA is interpreted
 under applicable law without limiting non-waivable consumer or privacy rights.
 
-Legal contact: TO BE COMPLETED BEFORE RELEASE.
+Public product contact: Daniel Unibe (GitHub account: danielunibe).
+Legal contact and notice email: danielunibe10@gmail.com.
+The legal identity and physical notice address still require confirmation and
+review before the first release.
 
 The source license is in LICENSE. Content, privacy, copyright, and security
 policies are in the corresponding documents in the official repository.
