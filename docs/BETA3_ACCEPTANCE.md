@@ -12,6 +12,31 @@ Registrar nombre del EXE, tamaño, SHA-256, tag `v0.1.0-beta.3`, commit, run ID 
 - Usar una VM, Windows Sandbox o perfil de prueba. Para actualización, instalar primero `v0.1.0-eval.3`, crear una biblioteca de prueba y documentar el backup; nunca experimentar sobre la biblioteca personal.
 - Cerrar las ventanas de prueba y comprobar que 8080/9001 estén libres antes del smoke aislado. No detener procesos ajenos automáticamente.
 
+La aplicación admite `PULSAR_DATA_DIR` como override del directorio de datos. En un perfil de Windows dedicado, el siguiente patrón de PowerShell asigna el override solo al proceso de prueba; conserva su carpeta para revisar SQLite y los archivos creados. Usarlo con la ruta del EXE instalado desde el artifact que se está aceptando, después de comprobar que los puertos indicados están libres:
+
+```powershell
+$installerExe = 'C:\ruta\verificada\Pulsaria.exe'
+$testData = Join-Path $env:TEMP ("Pulsaria-Beta3-" + [guid]::NewGuid().ToString('N'))
+if (-not (Test-Path -LiteralPath $installerExe -PathType Leaf)) { throw 'No se encuentra el EXE instalado.' }
+New-Item -ItemType Directory -Path $testData | Out-Null
+$hadOverride = Test-Path Env:\PULSAR_DATA_DIR
+$previousOverride = $env:PULSAR_DATA_DIR
+try {
+    $env:PULSAR_DATA_DIR = $testData
+    $appProcess = Start-Process -FilePath $installerExe -PassThru
+    $appProcess.WaitForExit()
+} finally {
+    if ($hadOverride) {
+        $env:PULSAR_DATA_DIR = $previousOverride
+    } else {
+        Remove-Item Env:\PULSAR_DATA_DIR -ErrorAction SilentlyContinue
+    }
+}
+Write-Host "Perfil de aceptación conservado en: $testData"
+```
+
+No ejecutar el patrón si la ruta de datos, EXE o puertos no coinciden con la sesión aislada prevista. El override no sustituye una VM para verificar WebView2 o instalación limpia.
+
 ## Recorrido con resultados esperados
 
 | Prueba | Resultado requerido | Estado inicial |

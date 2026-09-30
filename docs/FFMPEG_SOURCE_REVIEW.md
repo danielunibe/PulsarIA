@@ -25,7 +25,9 @@ Estos scripts **no** acreditan la receta efectiva del binario, la configuración
 
 ### Comprobación de procedencia pública — 2026-09-30
 
-La [release oficial 8.1.2](https://github.com/GyanD/codexffmpeg/releases/tag/8.1.2), publicada el 2026-06-27, identifica el commit de FFmpeg `38b88335f9`. Sus seis assets de release publicados son variantes `.7z`/`.zip` de los bundles essentials/full; no son paquetes de fuentes. GitHub genera además snapshots del repositorio `codexffmpeg`, pero ese repositorio de empaquetado no equivale a las fuentes del núcleo FFmpeg ni a las dependencias enlazadas.
+La [release oficial 8.1.2](https://github.com/GyanD/codexffmpeg/releases/tag/8.1.2), publicada el 2026-06-27, identifica el commit de FFmpeg `38b88335f9`. El tag `8.1.2` del repositorio de distribución resuelve al commit [`46465995c991fe65c5de853fa79bddec09cd6c37`](https://github.com/GyanD/codexffmpeg/tree/46465995c991fe65c5de853fa79bddec09cd6c37), fechado 2026-05-04; el árbol contiene solamente `README.md` y `.github/FUNDING.yml`. No contiene una receta/workflow de compilación. La consulta de GitHub Actions por ese `head_sha` no devolvió ejecuciones asociadas.
+
+La API de esa release enumera seis assets, todos paquetes binarios essentials/full en `.7z` o `.zip`; no incluye árboles de fuentes de FFmpeg ni de bibliotecas externas. Los snapshots de código que GitHub genera automáticamente para el tag son del repositorio de distribución `codexffmpeg`, no el código fuente del núcleo ni el conjunto de dependencias enlazadas.
 
 La [página actual de builds](https://www.gyan.dev/ffmpeg/builds/) mantiene 8.1.2 como release anterior y describe estas builds como estáticas y GPLv3. Esa página aporta clasificación y listado de funciones, pero no entrega las fuentes exactas, parches ni receta reproducible de sus bibliotecas externas para este binario. Además del `master` antiguo, el snapshot `patch-7` cercano en fecha tiene dependencias móviles y tampoco está vinculado al artefacto. No existe en la evidencia reunida una receta verificable que corresponda a la release de 2026.
 
