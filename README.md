@@ -135,10 +135,11 @@ la aceptación del instalador definitivo ni la prueba TikTok autorizada.
 El flujo directo separa `build` y `publish`: conserva EXE, SPDX, notices,
 licencia, materiales de terceros, procedencia y hashes como artifact de Actions.
 El Environment `direct-download` aprueba ese mismo artifact antes de publicarlo;
-no se recompila después de aceptar. La presentación pública y el correo de
-contacto se eligieron desde el perfil público de GitHub por delegación del
-usuario; no acreditan identidad legal, control del buzón ni domicilio de
-notificación. La revisión legal y la aceptación siguen pendientes, y
+no se recompila después de aceptar. Por delegación del usuario, se eligió la
+presentación “Daniel Unibe”, ya usada en el PR #2, y como contacto el correo
+visible en su perfil público de GitHub; no acreditan identidad legal, control
+del buzón ni domicilio de notificación. La revisión legal y la aceptación
+siguen pendientes, y
 `DIRECT_DOWNLOAD_RELEASE_READY` permanece en `false`.
 
 Consulta el [informe Beta 3](docs/BETA3_RELEASE_EVIDENCE.md), la

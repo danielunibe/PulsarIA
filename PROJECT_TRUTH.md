@@ -21,11 +21,12 @@ protección para resolver un gate pendiente.
 
 Los resultados actuales y límites están en `docs/BETA3_RELEASE_EVIDENCE.md`.
 La aceptación instalada se registra con el recorrido de `docs/BETA3_ACCEPTANCE.md`.
-Por delegación del usuario se eligieron para la presentación pública “Daniel
-Unibe” y el correo visible en su perfil de GitHub; estos datos no acreditan
-identidad legal, control del buzón ni titularidad. Domicilio de notificación,
-revisión legal y de materiales de terceros, y aceptación funcional/live siguen
-pendientes hasta tener evidencia.
+Por delegación del usuario se eligió para la presentación pública “Daniel
+Unibe”, denominación ya usada en el PR #2, y como correo el que aparece en su
+perfil público de GitHub. Estos datos no acreditan identidad legal, control del
+buzón ni titularidad. Domicilio de notificación, revisión legal y de materiales
+de terceros, y aceptación funcional/live siguen pendientes hasta tener
+evidencia.
 
 Pulsaria es un MVP local-first para Windows que importa contenido de TikTok que
 el usuario está autorizado a procesar, genera video/audio/transcripción/análisis

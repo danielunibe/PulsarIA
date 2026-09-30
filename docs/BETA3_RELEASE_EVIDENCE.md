@@ -58,7 +58,7 @@ Se consultó nuevamente la [release Gyan 8.1.2](https://github.com/GyanD/codexff
 
 ## Pendientes que impiden declarar el lanzamiento cerrado
 
-1. `public_owner` se presenta como “Daniel Unibe” y el correo como `danielunibe10@gmail.com`, elegidos desde el perfil público de GitHub por delegación del usuario. No acreditan identidad legal ni control del buzón. Siguen pendientes el domicilio autorizado y la aprobación legal humana.
+1. `public_owner` se presenta como “Daniel Unibe”, denominación ya usada en el PR #2; por delegación del usuario, se eligió como contacto `danielunibe10@gmail.com`, correo que aparece en el perfil público de GitHub. No acreditan identidad legal ni control del buzón. Siguen pendientes el domicilio autorizado y la aprobación legal humana.
 2. Resolver `COMPONENT_LICENSE_REVIEW_PENDING` y registrar los materiales exactos aprobados de terceros con URL/hash. El gate legal actual informa cuatro bloqueos: estos dos asuntos de terceros, domicilio y aprobación legal.
 3. Completar [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) con el artifact definitivo de Actions, Windows sin herramientas de desarrollo, WebView2, actualización, ventana nativa y prueba live de la URL autorizada.
 4. Los documentos públicos de contacto cambiaron después de construir `AB13…`; ese instalador ya no representa el árbol fuente actual y no puede aprobarse. Tras cerrar los asuntos legales, construir y aceptar un candidato nuevo.
@@ -112,7 +112,7 @@ El usuario proporcionó y autorizó una URL TikTok para la prueba. Para proteger
 
 ### Estado posterior al cambio de contacto — 2026-09-30
 
-- Por delegación expresa del usuario se usaron el nombre público “Daniel Unibe” y el correo que figura públicamente en su perfil de GitHub. No se expuso un domicilio residencial ni se infirió una entidad jurídica.
+- Por delegación expresa del usuario se usó como nombre público “Daniel Unibe”, denominación ya presente en el PR #2, y como correo el que figura públicamente en su perfil de GitHub. No se expuso un domicilio residencial ni se infirió una entidad jurídica.
 - `legal/release-manifest.json` contiene esos valores de presentación/contacto. El domicilio y la aprobación legal continúan como placeholders; el gate correctamente informa cuatro bloqueos en total, incluidos la revisión de FFmpeg/notices y los materiales fuente/build.
 - El SPDX agregado actual se regeneró desde los documentos cambiados y pasó su gate estructural. El bloqueo legal no se eliminó. `AB13B5F654EE02B0FD4D960BD517BA6CCE26BA5B4FA66035736C883A230F69A8` fue construido antes de estas modificaciones de documentos y queda como evidencia de un candidato anterior, no el instalador actual.
 - El PR #2 permanece en borrador. En el head `b2e6ed236c9754d9629c578209000a9dec1ac204`, canonical CI `36749881432` y runtime preflight `36749881371` terminaron en success. Los cambios documentales de este update requieren un nuevo ciclo de CI.
