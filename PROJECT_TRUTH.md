@@ -21,14 +21,19 @@ protección para resolver un gate pendiente.
 
 El último commit que cambió código de la aplicación es
 `e3b2e1258138715d9fd580c361ee8c82d29fa977` (accesibilidad del diálogo de
-consentimiento). El head documental actual del PR es
+consentimiento). El instalador local documentado abajo se construyó desde
 `f84e9dd02e0d6c7dbadcf7141abcf6af1de64b20`; [Canonical CI, ejecución
 36841291658](https://github.com/danielunibe/PulsarIA/actions/runs/36841291658)
 y [preflight de runtime, ejecución
 36841292133](https://github.com/danielunibe/PulsarIA/actions/runs/36841292133)
-terminaron en success el 2026-10-01. El PR #2 sigue abierto, en borrador y
-mergeable. Todavía no existe tag ni release `v0.1.0-beta.3`; la release pública
-más reciente continúa en `v0.1.0-eval.3`. Esos checks no son aceptación legal,
+terminaron en success el 2026-10-01. La actualización documental que registró
+el hash del candidato quedó en `9bcd370f7586b48c53cf6fb275900e4937970822`;
+[Canonical CI, ejecución 36847657199](https://github.com/danielunibe/PulsarIA/actions/runs/36847657199)
+y [preflight de runtime, ejecución
+36847657071](https://github.com/danielunibe/PulsarIA/actions/runs/36847657071)
+también terminaron en success. El PR #2 sigue abierto, en borrador y mergeable.
+Todavía no existe tag ni release `v0.1.0-beta.3`; la release pública más
+reciente continúa en `v0.1.0-eval.3`. Esos checks no son aceptación legal,
 visual nativa, live desde IPC ni aprobación del instalador.
 
 Desde ese head se reconstruyó un instalador NSIS local de `0.1.0-beta.3`:
