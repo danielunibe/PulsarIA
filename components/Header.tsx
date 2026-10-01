@@ -149,6 +149,7 @@ export function useWindowControls(onClose?: () => Promise<void> | void): WindowC
 
 export function WindowControls({ controls }: { controls: WindowControlsApi }) {
     const { isMaximized, minimize, maximize, close, windowAction } = controls;
+    const { t } = useI18n();
 
     return (
         <div className="pulsaria-window-header__window-controls flex shrink-0 items-center gap-1 pointer-events-auto app-no-drag">
@@ -156,8 +157,8 @@ export function WindowControls({ controls }: { controls: WindowControlsApi }) {
                 type="button"
                 onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
                 onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void minimize(); }}
-                title="Minimizar"
-                aria-label="Minimizar"
+                title={t('windowMinimize')}
+                aria-label={t('windowMinimize')}
                 style={{ width: '36px', height: '36px', borderRadius: 0, border: 0, background: 'transparent', boxShadow: 'none', padding: 0 }}
                 animate={windowAction === 'minimize' ? { scale: [1, 0.82, 1] } : { scale: 1 }}
                 transition={{ duration: 0.28 }}
@@ -171,8 +172,8 @@ export function WindowControls({ controls }: { controls: WindowControlsApi }) {
                 type="button"
                 onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
                 onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void maximize(); }}
-                title={isMaximized ? 'Restaurar' : 'Maximizar'}
-                aria-label={isMaximized ? 'Restaurar ventana' : 'Maximizar ventana'}
+                title={isMaximized ? t('windowRestore') : t('windowMaximize')}
+                aria-label={isMaximized ? t('windowRestore') : t('windowMaximize')}
                 style={{ width: '36px', height: '36px', borderRadius: 0, border: 0, background: 'transparent', boxShadow: 'none', padding: 0 }}
                 animate={windowAction === 'maximize' ? { scale: [1, 1.16, 1] } : { scale: 1 }}
                 transition={{ duration: 0.28 }}
@@ -186,8 +187,8 @@ export function WindowControls({ controls }: { controls: WindowControlsApi }) {
                 type="button"
                 onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
                 onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void close(); }}
-                title="Cerrar"
-                aria-label="Cerrar"
+                title={t('windowClose')}
+                aria-label={t('windowClose')}
                 style={{ width: '36px', height: '36px', borderRadius: 0, border: 0, background: 'transparent', boxShadow: 'none', padding: 0 }}
                 animate={windowAction === 'close' ? { scale: [1, 0.82, 1] } : { scale: 1 }}
                 transition={{ duration: 0.28 }}

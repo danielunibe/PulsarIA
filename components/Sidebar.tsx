@@ -3,6 +3,7 @@
 import type { ComponentType } from 'react';
 import Image from 'next/image';
 import { FaMagnifyingGlass } from '@/components/icon-library';
+import { useI18n } from '@/lib/i18n';
 
 export type GlobalSection = 'home' | 'profiles' | 'activity' | 'library' | 'settings';
 
@@ -34,6 +35,7 @@ function RailButton({
     artwork,
     activityCount = 0,
 }: RailButtonProps) {
+    const { t } = useI18n();
     const isActive = activeSection === section;
 
     return (
@@ -50,7 +52,7 @@ function RailButton({
                 <Icon size={16} className="pulsaria-nav-item__icon" />
             ) : null}
             {section === 'activity' && activityCount > 0 && (
-                <span className="pulsaria-nav-item__badge" aria-label={`${activityCount} actividades pendientes`}>
+                <span className="pulsaria-nav-item__badge" aria-label={t('navPendingActivityCount', { count: activityCount })}>
                     {activityCount > 99 ? '99+' : activityCount}
                 </span>
             )}
@@ -119,8 +121,10 @@ export function Sidebar({
     onOpenCinema,
     canOpenCinema,
 }: SidebarProps) {
+    const { t } = useI18n();
+
     return (
-        <aside className="cinema-shell-panel pulsaria-nav-rail" aria-label="Navegación principal">
+        <aside className="cinema-shell-panel pulsaria-nav-rail" aria-label={t('navPrimary')}>
             <div className="pulsaria-nav-rail__brand" aria-label="Pulsaria">
                 <Image
                     src="/pulsaria-icon.png"
@@ -133,19 +137,19 @@ export function Sidebar({
                     className="pulsaria-nav-rail__mark"
                 />
             </div>
-            <nav className="pulsaria-nav-rail__nav" aria-label="Secciones globales">
-                <RailAction label="Buscar en la biblioteca" onClick={onOpenSearch} Icon={FaMagnifyingGlass} />
-                <HomeRailButton label="Inicio · Kiosco" activeSection={activeSection} onNavigate={onNavigate} />
+            <nav className="pulsaria-nav-rail__nav" aria-label={t('navSections')}>
+                <RailAction label={t('navSearch')} onClick={onOpenSearch} Icon={FaMagnifyingGlass} />
+                <HomeRailButton label={t('navHome')} activeSection={activeSection} onNavigate={onNavigate} />
                 <RailButton
                     section="profiles"
-                    label="Perfiles TikTok"
+                    label={t('navProfiles')}
                     activeSection={activeSection}
                     onNavigate={onNavigate}
                     artwork="/icons/menu/profiles.webp"
                 />
                 <RailButton
                     section="activity"
-                    label="Actividad · Historial"
+                    label={t('navActivity')}
                     activeSection={activeSection}
                     onNavigate={onNavigate}
                     artwork="/icons/menu/activity.webp"
@@ -153,18 +157,18 @@ export function Sidebar({
                 />
                 <RailButton
                     section="library"
-                    label="Playlists"
+                    label={t('navPlaylists')}
                     activeSection={activeSection}
                     onNavigate={onNavigate}
                     artwork="/icons/menu/playlist.webp"
                 />
-                <RailButton section="settings" label="Ajustes" activeSection={activeSection} onNavigate={onNavigate} artwork="/icons/menu/settings.webp" />
+                <RailButton section="settings" label={t('navSettings')} activeSection={activeSection} onNavigate={onNavigate} artwork="/icons/menu/settings.webp" />
             </nav>
             <div className="pulsaria-nav-rail__footer">
                 <button
                     type="button"
                     className="pulsaria-nav-cinema"
-                    aria-label={canOpenCinema ? 'Abrir Cinema a pantalla completa' : 'Cinema no disponible: agrega un video primero'}
+                    aria-label={canOpenCinema ? t('navCinemaOpen') : t('navCinemaUnavailable')}
                     onClick={onOpenCinema}
                     disabled={!canOpenCinema}
                 >
