@@ -66,15 +66,17 @@ un Windows limpio. No se aceptaron acuerdos ni la política de derechos, así
 que no se recorrió la aplicación detrás de esos controles. Esto no es
 aceptación humana ni prueba live.
 
-`npm run verify:mvp` pasó 13/13 en el checkout
-`0e0b3378e428be9941f8fb8dbf3f0a91d302b54a` (105 pruebas Rust y 32 pruebas
-Python; una prueba live se omitió porque esa ejecución no recibió URL). También
-pasaron versionado, SPDX (762 paquetes, 68 archivos, 42 expresiones), estructura
-canónica, accesibilidad, iconos, modelo local, API loopback y
-`npm audit --omit=dev --audit-level=low` (cero vulnerabilidades). El gate legal
-del SPDX regenerado sigue BLOCKED con diez hallazgos: seis textos físicos
-pendientes, revisión de notices/licencias incompleta, materiales fuente/build
-exactos no revisados, `notice_address` y `legal_approval`.
+`npm run verify:mvp` se reejecutó localmente sobre el candidato de código
+`0adcff7e90a0f7c261a2fae1239874f3bd7ebe22` y pasó 13/13: 105 pruebas Rust
+aprobadas y 32 casos Python con una prueba live omitida porque esta ejecución
+no recibió URL. También pasaron contrato de versión `0.1.0-beta.3`, SPDX
+agregado (762 paquetes, 68 archivos, 42 expresiones), estructura canónica,
+accesibilidad, iconos, modelo local, API loopback y
+`npm audit --omit=dev --audit-level=low` (cero vulnerabilidades). El manifiesto
+de runtime verificó 54/54 archivos. El gate legal del mismo SPDX sigue BLOCKED
+con diez hallazgos: seis textos físicos pendientes, revisión de notices/licencias
+incompleta, materiales fuente/build exactos no revisados, `notice_address` y
+`legal_approval`. Esta reejecución no sustituye la aceptación live desde la UI.
 
 El usuario autorizó una URL TikTok para probarla; el enlace no se repite en
 documentación pública. El smoke live del worker llegó a `completed`, pero

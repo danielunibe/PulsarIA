@@ -21,25 +21,25 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 
 | Gate | Resultado | Evidencia y límites |
 | --- | --- | --- |
-| `verify:mvp` | PASS 13/13 | Reejecución en el checkout `0e0b3378e428be9941f8fb8dbf3f0a91d302b54a`; la prueba live se omitió porque no se pasó URL en esa ejecución |
-| Rust | PASS | 105 pruebas; 0 fallos |
-| Python | PASS offline | 31 pruebas aprobadas y 1 prueba live omitida; 32 casos en total |
-| Runtime fuente | PASS | 54 archivos críticos del manifiesto verificados; no son el total de archivos empaquetados ni certifican instalación limpia |
-| Versiones | PASS | Incluye `legal/release-manifest.json` |
-| Accesibilidad e iconos | PASS contratos | No sustituye inspección de foco/contraste ni revisión nativa humana |
-| Modelo local | PASS contrato | Sidecar presente, modelo fijado bajo demanda; no se declara conversación humana validada |
+| `verify:mvp` | PASS 13/13 | Reejecución local sobre el candidato de código `0adcff7e90a0f7c261a2fae1239874f3bd7ebe22`; la prueba live se omitió porque esta ejecución no recibió URL |
+| Rust | PASS | 105 pruebas; 0 fallos en el mismo checkout |
+| Python | PASS offline | 32 casos: 31 aprobados y 1 prueba live omitida porque no se pasó URL |
+| Runtime fuente | PASS | 54 archivos críticos del manifiesto verificados; FFmpeg, FFprobe y su aviso coinciden con los hashes registrados. No son el total de archivos empaquetados ni certifican instalación limpia |
+| Versiones | PASS | `verify:versions` confirmó `0.1.0-beta.3` en los nueve manifiestos y lockfiles requeridos |
+| Accesibilidad e iconos | PASS contratos | `verify:frontend-a11y` y `verify:icons` pasaron; no sustituyen inspección humana de foco/contraste |
+| Modelo local | PASS contrato | `verify:local-llm` confirmó el sidecar fijado; modelo descargable bajo demanda. No se declara conversación humana validada |
 | Dependencias de producción | PASS | `npm audit --omit=dev --audit-level=low`: 0 vulnerabilidades |
 | Herramienta de versionado | PASS | 2 regresiones: BOM/idempotencia y fallo de entrada sin escrituras parciales |
 | Verificador de release | PASS unitario | 6 casos con fixture; no prueba un instalador real |
-| Workflows e Issues | PASS en CI remoto para el código candidato | [Canonical CI](https://github.com/danielunibe/PulsarIA/actions/runs/36878954628) y [runtime preflight](https://github.com/danielunibe/PulsarIA/actions/runs/36878954604) pasaron en el head `cddbb069`. No sustituyen aceptación humana |
+| Workflows e Issues | PASS en CI remoto para el candidato | [Canonical CI](https://github.com/danielunibe/PulsarIA/actions/runs/36908295288) y [runtime preflight](https://github.com/danielunibe/PulsarIA/actions/runs/36908295272) pasaron en el head `0adcff7e`. No sustituyen aceptación humana ni los checks del siguiente commit documental |
 | Sitio y estructura canónica | PASS | `verify:website`, `verify:canonical` |
-| SPDX agregado | PASS inventario y sintaxis | 762 paquetes, 68 archivos, 42 expresiones únicas; 34 npm, 695 Cargo, 33 Python, 54 runtime, 13 documentos legales y 1 licencia de tercero. No equivale a revisión de licencias |
+| SPDX agregado | PASS inventario y sintaxis | Regenerado localmente desde el checkout actual: 762 paquetes, 68 archivos, 42 expresiones únicas; 34 npm, 695 Cargo, 33 Python, 54 runtime, 13 documentos legales y 1 licencia de tercero. No equivale a revisión de licencias |
 | Instalador Beta 3 | PASS build local | `Pulsaria_0.1.0-beta.3_x64-setup.exe`, 687,986,682 bytes, SHA-256 `D0492C87BF868A857FB02E8FB25AF7D12F451EFEA0ABA1176D8423B7A669F989`; ProductVersion/FileVersion `0.1.0-beta.3`, Authenticode `NotSigned`. No es artifact de Actions |
 | Smoke offline del instalador vigente | PASS local | Hash `D0492C87…A669F989`: instalación/desinstalación exit 0, runtime 54/54, 13 documentos legales y modelos presentes, health antes/después de reiniciar el proceso de la aplicación, carpeta de datos WebView2 aislada y marcador sintético conservado. No ejecutó ingestión, transcripción ni búsqueda; ver [BETA3_LOCAL_INSTALL_SMOKE.json](BETA3_LOCAL_INSTALL_SMOKE.json) |
 | Smoke de instalador anterior | Histórico, hash obsoleto | Un smoke inicial reveló que React no hidrataba; candidatos anteriores quedaron reemplazados tras cambios. No certifica el EXE actual |
 | Actualización desde Eval.3 | PASS local en el hash vigente | El hash `D0492C87…A669F989` conservó 1 job y 1 medio sintéticos, ajustes `en-US`/`oled` y SQLite íntegra; la desinstalación preservó la biblioteca. La carpeta WebView2 se aisló. Falta el artifact exacto de Actions en Windows limpio |
 | Aceptación nativa y TikTok live | Parcial local; cierre pendiente | El onboarding del hash local `D0492C87…A669F989` se observó a 1280 × 800 y 860 × 640; el diálogo cupo y Tab mostró foco visible. No se aceptaron acuerdos y no se abrió la app más allá de la pantalla de derechos. Sigue pendiente Windows x64 limpio, WebView2, IPC autenticado, voz española, indexación, búsqueda y reproducción sobre el artifact definitivo. El worker aislado obtuvo audio no silencioso, pero 0 transcripción y no determina si había voz |
-| Gate legal con SPDX | BLOCKED: 10 hallazgos | Seis traducciones con domicilio pendiente, revisión de licencias/notices, fuentes/build exactos de terceros, `notice_address` y `legal_approval` |
+| Gate legal con SPDX | BLOCKED: 10 hallazgos | Reejecutado con el SBOM agregado actual. Seis traducciones con domicilio pendiente, revisión de licencias/notices, fuentes/build exactos de terceros, `notice_address` y `legal_approval` |
 | Integración, tag y descarga pública | Pendiente | PR #2 sigue en borrador mientras falten los gates previos a integrar. Una vez resueltos, el tag en `main` genera el artifact inmutable de Actions; ese hash deberá aceptarse antes de publicar |
 
 ## Materiales FFmpeg reunidos
