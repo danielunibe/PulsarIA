@@ -45,7 +45,7 @@ No ejecutar el patrón si la ruta de datos, EXE o puertos no coinciden con la se
 | Biblioteca vacía / DEMO | Vacío explicado; DEMO opt-in separado de SQLite y búsqueda | Pendiente |
 | 1280 × 800 / 860 × 640 | Cabecera, navegación, Ajustes y acciones visibles sin recortes que impidan uso | Pendiente |
 | Teclado / foco / idioma | Acciones accesibles, foco visible y cambio persistente es-MX/en-US | Pendiente |
-| URL autorizada con voz española | Job completado, audio reproducible y transcripción con palabras reconocibles | Pendiente |
+| URL autorizada con voz española | Job completado, audio reproducible y transcripción con palabras reconocibles | Pendiente; el smoke del worker anterior generó 0 caracteres/segmentos |
 | Actividad / fallo / reintento | Estado real, mensaje comprensible y reintento sin progreso inventado | Pendiente |
 | URL inválida / duplicado | Rechazo visible; duplicado no crea otro contenido canónico | Pendiente |
 | Fuente sin acceso | Error explicado sin simular descubrimiento; biblioteca conservada | Pendiente |
