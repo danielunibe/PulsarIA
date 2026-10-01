@@ -6,7 +6,7 @@ actual, las pruebas reproducidas y esta definición de verdad.
 
 ## Objetivo y alcance
 
-### Estado activo de lanzamiento — 2026-09-30
+### Estado activo de lanzamiento — 2026-10-01
 
 El candidato activo del PR #2 es **Beta 3, `0.1.0-beta.3`**. `main` sigue
 siendo canónico y la rama temporal conserva el nombre `beta2-hardening`.
@@ -20,12 +20,13 @@ se mantiene hasta revisión legal y aceptación. No se publica ni se elimina una
 protección para resolver un gate pendiente.
 
 El último commit que cambió código de la aplicación es
-`38f141549d573e277fd0e0931d541cf54d9ad8a7`; los checks del PR pasaron después
-en el head `3c316c93c73371fc3557ab79e6e4ffce8f1370a9`. La actualización de
-evidencia `dd07f011f9e19494179bef54d8837ebca13fd640` también pasó [Canonical
-CI](https://github.com/danielunibe/PulsarIA/actions/runs/36820902701) y el
-[preflight de runtime](https://github.com/danielunibe/PulsarIA/actions/runs/36820902677);
-no modifica el código ni el instalador. El PR #2 sigue abierto, en borrador y
+`e3b2e1258138715d9fd580c361ee8c82d29fa977` (accesibilidad del diálogo de
+consentimiento). El head documental actual del PR es
+`c72d7f7b433cf0e7c0b24ade45f56e31c240aa5a`; [Canonical CI, ejecución
+36835137360](https://github.com/danielunibe/PulsarIA/actions/runs/36835137360)
+y [preflight de runtime, ejecución
+36835137429](https://github.com/danielunibe/PulsarIA/actions/runs/36835137429)
+terminaron en success el 2026-10-01. El PR #2 sigue abierto, en borrador y
 mergeable. Todavía no existe tag ni release `v0.1.0-beta.3`; la release pública
 más reciente continúa en `v0.1.0-eval.3`. Esos checks no son aceptación legal,
 visual nativa, live desde IPC ni aprobación del instalador.
@@ -54,6 +55,11 @@ El 2026-09-30 se envió desde el contacto público de Pulsaria una solicitud a
 Gyan 8.1.2; el correo está confirmado en Enviados y aún no aparece respuesta.
 `legal/third-party-materials.json` continúa en `pending`: el contacto enviado
 no equivale a la entrega ni a la revisión de materiales.
+La revisión de la página pública del proveedor al 2026-10-01 lista 9.0.2 como
+última release y 8.1.2 como anterior. El candidato conserva el binario 8.1.2
+identificado por hash; este cambio de versión pública no aporta la procedencia
+exacta que falta para el paquete incluido. El detalle está en
+`docs/FFMPEG_SOURCE_REVIEW.md`.
 
 El worker canónico completó un smoke live con la URL TikTok autorizada, pero
 generó cero caracteres de transcripción y cero segmentos; no demuestra voz

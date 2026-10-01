@@ -35,6 +35,10 @@ También se inspeccionó el archivo [`x86_64.yml`](https://github.com/GyanD/medi
 
 La [página actual de builds](https://www.gyan.dev/ffmpeg/builds/) mantiene 8.1.2 como release anterior y describe estas builds como estáticas y GPLv3. Esa página aporta clasificación y listado de funciones, pero no entrega las fuentes exactas, parches ni receta reproducible de sus bibliotecas externas para este binario. Además del `master` antiguo, el snapshot `patch-7` cercano en fecha tiene dependencias móviles y tampoco está vinculado al artefacto. No existe en la evidencia reunida una receta verificable que corresponda a la release de 2026.
 
+### Revisión de la página del proveedor — 2026-10-01
+
+La página de Gyan indica que su última actualización fue el 2026-09-28, lista FFmpeg 9.0.2 (2026-09-19) como release más reciente y conserva 8.1.2 en “previous release”. También clasifica sus builds actuales como estáticas y GPLv3. El instalador candidato Beta 3 conserva el paquete 8.1.2 identificado por hash; esta comprobación solo actualiza el contexto temporal del inventario. No cambia el binario, no prueba la receta ni las fuentes exactas de sus bibliotecas externas y no satisface la revisión de redistribución.
+
 ### OpenAL Soft 1.25.2 — reconstrucción candidata, no atribución exacta
 
 El inventario original transcribe `openal-soft latest` del README incluido en el paquete Gyan. La tabla de cadenas del `ffmpeg.exe` exacto también contiene `1.25.2`, `b472600` y `ab-suite`. La release oficial de OpenAL Soft `1.25.2` fue publicada el 2026-05-12, antes que Gyan 8.1.2 el 2026-06-27; GitHub informa actualmente `1.25.2` como la última release. Esto hace que el tag sea una explicación plausible de `latest`, pero no demuestra qué resolución de dependencias hizo el proveedor.
