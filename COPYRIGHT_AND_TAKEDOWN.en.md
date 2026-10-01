@@ -34,6 +34,6 @@ the appropriate service.
 
 ## Contact
 
-Legal contact: TO BE COMPLETED BEFORE RELEASE.
+Legal contact: danielunibe10@gmail.com.
 
 Official repository: https://github.com/danielunibe/PulsarIA

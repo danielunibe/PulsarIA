@@ -5,8 +5,10 @@ Version: 1.0 · September 12, 2026
 ## 1. Licensor
 
 Pulsaria is a free beta distributed by the rights holder expressly identified
-in the official release, as an individual or entity. The legal
-address and notice email must be completed before the first public release.
+in the official release, as an individual or entity. The legal identity and
+physical notice address still require confirmation and review before the first
+public release. The current public product and legal contact details appear
+in Section 10.
 
 Pulsaria is not affiliated with, sponsored by, or endorsed by TikTok,
 ByteDance, YouTube, Google, or any other platform mentioned by the

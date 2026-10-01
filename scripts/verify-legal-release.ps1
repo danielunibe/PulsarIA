@@ -40,10 +40,13 @@ try {
 
     $userFacingLegalDocuments = @(
         'EULA.es.md', 'EULA.en.md', 'TERMS_OF_USE.es.md', 'TERMS_OF_USE.en.md',
-        'PRIVACY.es.md', 'PRIVACY.en.md', 'CONTENT_POLICY.es.md', 'CONTENT_POLICY.en.md'
+        'PRIVACY.es.md', 'PRIVACY.en.md', 'CONTENT_POLICY.es.md', 'CONTENT_POLICY.en.md',
+        'COPYRIGHT_AND_TAKEDOWN.es.md', 'COPYRIGHT_AND_TAKEDOWN.en.md',
+        'SECURITY.md', 'CODE_OF_CONDUCT.md'
     )
     $unresolvedDocumentMarkers = @(
         '(?i)COMPLETAR\s+ANTES\s+DEL\s+RELEASE',
+        '(?i)TO\s+BE\s+COMPLETED(?:\s+BEFORE\s+RELEASE)?',
         '(?i)PENDING\s+CONFIRMATION(?:\s+AND\s+REVIEW)?',
         '(?i)PENDIENTE[\s\S]{0,80}CONFIRMAR[\s\S]{0,40}REVISAR',
         '(?i)REQUIERE[\s\S]{0,40}(CONFIRM|REVIS)',

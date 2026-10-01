@@ -10,7 +10,7 @@ builds may be withdrawn when an issue cannot be safely backported.
 Do not disclose a vulnerability in a public GitHub issue. Use GitHub Private
 Vulnerability Reporting if enabled, or contact:
 
-Security contact: TO BE COMPLETED BEFORE RELEASE.
+Security contact: danielunibe10@gmail.com.
 
 Include a concise description, affected version, reproduction steps, impact,
 and any safe mitigation. Do not include passwords, API keys, cookies, private
