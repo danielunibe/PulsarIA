@@ -21,14 +21,10 @@ protección para resolver un gate pendiente.
 
 El último commit que cambió código de la aplicación es
 `e3b2e1258138715d9fd580c361ee8c82d29fa977` (accesibilidad del diálogo de
-consentimiento). El PR #2 sigue abierto, en borrador y mergeable. El head
-documental comprobado antes de esta actualización fue
-`bbac0875877c49da91f52e53cd83d49cce571d1a`; sus checks están registrados en
-[Canonical CI, ejecución 36860984752](https://github.com/danielunibe/PulsarIA/actions/runs/36860984752)
-y [runtime bootstrap preflight, ejecución
-36860984936](https://github.com/danielunibe/PulsarIA/actions/runs/36860984936).
-El preflight terminó en success; Canonical CI seguía en curso al tomar esa
-lectura. El padre `15c3edc783ab30666015598b953bbc5c5003c87b` pasó ambos checks.
+consentimiento). El PR #2 sigue abierto, en borrador y mergeable; el head
+documental vigente es `9ab57514d12b2da3bd64094b7ce4f69ef18c3830`. Sus dos
+checks pasaron: [Canonical CI, ejecución 36866247737](https://github.com/danielunibe/PulsarIA/actions/runs/36866247737)
+y [runtime bootstrap preflight, ejecución 36866247736](https://github.com/danielunibe/PulsarIA/actions/runs/36866247736).
 Los checks de código no sustituyen aceptación legal, visual nativa, live desde
 IPC ni aprobación del artifact definitivo de Actions.
 
@@ -41,6 +37,13 @@ desinstalación con exit 0, runtime 54/54, 13 recursos legales, ONNX/Whisper,
 conservación de datos de prueba tras desinstalar. Fue offline: no creó trabajos
 ni validó ingestión, transcripción, búsqueda o reproducción. Es una build local,
 no el artifact de Actions ni un instalador aprobado para publicar.
+
+El mismo hash local también pasó la actualización desde la release pública
+Eval.3 en un perfil temporal: ambas instalaciones y la desinstalación terminaron
+con exit 0; SQLite y sus claves foráneas quedaron íntegros; se conservaron 1 job,
+1 medio, 1 playlist, su vínculo, 17 ajustes y dos archivos sintéticos tras el
+primer arranque Beta 3 y después de desinstalar. Esta prueba local no sustituye
+repetirla con el artifact de Actions en Windows x64 limpio.
 
 `npm run verify:mvp` pasó 13/13 en el checkout
 `0e0b3378e428be9941f8fb8dbf3f0a91d302b54a` (105 pruebas Rust y 32 pruebas
@@ -68,11 +71,11 @@ se investigó por hash, pero no está vinculado al paquete Gyan 8.1.2 y no
 resuelve la revisión de redistribución.
 
 La última release pública sigue siendo `v0.1.0-eval.3`; no existe tag ni
-release `v0.1.0-beta.3`, y `DIRECT_DOWNLOAD_RELEASE_READY=false`. El artifact
-de Actions debe pasar aceptación en Windows x64 limpio, incluido WebView2, y
-debe repetirse el upgrade desde Eval.3 con ese artifact exacto. El instalador
-actual no tiene aceptación nativa/visual en ambas resoluciones ni aceptación
-del recorrido live. La decisión sobre los datos residenciales que siguen en un
+release `v0.1.0-beta.3`, y `DIRECT_DOWNLOAD_RELEASE_READY=false`. El upgrade
+local desde Eval.3 ya pasó con el hash actual; debe repetirse con el artifact
+exacto de Actions en Windows x64 limpio, incluido WebView2. El instalador actual
+aún no tiene aceptación nativa/visual en ambas resoluciones ni aceptación del
+recorrido live. La decisión sobre los datos residenciales que siguen en un
 commit antiguo del historial público también permanece pendiente; no se
 reescribió la rama.
 
