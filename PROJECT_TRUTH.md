@@ -19,15 +19,17 @@ el artifact exacto conservado por Actions. `DIRECT_DOWNLOAD_RELEASE_READY=false`
 se mantiene hasta revisión legal y aceptación. No se publica ni se elimina una
 protección para resolver un gate pendiente.
 
-El usuario proporcionó un domicilio de notificación y autorizó una URL TikTok
-para la prueba; el domicilio está registrado en `legal/release-manifest.json`
-y el enlace no se repite en documentación pública. No se inventó el código
-postal. El manifiesto de contacto no representa una confirmación de titularidad
-legal ni una aprobación de los avisos. El gate legal, regenerado con el SPDX
-actual, sigue bloqueado por la revisión de `THIRD_PARTY_NOTICES.md`, las fuentes
-y receta exactas del build Gyan/FFmpeg y la aprobación legal humana. El snapshot
-`media-autobuild_suite` `patch-7` se investigó por hash, pero no está vinculado
-al paquete 8.1.2 y no resuelve ese requisito.
+El usuario autorizó una URL TikTok para la prueba; el enlace no se repite en
+documentación pública. El domicilio residencial proporcionado no se conserva
+en la punta pública del PR: `notice_address` queda pendiente hasta que el
+usuario autorice expresamente su publicación o indique un contacto postal
+publicable. El manifiesto de contacto no representa una confirmación de
+titularidad legal ni una aprobación de los avisos. El gate legal, regenerado
+con el SPDX actual, sigue bloqueado por `notice_address`, la revisión de
+`THIRD_PARTY_NOTICES.md`, las fuentes y receta exactas del build Gyan/FFmpeg y
+la aprobación legal humana. El snapshot `media-autobuild_suite` `patch-7` se
+investigó por hash, pero no está vinculado al paquete 8.1.2 y no resuelve ese
+requisito.
 
 El 2026-09-30 se envió desde el contacto público de Pulsaria una solicitud a
 `builds@gyan.dev` para obtener los materiales fuente/build exactos del paquete
@@ -372,7 +374,7 @@ La publicación permanece bloqueada por el marcador humano de revisión de
 licencias/notices y los cuatro datos placeholder de titular, correo, domicilio
 y aprobación en `legal/release-manifest.json`.
 
-### Seguimiento actual — 2026-09-28
+### Seguimiento histórico de Beta 2 — 2026-09-28
 
 El último commit de implementación validado en la rama `beta2-hardening` es
 `8277f774dfae2c33596307e87da0ca9940aff796`. CI canónico pasó en
