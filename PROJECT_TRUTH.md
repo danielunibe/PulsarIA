@@ -21,112 +21,76 @@ protección para resolver un gate pendiente.
 
 El último commit que cambió código de la aplicación es
 `e3b2e1258138715d9fd580c361ee8c82d29fa977` (accesibilidad del diálogo de
-consentimiento). El instalador local documentado abajo se construyó desde
-`f84e9dd02e0d6c7dbadcf7141abcf6af1de64b20`; [Canonical CI, ejecución
-36841291658](https://github.com/danielunibe/PulsarIA/actions/runs/36841291658)
-y [preflight de runtime, ejecución
-36841292133](https://github.com/danielunibe/PulsarIA/actions/runs/36841292133)
-terminaron en success el 2026-10-01. La actualización documental que registró
-el hash del candidato quedó en `9bcd370f7586b48c53cf6fb275900e4937970822`;
-[Canonical CI, ejecución 36847657199](https://github.com/danielunibe/PulsarIA/actions/runs/36847657199)
-y [preflight de runtime, ejecución
-36847657071](https://github.com/danielunibe/PulsarIA/actions/runs/36847657071)
-también terminaron en success. El PR #2 sigue abierto, en borrador y mergeable.
-Todavía no existe tag ni release `v0.1.0-beta.3`; la release pública más
-reciente continúa en `v0.1.0-eval.3`. Esos checks no son aceptación legal,
-visual nativa, live desde IPC ni aprobación del instalador.
+consentimiento). El PR #2 sigue abierto, en borrador y mergeable. El head
+documental comprobado antes de esta actualización fue
+`bbac0875877c49da91f52e53cd83d49cce571d1a`; sus checks están registrados en
+[Canonical CI, ejecución 36860984752](https://github.com/danielunibe/PulsarIA/actions/runs/36860984752)
+y [runtime bootstrap preflight, ejecución
+36860984936](https://github.com/danielunibe/PulsarIA/actions/runs/36860984936).
+El preflight terminó en success; Canonical CI seguía en curso al tomar esa
+lectura. El padre `15c3edc783ab30666015598b953bbc5c5003c87b` pasó ambos checks.
+Los checks de código no sustituyen aceptación legal, visual nativa, live desde
+IPC ni aprobación del artifact definitivo de Actions.
 
-Antes de incorporar la respuesta del proveedor a `THIRD_PARTY_NOTICES.md` se
-construyó un instalador NSIS local de `0.1.0-beta.3`: 688,003,507 bytes,
-SHA-256 `B3A9C641FD71BE7BCBEF09877DA50074EF821F7FA79312ABF6E24136CB759C92`.
-Ese candidato pasó el smoke instalado anterior, pero el cambio del notice que
-se empaqueta lo dejó obsoleto.
+El instalador local vigente es `Pulsaria_0.1.0-beta.3_x64-setup.exe`,
+687,973,984 bytes, SHA-256
+`CE0FB3D98C5B12B44377CE912E5ED776160473419C8CA3D3799FF376D88E51CE`,
+Authenticode `NotSigned`. El smoke instalado pasó instalación y
+desinstalación con exit 0, runtime 54/54, 13 recursos legales, ONNX/Whisper,
+`/health` correcto antes y después de reiniciar, perfil APPDATA aislado y
+conservación de datos de prueba tras desinstalar. Fue offline: no creó trabajos
+ni validó ingestión, transcripción, búsqueda o reproducción. Es una build local,
+no el artifact de Actions ni un instalador aprobado para publicar.
 
-El candidato local actual se reconstruyó desde el mismo head de código con el
-notice actualizado: `Pulsaria_0.1.0-beta.3_x64-setup.exe`, 687,973,984 bytes,
-SHA-256 `CE0FB3D98C5B12B44377CE912E5ED776160473419C8CA3D3799FF376D88E51CE`,
-Authenticode `NotSigned`. El smoke instalado pasó con instalación y
-desinstalación exit 0, runtime 54/54, 13 recursos legales, ONNX/Whisper,
-salud `0.1.0-beta.3` antes y después de reiniciar, perfil APPDATA aislado y
-conservación de datos de prueba tras desinstalar. La prueba fue offline: no
-creó trabajos ni valida ingestión, transcripción, búsqueda o reproducción. El
-hash sigue siendo un candidato local, no el artifact de Actions ni un
-instalador de publicación.
+`npm run verify:mvp` pasó 13/13 en el checkout
+`0e0b3378e428be9941f8fb8dbf3f0a91d302b54a` (105 pruebas Rust y 32 pruebas
+Python; una prueba live se omitió porque esa ejecución no recibió URL). También
+pasaron versionado, SPDX (762 paquetes, 68 archivos, 42 expresiones), estructura
+canónica, accesibilidad, iconos, modelo local, API loopback y
+`npm audit --omit=dev --audit-level=low` (cero vulnerabilidades). El gate legal
+del SPDX regenerado sigue BLOCKED con diez hallazgos: seis textos físicos
+pendientes, revisión de notices/licencias incompleta, materiales fuente/build
+exactos no revisados, `notice_address` y `legal_approval`.
 
-En ese checkout `verify:mvp` pasó 13/13 (105 pruebas Rust, 32 Python y una
-prueba live omitida por falta de URL en esa ejecución); también pasaron versión,
-SPDX (762 paquetes, 68 archivos, 42 expresiones), estructura canónica,
-accesibilidad, iconos, modelo local, API loopback y `npm audit --omit=dev`
-(cero vulnerabilidades). El gate legal del SPDX regenerado sigue BLOCKED con
-diez hallazgos: seis textos físicos pendientes, notices/licencias sin revisión,
-materiales fuente/build exactos no revisados, `notice_address` y `legal_approval`.
+El usuario autorizó una URL TikTok para probarla; el enlace no se repite en
+documentación pública. El smoke live del worker llegó a `completed`, pero
+produjo cero caracteres de transcripción y cero segmentos. Falta aceptación
+live desde la app instalada con IPC autenticado, voz española, indexación,
+búsqueda y reproducción. `notice_address` queda pendiente hasta recibir
+autorización explícita para publicar un domicilio residencial o un contacto
+postal publicable. El manifiesto de contacto no acredita titularidad legal ni
+aprobación de los avisos. El gate examina los ocho documentos de EULA, términos,
+privacidad y política de contenido y aún detecta texto de domicilio físico
+pendiente en seis traducciones. El snapshot `media-autobuild_suite` `patch-7`
+se investigó por hash, pero no está vinculado al paquete Gyan 8.1.2 y no
+resuelve la revisión de redistribución.
 
-El usuario autorizó una URL TikTok para la prueba; el enlace no se repite en
-documentación pública. El domicilio residencial proporcionado no se conserva
-en la punta pública del PR: `notice_address` queda pendiente hasta que el
-usuario autorice expresamente su publicación o indique un contacto postal
-publicable. El manifiesto de contacto no representa una confirmación de
-titularidad legal ni una aprobación de los avisos. El gate legal, regenerado
-con el SPDX actual, sigue bloqueado por `notice_address`, la revisión de
-`THIRD_PARTY_NOTICES.md`, las fuentes y receta exactas del build Gyan/FFmpeg y
-la aprobación legal humana. El gate ahora también revisa los ocho documentos
-de EULA, términos, privacidad y política de contenido: detecta texto pendiente
-de confirmación del domicilio físico en seis traducciones. Tres campos de
-contacto españoles que ya tenían un canal público definido se normalizaron con
-ese contacto; ningún dato residencial se añadió. El snapshot
-`media-autobuild_suite` `patch-7` se investigó por hash, pero no está vinculado
-al paquete 8.1.2 y no resuelve ese requisito.
+La última release pública sigue siendo `v0.1.0-eval.3`; no existe tag ni
+release `v0.1.0-beta.3`, y `DIRECT_DOWNLOAD_RELEASE_READY=false`. El artifact
+de Actions debe pasar aceptación en Windows x64 limpio, incluido WebView2, y
+debe repetirse el upgrade desde Eval.3 con ese artifact exacto. El instalador
+actual no tiene aceptación nativa/visual en ambas resoluciones ni aceptación
+del recorrido live. La decisión sobre los datos residenciales que siguen en un
+commit antiguo del historial público también permanece pendiente; no se
+reescribió la rama.
 
-**Privacidad del historial:** el repositorio y el PR #2 son públicos. El commit
-`b7e6deea` de la rama del PR conserva el domicilio residencial en su historial;
-el commit `6dc3ae6b` lo retiró del árbol vigente, no de los commits anteriores.
-No se reescribió la rama porque el plan de lanzamiento prohíbe reescribir
-historia. No integrar el PR mientras no se resuelva esta exposición. La decisión
-entre conservar el historial o autorizar su saneamiento se solicitó al usuario.
+**Privacidad del historial:** la rama pública aún contiene el domicilio residencial
+retirado del árbol vigente: el commit `b7e6deea` lo conserva en historia y
+`6dc3ae6b` lo retiró de la punta. No se reescribió la rama. No integrar el PR
+hasta resolver la exposición y la decisión del usuario sobre su saneamiento.
 
-El 2026-09-30 se envió desde el contacto público de Pulsaria una solicitud a
-`builds@gyan.dev` para obtener los materiales fuente/build exactos del paquete
-Gyan 8.1.2. El mantenedor respondió el 2026-10-01 que OpenAL Soft es
-`1.25.2-8-gdd4e07d`, que usa MSYS2 UCRT64/GCC y que sus scripts dependen de su
-configuración y no son portables. El commit upstream
-`dd4e07de0fe73d8c0326c4502f63e71da8ef268b` está ocho commits después del tag
-`1.25.2`; sin embargo, el binario incluido contiene `b472600` y `ab-suite`, y
-esa discrepancia no está conciliada. La respuesta no incluyó las fuentes/patches
-del resto de bibliotecas externas ni el paquete de build completo. Se conserva
-el snapshot upstream OpenAL bajo `target-tauri/beta3-third-party-review/` como
-evidencia candidata, no como material aprobado. `legal/third-party-materials.json`
-continúa en `pending`.
-La revisión de la página pública del proveedor al 2026-10-01 lista 9.0.2 como
-última release y 8.1.2 como anterior. El candidato conserva el binario 8.1.2
-identificado por hash; este cambio de versión pública no aporta la procedencia
-exacta que falta para el paquete incluido. El detalle está en
+Por delegación del usuario, la presentación propuesta usa “Daniel Unibe” y el
+correo visible en su perfil público de GitHub. Esto no acredita identidad legal,
+control del buzón ni titularidad. La dirección residencial no se publica sin
+autorización expresa; `notice_address` permanece pendiente y los seis campos
+físicos de las traducciones siguen bloqueando el gate.
+
+El mantenedor de Gyan identificó OpenAL Soft como `1.25.2-8-gdd4e07d` y MSYS2
+UCRT64/GCC como toolchain, pero no proporcionó fuentes/patches de las otras
+bibliotecas ni los insumos exactos del build. El binario aún contiene
+`b472600` y `ab-suite`, discrepancia no conciliada. El snapshot OpenAL se
+conserva como evidencia candidata, no como material aprobado. Véase
 `docs/FFMPEG_SOURCE_REVIEW.md`.
-
-El worker canónico completó un smoke live con la URL TikTok autorizada, pero
-generó cero caracteres de transcripción y cero segmentos; no demuestra voz
-española reconocible. Esa prueba directa tampoco verificó la interfaz ni la
-autenticación IPC de la app. La aceptación live y visual/funcional de la app
-instalada sigue pendiente. El directorio de datos predeterminado de Pulsaria ya
-existe; no se inspeccionó su contenido y no se inició la app con ese perfil.
-Completar la aceptación en un perfil o Windows de prueba aislado y con el
-artifact definitivo de Actions para preservar la biblioteca personal.
-
-El audit de producción actual detectó el aviso crítico
-[GHSA-vcvr-r3jv-pc5j](https://github.com/vercel/next.js/security/advisories/GHSA-vcvr-r3jv-pc5j)
-en Next.js 16.3.5. El candidato Beta 3 se actualizó a Next.js 16.3.8 y alineó
-sus paquetes de lint y SWC; `npm audit --omit=dev --audit-level=low` volvió a
-dar cero vulnerabilidades y `verify:mvp` pasó 13/13 sobre esa versión. Este
-resultado actualiza las matrices fechadas anteriores que registran otros
-conteos; los detalles y límites están en la evidencia Beta 3.
-
-Los resultados actuales y límites están en `docs/BETA3_RELEASE_EVIDENCE.md`.
-La aceptación instalada se registra con el recorrido de `docs/BETA3_ACCEPTANCE.md`.
-Por delegación del usuario se eligió para la presentación pública “Daniel
-Unibe”, denominación ya usada en el PR #2, y como correo el que aparece en su
-perfil público de GitHub. Estos datos no acreditan identidad legal, control del
-buzón ni titularidad. El domicilio y la URL de prueba se recibieron después
-del corte inicial; su registro no sustituye la revisión legal, la aceptación de
-materiales de terceros ni la ejecución del recorrido live.
 
 Pulsaria es un MVP local-first para Windows que importa contenido de TikTok que
 el usuario está autorizado a procesar, genera video/audio/transcripción/análisis

@@ -19,29 +19,28 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 - El script instalado rechaza explícitamente `RunLive`, cuya autenticación era inválida; el smoke offline sigue vigente y la aceptación live usa la interfaz nativa autenticada.
 - Corregido el SHA-256 obsoleto de eval.3 en la guía de instalación.
 
-## Pruebas ejecutadas sobre Beta 3
-
 | Gate | Resultado | Evidencia y límites |
 | --- | --- | --- |
-| `verify:mvp` | PASS 13/13 | Resumen estructurado de la ejecución del commit `38f141549d573e277fd0e0931d541cf54d9ad8a7` en `target-tauri/beta3-current-verification.json`; incluye lint, TypeScript, build, locale, Rust, Python, seguridad, estructura, runtime y onboarding |
-| Rust | PASS | 105 tests; 0 fallos |
-| Python | PASS offline | 31 tests PASS y 1 skip live; 32 en total |
+| `verify:mvp` | PASS 13/13 | Reejecución en el checkout `0e0b3378e428be9941f8fb8dbf3f0a91d302b54a`; la prueba live se omitió porque no se pasó URL en esa ejecución |
+| Rust | PASS | 105 pruebas; 0 fallos |
+| Python | PASS offline | 31 pruebas aprobadas y 1 prueba live omitida; 32 casos en total |
 | Runtime fuente | PASS | 54 archivos críticos del manifiesto verificados; no son el total de archivos empaquetados ni certifican instalación limpia |
 | Versiones | PASS | Incluye `legal/release-manifest.json` |
-| Accesibilidad e iconos | PASS contratos | No sustituye foco, contraste ni inspección nativa humana |
+| Accesibilidad e iconos | PASS contratos | No sustituye inspección de foco/contraste ni revisión nativa humana |
 | Modelo local | PASS contrato | Sidecar presente, modelo fijado bajo demanda; no se declara conversación humana validada |
 | Dependencias de producción | PASS | `npm audit --omit=dev --audit-level=low`: 0 vulnerabilidades |
 | Herramienta de versionado | PASS | 2 regresiones: BOM/idempotencia y fallo de entrada sin escrituras parciales |
 | Verificador de release | PASS unitario | 6 casos con fixture; no prueba un instalador real |
-| Workflows e Issues | PASS sintaxis, actionlint parcial | El parser YAML valida los dos workflows cambiados en esta revisión; `actionlint` no está disponible en este checkout y los checks de Actions deben repetirse sobre el nuevo commit |
+| Workflows e Issues | PASS en CI remoto para el código candidato | [Canonical CI](https://github.com/danielunibe/PulsarIA/actions/runs/36858330874) y [runtime preflight](https://github.com/danielunibe/PulsarIA/actions/runs/36858330835) pasaron en el head `15c3edc`; consultar el PR para el estado del head documental más reciente. No sustituye aceptación humana |
 | Sitio y estructura canónica | PASS | `verify:website`, `verify:canonical` |
-| SPDX agregado | PASS inventario y sintaxis | 762 paquetes, 68 archivos, 42 expresiones únicas validadas; 34 npm, 695 Cargo, 33 Python, 54 runtime, 13 documentos legales y 1 licencia de tercero. No equivale a revisión de licencias |
-| Instalador Beta 3 | PASS build local | `npm run tauri build -- --bundles nsis`, exit 0; candidato `55F420C9…B2C02C1`, 687,988,116 bytes |
-| Smoke offline del primer candidato | PASS histórico, hash rechazado | El health check pasó con F151…, pero la inspección de la ventana detectó que React no hidrataba; no certifica el candidato activo |
-| Actualización desde eval.3 | PASS local en fixture | El primer arranque de Beta 3 migró SQLite; `/health`, integridad, claves foráneas, trabajos, medios, playlists, ajustes y archivos sintéticos pasaron también tras desinstalar. No es el artifact de Actions ni usa una biblioteca personal |
-| Aceptación nativa y TikTok live | Pendiente | La build instalada nueva respondió `/health` y migró el fixture en un proceso oculto, pero no se inspeccionó su ventana ni se probó interacción humana. TikTok desde IPC, idiomas, Cinema y Ajustes siguen sin aceptar |
-| Gate legal con SPDX | BLOCKED por cuatro asuntos | El SBOM y su sintaxis pasan, pero el manifiesto conserva el domicilio como pendiente y siguen sin resolverse la revisión de notices/licencias, los materiales fuente/build exactos y la aprobación legal humana |
-| Integración, tag y descarga pública | Pendiente | No se publican antes de revisar el candidato |
+| SPDX agregado | PASS inventario y sintaxis | 762 paquetes, 68 archivos, 42 expresiones únicas; 34 npm, 695 Cargo, 33 Python, 54 runtime, 13 documentos legales y 1 licencia de tercero. No equivale a revisión de licencias |
+| Instalador Beta 3 | PASS build local | `Pulsaria_0.1.0-beta.3_x64-setup.exe`, 687,973,984 bytes, SHA-256 `CE0FB3D98C5B12B44377CE912E5ED776160473419C8CA3D3799FF376D88E51CE`; Authenticode `NotSigned`. No es artifact de Actions |
+| Smoke offline del instalador vigente | PASS local | Instalación/desinstalación exit 0, runtime 54/54, recursos legales y modelos presentes, health antes/después de reinicio y datos de prueba conservados. No ejecutó ingestión, transcripción ni búsqueda |
+| Smoke de instalador anterior | Histórico, hash obsoleto | Un smoke inicial reveló que React no hidrataba; candidatos anteriores quedaron reemplazados tras cambios. No certifica el EXE actual |
+| Actualización desde Eval.3 | PASS solo en fixture local anterior | El candidato `55F420C9…B2C02C1` migró SQLite, relaciones, trabajos, medios, playlists y ajustes con datos sintéticos. Ese EXE quedó obsoleto; repetir la actualización con el artifact exacto de Actions |
+| Aceptación nativa y TikTok live | Pendiente | Falta Windows x64 limpio, WebView2, UI 1280 × 800 y 860 × 640, IPC autenticado, voz española, indexación, búsqueda y reproducción sobre el artifact definitivo |
+| Gate legal con SPDX | BLOCKED: 10 hallazgos | Seis traducciones con domicilio pendiente, revisión de licencias/notices, fuentes/build exactos de terceros, `notice_address` y `legal_approval` |
+| Integración, tag y descarga pública | Pendiente | PR #2 sigue en borrador; no crear tag ni publicar antes de resolver los gates y aceptar el artifact exacto |
 
 ## Materiales FFmpeg reunidos
 
@@ -62,7 +61,7 @@ Se consultó nuevamente la [release Gyan 8.1.2](https://github.com/GyanD/codexff
 1. `public_owner` se presenta como “Daniel Unibe”, denominación ya usada en el PR #2; por delegación del usuario, se eligió como contacto `danielunibe10@gmail.com`, correo que aparece en el perfil público de GitHub. Estos datos no acreditan identidad legal ni control del buzón. `notice_address` queda pendiente hasta contar con autorización explícita para publicar un domicilio residencial o con otro contacto postal publicable.
 2. Resolver `COMPONENT_LICENSE_REVIEW_PENDING`, registrar los materiales exactos aprobados de terceros con URL/hash y completar la aprobación legal humana. El gate legal vigente también mantiene `notice_address` pendiente.
 3. Completar [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) con el artifact definitivo de Actions, Windows sin herramientas de desarrollo, WebView2, actualización, ventana nativa y prueba live de la URL autorizada.
-4. Los instaladores `AB13…` y `E733…` quedaron obsoletos. El candidato local actual `55F420C9…B2C02C1` pasó smoke instalado y actualización desde eval.3 con fixture; aún no es el artifact definitivo de Actions ni tiene aceptación humana. Cerrar primero los asuntos legales y completar la aceptación del hash exacto.
+4. Los candidatos anteriores `55F420C9…B2C02C1`, `AB13…` y `E733…` quedaron obsoletos. El instalador local actual `CE0FB3D9…D88E51CE` pasó smoke offline, pero todavía no se ha probado su actualización desde Eval.3 ni es el artifact de Actions. Cerrar primero los asuntos legales y completar la aceptación del hash exacto.
 5. Integrar el PR revisado en `main`, crear el tag nuevo y ejecutar el workflow. Mantener `DIRECT_DOWNLOAD_RELEASE_READY=false` hasta aceptación y revisión; no desactivar el Environment.
 6. Comprobar los assets públicos y sus hashes; después actualizar las descargas a Beta 3.
 
