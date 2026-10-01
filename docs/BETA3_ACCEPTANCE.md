@@ -69,7 +69,7 @@ El smoke TikTok se hace desde la app instalada mediante el cliente IPC autentica
 
 ## Entradas aún necesarias
 
-Por delegación del usuario, se eligió como presentación pública “Daniel Unibe”, denominación ya usada en el PR #2, y `danielunibe10@gmail.com`, correo que aparece en su perfil público de GitHub. Estos datos no acreditan identidad/titularidad legal ni control del buzón. `notice_address` se mantiene pendiente hasta recibir autorización explícita para publicar un domicilio residencial o hasta definir otro contacto postal publicable. El PR público también conserva el domicilio en un commit histórico que se retiró del árbol actual; el plan vigente prohíbe reescribir la historia y el PR no debe integrarse hasta resolver esa exposición. Siguen pendientes la revisión legal humana y la aprobación de los documentos y materiales de terceros.
+Por delegación del usuario, se eligió como presentación pública “Daniel Unibe”, denominación ya usada en el PR #2, y `danielunibe10@gmail.com`, correo que aparece en su perfil público de GitHub. Estos datos no acreditan identidad/titularidad legal ni control del buzón. `notice_address` sigue pendiente hasta aprobar un contacto postal para publicación. El PR público conserva un valor de aviso en un commit histórico que se retiró del árbol actual; el plan vigente prohíbe reescribir la historia y el PR no debe integrarse hasta resolver esa exposición. Siguen pendientes la revisión legal humana y la aprobación de los documentos y materiales de terceros.
 
 El 2026-09-30 el usuario proporcionó y autorizó una URL TikTok para la prueba. Se omite el enlace concreto de esta documentación pública; debe comprobarse si contiene voz en español. Recibirlo no demuestra descarga ni transcripción.
 

@@ -20,13 +20,15 @@ se mantiene hasta revisión legal y aceptación. No se publica ni se elimina una
 protección para resolver un gate pendiente.
 
 El commit funcional más reciente del PR es
-`d53013c5870dc5f0636213d58607ee923137ca31` (nombres accesibles bilingües); el
-head documental actual es `cddbb0692001adff94c92775e2ad9a13d473cfa5`. El PR #2
-sigue abierto, en borrador y mergeable. Sus checks del head actual pasaron:
-[Canonical CI, ejecución 36878954628](https://github.com/danielunibe/PulsarIA/actions/runs/36878954628)
-y [runtime bootstrap preflight, ejecución 36878954604](https://github.com/danielunibe/PulsarIA/actions/runs/36878954604).
-Los checks de código no sustituyen aceptación legal, visual nativa, live desde
-IPC ni aprobación del artifact definitivo de Actions.
+`d53013c5870dc5f0636213d58607ee923137ca31` (nombres accesibles bilingües). Al
+corte de esta evidencia, el head documental `328e1b57ba912600316464312816d6b40ed29fe5`
+tenía ambos checks completos y el PR #2 seguía abierto, en borrador y mergeable:
+[Canonical CI, ejecución 36895639595](https://github.com/danielunibe/PulsarIA/actions/runs/36895639595)
+y [runtime bootstrap preflight, ejecución 36895639527](https://github.com/danielunibe/PulsarIA/actions/runs/36895639527).
+Un seguimiento documental de privacidad se registra a continuación y debe
+completar su propio ciclo de CI antes de integrar. Los checks de código no
+sustituyen aceptación legal, visual nativa, live desde IPC ni aprobación del
+artifact definitivo de Actions.
 
 El último instalador local es `Pulsaria_0.1.0-beta.3_x64-setup.exe`,
 687,986,682 bytes, SHA-256
@@ -65,10 +67,9 @@ produjo cero caracteres de transcripción y cero segmentos. Una repetición
 aislada extrajo 41.263 segundos de MP3 mono a 16 kHz con señal no silenciosa;
 no permite distinguir voz de música/ambiente ni acreditar voz española.
 Falta aceptación live desde la app instalada con IPC autenticado, voz española,
-indexación, búsqueda y reproducción. `notice_address` queda pendiente: el usuario
-proporcionó un domicilio residencial, pero la autorización para divulgarlo
-públicamente no está confirmada; no se incorpora al árbol. El manifiesto de
-contacto no acredita titularidad legal ni
+indexación, búsqueda y reproducción. `notice_address` queda pendiente porque no
+hay un contacto postal aprobado para publicación; el campo permanece vacío en
+el árbol actual. El manifiesto de contacto no acredita titularidad legal ni
 aprobación de los avisos. El gate examina los ocho documentos de EULA, términos,
 privacidad y política de contenido y aún detecta texto de domicilio físico
 pendiente en seis traducciones. El snapshot `media-autobuild_suite` `patch-7`
@@ -84,16 +85,15 @@ recorrido live. La decisión sobre los datos residenciales que siguen en un
 commit antiguo del historial público también permanece pendiente; no se
 reescribió la rama.
 
-**Privacidad del historial:** la rama pública aún contiene el domicilio residencial
-retirado del árbol vigente: el commit `b7e6deea` lo conserva en historia y
-`6dc3ae6b` lo retiró de la punta. No se reescribió la rama. No integrar el PR
-hasta resolver la exposición y la decisión del usuario sobre su saneamiento.
+**Privacidad del historial:** la rama pública conserva un valor postal de aviso
+en un commit antiguo (`b7e6deea`) que fue retirado del árbol actual
+(`6dc3ae6b`). No se reescribió la rama. No integrar el PR hasta resolver esa
+exposición; el valor no se repite aquí.
 
 Por delegación del usuario, la presentación propuesta usa “Daniel Unibe” y el
 correo visible en su perfil público de GitHub. Esto no acredita identidad legal,
-control del buzón ni titularidad. La dirección residencial que el usuario
-proporcionó no se publica sin autorización expresa; `notice_address` permanece
-pendiente y los seis campos
+control del buzón ni titularidad. No se publica dirección residencial;
+`notice_address` permanece pendiente y los seis campos
 físicos de las traducciones siguen bloqueando el gate.
 
 El mantenedor de Gyan identificó OpenAL Soft como `1.25.2-8-gdd4e07d` y MSYS2
@@ -529,12 +529,10 @@ La repetición actual de `verify:legal-release -RequireSbom` permanece
 **BLOCKED con 10 hallazgos**: seis documentos legales aún contienen texto de
 contacto/domicilio pendiente; faltan la revisión de componentes/notices,
 materiales de fuente y build exactos y la aprobación humana; `notice_address` y
-`legal_approval` permanecen pendientes. El usuario identificó el dato postal
-previamente registrado como su domicilio particular; no se recibió una
-autorización expresa para publicarlo, por lo que el manifiesto conserva el
-marcador pendiente y el domicilio no se incorpora al árbol actual. Un snapshot
-histórico público del PR conserva la exposición y sigue sin saneamiento; el PR
-no se debe integrar hasta resolverla.
+`legal_approval` permanecen pendientes. El campo postal conserva el marcador
+pendiente y no se incorpora al árbol actual. Un snapshot histórico público del
+PR conserva un valor postal de aviso retirado de la punta; no se repite aquí y
+el PR no se debe integrar hasta resolver esa exposición.
 
 El instalador local `CE0FB3D9…D88E51CE` se creó antes de este commit y no
 incluye el cambio bilingüe; no es candidato para la aceptación final. La rama
@@ -561,7 +559,7 @@ revisión de notices/licencias; fuentes/build exactos de terceros;
 `notice_address` y `legal_approval`. No quedan marcadores de contacto en los
 documentos adicionales revisados.
 
-No se añadió el domicilio particular al manifiesto ni a los documentos. El
-snapshot histórico público del PR conserva una exposición anterior; no integrar
-hasta resolver el saneamiento. El instalador local `CE0FB3D9…D88E51CE` antecede
+No se añadió un domicilio al manifiesto ni a los documentos. El snapshot
+histórico público del PR conserva un valor postal retirado de la punta; no se
+repite aquí y no integrar hasta resolver la exposición. El instalador local `CE0FB3D9…D88E51CE` antecede
 a `fe356130` y tampoco contiene estos documentos actualizados.
