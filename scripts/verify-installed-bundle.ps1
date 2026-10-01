@@ -101,13 +101,49 @@ function Assert-OwnedTempPath {
 $tag = [guid]::NewGuid().ToString('N')
 $installDir = Join-Path $env:TEMP "pulsaria-current-bundle-install-$tag"
 $appDataRoot = Join-Path $env:TEMP "pulsaria-current-bundle-appdata-$tag"
+$webViewDataDir = Join-Path $appDataRoot 'WebView2UserData'
 $dataDir = Join-Path $appDataRoot 'Pulsar Eventide'
 $preservationMarker = Join-Path $dataDir 'settings\mvp-uninstall-preservation.txt'
 $downloadsDir = Join-Path $env:TEMP "pulsaria-current-bundle-downloads-$tag"
 $msiLog = Join-Path $installDir 'msiexec.log'
 $baseUrl = "http://127.0.0.1:$ApiPort"
+
+function Assert-TestWebViewIsolation {
+    $expectedPath = [System.IO.Path]::GetFullPath($script:webViewDataDir)
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        $webViewProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -like "*$expectedPath*"
+        })
+        if ($webViewProcesses.Count -gt 0) {
+            $script:result.webView2UserDataFolderIsolated = $true
+            return
+        }
+        Start-Sleep -Seconds 1
+    }
+    throw 'WebView2 did not use the test-owned WEBVIEW2_USER_DATA_FOLDER; refusing to continue with a non-isolated installed smoke.'
+}
+
+function Stop-TestInstalledApp {
+    if ($null -ne $script:appProcess) {
+        Stop-Process -Id $script:appProcess.Id -Force -ErrorAction SilentlyContinue
+        try { [void]$script:appProcess.WaitForExit(15000) } catch { }
+        $script:appProcess = $null
+    }
+    $expectedPath = [System.IO.Path]::GetFullPath($script:webViewDataDir)
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $webViewProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -like "*$expectedPath*"
+        })
+        if ($webViewProcesses.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    foreach ($webViewProcess in $webViewProcesses) {
+        Stop-Process -Id $webViewProcess.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $envNames = @(
-    'PULSAR_DATA_DIR', 'PULSAR_DOWNLOAD_DIR', 'PULSAR_API_PORT', 'PULSAR_API_HOST', 'APPDATA',
+    'PULSAR_DATA_DIR', 'PULSAR_DOWNLOAD_DIR', 'PULSAR_API_PORT', 'PULSAR_API_HOST', 'APPDATA', 'WEBVIEW2_USER_DATA_FOLDER',
     'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
     'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
     'ONNX_MODEL_DIR', 'TESSERACT_PATH', 'PATH'
@@ -145,6 +181,7 @@ $result = [ordered]@{
         expected = $dataDir
         usesAppDataFallback = $false
     }
+    webView2UserDataFolderIsolated = $false
     userDataPreservedAfterUninstall = $false
     runtimeIsolation = [ordered]@{
         pathCleared = $false
@@ -159,7 +196,7 @@ try {
     if ($RunLive) {
         throw 'RunLive is not a validated acceptance path: the legacy script does not send or refresh process-scoped IPC credentials. Use the installed native UI and docs/BETA3_ACCEPTANCE.md. Offline installation smoke remains available without RunLive.'
     }
-    New-Item -ItemType Directory -Path $installDir, $appDataRoot, $downloadsDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $installDir, $appDataRoot, $downloadsDir, $webViewDataDir -Force | Out-Null
     if ($Bundle -eq 'msi') {
         $msiInstallArguments = @(
             '/i', ('"{0}"' -f $bundlePath),
@@ -262,6 +299,7 @@ try {
     [Environment]::SetEnvironmentVariable('PULSAR_DOWNLOAD_DIR', $downloadsDir, 'Process')
     [Environment]::SetEnvironmentVariable('PULSAR_API_PORT', "$ApiPort", 'Process')
     [Environment]::SetEnvironmentVariable('PULSAR_API_HOST', '127.0.0.1', 'Process')
+    [Environment]::SetEnvironmentVariable('WEBVIEW2_USER_DATA_FOLDER', $webViewDataDir, 'Process')
     foreach ($name in @(
         'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
         'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
@@ -276,6 +314,7 @@ try {
     $result.runtimeIsolation.pathCleared = $true
     $result.runtimeIsolation.externalRuntimeOverridesCleared = $true
     $appProcess = Start-Process -FilePath $appPath -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
+    Assert-TestWebViewIsolation
 
     $health = $null
     for ($i = 0; $i -lt $StartupTimeoutSeconds; $i++) {
@@ -387,11 +426,10 @@ try {
         }
     }
 
-    Stop-Process -Id $appProcess.Id -Force -ErrorAction SilentlyContinue
-    try { [void]$appProcess.WaitForExit(15000) } catch { }
-    $appProcess = $null
+    Stop-TestInstalledApp
     Start-Sleep -Seconds 2
     $appProcess = Start-Process -FilePath $appPath -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
+    Assert-TestWebViewIsolation
     $healthAfterRestart = $null
     for ($i = 0; $i -lt $StartupTimeoutSeconds; $i++) {
         try {
@@ -433,10 +471,7 @@ try {
 } catch {
     $result.error = $_.Exception.Message
 } finally {
-    if ($null -ne $appProcess) {
-        Stop-Process -Id $appProcess.Id -Force -ErrorAction SilentlyContinue
-        try { [void]$appProcess.WaitForExit(15000) } catch { }
-    }
+    Stop-TestInstalledApp
     foreach ($name in $envNames) {
         if ($null -eq $oldEnvironment[$name]) {
             [Environment]::SetEnvironmentVariable($name, $null, 'Process')

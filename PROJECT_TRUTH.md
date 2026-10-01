@@ -35,17 +35,19 @@ ProductVersion/FileVersion `0.1.0-beta.3`, Authenticode `NotSigned`. El
 `verify:installed` de ese hash pasó la instalación/desinstalación (exit 0),
 runtime 54/54, 13 documentos legales, presencia de ONNX/Whisper, `/health`
 antes y después de reiniciar el proceso de la aplicación, aislamiento de
-runtime y conservación de un marcador de datos sintético. La prueba fue
+runtime y de la carpeta de datos de WebView2, y conservación de un marcador de
+datos sintético. La prueba fue
 offline: no validó ingestión,
 transcripción, búsqueda ni reproducción. Es una build local, no el artifact de
 Actions ni un instalador aprobado para publicar. El resumen saneado está en
 `docs/BETA3_LOCAL_INSTALL_SMOKE.json`.
 
-La prueba local anterior de actualización desde Eval.3 usó el hash
-`CE0FB3D98C5B12B44377CE912E5ED776160473419C8CA3D3799FF376D88E51CE` y preservó
-la biblioteca sintética y sus ajustes. El hash más reciente `D0492C87…A669F989`
-aún necesita esa prueba de actualización; también falta repetirla con el
-artifact de Actions en Windows x64 limpio.
+La actualización local desde el asset público Eval.3 hacia el hash más reciente
+`D0492C87…A669F989` también pasó con un job y medio sintéticos, SQLite íntegra,
+sin violaciones de claves foráneas, ajustes `en-US`/`oled` preservados y datos
+conservados después de desinstalar. El resumen saneado está en
+`docs/BETA3_UPGRADE_LOCAL_EVIDENCE.json`. La aceptación aún debe repetirse con
+el artifact de Actions en Windows x64 limpio.
 
 `npm run verify:mvp` pasó 13/13 en el checkout
 `0e0b3378e428be9941f8fb8dbf3f0a91d302b54a` (105 pruebas Rust y 32 pruebas
@@ -63,9 +65,10 @@ produjo cero caracteres de transcripción y cero segmentos. Una repetición
 aislada extrajo 41.263 segundos de MP3 mono a 16 kHz con señal no silenciosa;
 no permite distinguir voz de música/ambiente ni acreditar voz española.
 Falta aceptación live desde la app instalada con IPC autenticado, voz española,
-indexación, búsqueda y reproducción. `notice_address` queda pendiente hasta recibir
-autorización explícita para publicar un domicilio residencial o un contacto
-postal publicable. El manifiesto de contacto no acredita titularidad legal ni
+indexación, búsqueda y reproducción. `notice_address` queda pendiente: el usuario
+proporcionó un domicilio residencial, pero la autorización para divulgarlo
+públicamente no está confirmada; no se incorpora al árbol. El manifiesto de
+contacto no acredita titularidad legal ni
 aprobación de los avisos. El gate examina los ocho documentos de EULA, términos,
 privacidad y política de contenido y aún detecta texto de domicilio físico
 pendiente en seis traducciones. El snapshot `media-autobuild_suite` `patch-7`
@@ -88,8 +91,9 @@ hasta resolver la exposición y la decisión del usuario sobre su saneamiento.
 
 Por delegación del usuario, la presentación propuesta usa “Daniel Unibe” y el
 correo visible en su perfil público de GitHub. Esto no acredita identidad legal,
-control del buzón ni titularidad. La dirección residencial no se publica sin
-autorización expresa; `notice_address` permanece pendiente y los seis campos
+control del buzón ni titularidad. La dirección residencial que el usuario
+proporcionó no se publica sin autorización expresa; `notice_address` permanece
+pendiente y los seis campos
 físicos de las traducciones siguen bloqueando el gate.
 
 El mantenedor de Gyan identificó OpenAL Soft como `1.25.2-8-gdd4e07d` y MSYS2

@@ -1,21 +1,24 @@
 {
   "schemaVersion": 1,
-  "test": "Eval.3-to-Beta-3 local installer upgrade",
+  "test": "Public Eval.3-to-current Beta 3 local installer upgrade",
   "date": "2026-10-01",
   "status": "PASS",
-  "sourceCommit": "9ab57514d12b2da3bd64094b7ce4f69ef18c3830",
+  "sourceCommit": "cddbb0692001adff94c92775e2ad9a13d473cfa5",
   "previousRelease": {
     "tag": "v0.1.0-eval.3",
-    "installerSha256": "1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF"
+    "installerSha256": "1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF",
+    "publicAssetSha256Verified": true,
+    "healthVersion": "0.1.0"
   },
   "candidate": {
     "version": "0.1.0-beta.3",
-    "installerSha256": "CE0FB3D98C5B12B44377CE912E5ED776160473419C8CA3D3799FF376D88E51CE",
-    "installerBytes": 687973984,
+    "installerSha256": "D0492C87BF868A857FB02E8FB25AF7D12F451EFEA0ABA1176D8423B7A669F989",
+    "installerBytes": 687986682,
     "authenticode": "NotSigned"
   },
   "isolation": {
     "appDataIsolated": true,
+    "webView2UserDataFolderIsolated": true,
     "syntheticFixtureOnly": true,
     "externalRuntimeOverridesCleared": true,
     "tempCleanupCompleted": true
@@ -32,24 +35,11 @@
   "preservedData": {
     "integrityAfterUpgrade": "ok",
     "foreignKeysAfterUpgrade": "ok",
-    "rowsAfterUpgrade": {
-      "jobs": 1,
-      "media": 1,
-      "playlists": 1,
-      "playlist_items": 1
-    },
-    "settingsPreservedCount": 17,
-    "syntheticMediaFilesPreserved": 2,
+    "rowsAfterUpgrade": { "jobs": 1, "media": 1 },
+    "settingsFilePreserved": true,
+    "settingsValuesPreserved": { "locale": "en-US", "theme": "oled" },
     "integrityAfterUninstall": "ok",
-    "foreignKeysAfterUninstall": "ok",
-    "rowsAfterUninstall": {
-      "jobs": 1,
-      "media": 1,
-      "playlists": 1,
-      "playlist_items": 1
-    },
-    "settingsAfterUninstallCount": 17,
-    "syntheticFilesAfterUninstall": 2
+    "syntheticLibraryPreservedAfterUninstall": true
   },
-  "scope": "PASS applies to this local installer and synthetic data on the current Windows host. Windows was not rebooted. It does not accept the Actions artifact, clean-machine WebView2, native UI, or live TikTok processing."
+  "scope": "PASS applies to this local installer and synthetic data on the current Windows host. The Eval.3 public NSIS asset digest was verified. The WebView2 user-data folder and app data were isolated under the test-owned temporary profile and cleaned. Windows was not rebooted. This does not accept the Actions artifact, clean-machine WebView2 behavior, native UI, or live TikTok processing."
 }

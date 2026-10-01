@@ -34,6 +34,7 @@
     },
     "healthBeforeAppRestart": "ok",
     "healthAfterAppRestart": "ok",
+    "webView2UserDataFolderIsolated": true,
     "testDataMarkerPreservedAfterUninstall": true,
     "runtimeOverridesIsolated": true,
     "temporaryProfileCleanup": true
