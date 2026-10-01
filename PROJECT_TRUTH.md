@@ -22,14 +22,31 @@ protección para resolver un gate pendiente.
 El último commit que cambió código de la aplicación es
 `e3b2e1258138715d9fd580c361ee8c82d29fa977` (accesibilidad del diálogo de
 consentimiento). El head documental actual del PR es
-`c72d7f7b433cf0e7c0b24ade45f56e31c240aa5a`; [Canonical CI, ejecución
-36835137360](https://github.com/danielunibe/PulsarIA/actions/runs/36835137360)
+`f84e9dd02e0d6c7dbadcf7141abcf6af1de64b20`; [Canonical CI, ejecución
+36841291658](https://github.com/danielunibe/PulsarIA/actions/runs/36841291658)
 y [preflight de runtime, ejecución
-36835137429](https://github.com/danielunibe/PulsarIA/actions/runs/36835137429)
+36841292133](https://github.com/danielunibe/PulsarIA/actions/runs/36841292133)
 terminaron en success el 2026-10-01. El PR #2 sigue abierto, en borrador y
 mergeable. Todavía no existe tag ni release `v0.1.0-beta.3`; la release pública
 más reciente continúa en `v0.1.0-eval.3`. Esos checks no son aceptación legal,
 visual nativa, live desde IPC ni aprobación del instalador.
+
+Desde ese head se reconstruyó un instalador NSIS local de `0.1.0-beta.3`:
+688,003,507 bytes, SHA-256
+`B3A9C641FD71BE7BCBEF09877DA50074EF821F7FA79312ABF6E24136CB759C92`,
+Authenticode `NotSigned`. El smoke instalado pasó con instalación y
+desinstalación exit 0, runtime 54/54, trece recursos legales cotejados, salud
+antes y después de reiniciar, APPDATA aislado y conservación de los datos de
+prueba tras desinstalar. Sigue siendo un candidato local, no el artifact de
+Actions ni un instalador de publicación.
+
+En ese checkout `verify:mvp` pasó 13/13 (105 pruebas Rust, 32 Python y una
+prueba live omitida por falta de URL en esa ejecución); también pasaron versión,
+SPDX (762 paquetes, 68 archivos, 42 expresiones), estructura canónica,
+accesibilidad, iconos, modelo local, API loopback y `npm audit --omit=dev`
+(cero vulnerabilidades). El gate legal del SPDX regenerado sigue BLOCKED con
+diez hallazgos: seis textos físicos pendientes, notices/licencias sin revisión,
+materiales fuente/build exactos no revisados, `notice_address` y `legal_approval`.
 
 El usuario autorizó una URL TikTok para la prueba; el enlace no se repite en
 documentación pública. El domicilio residencial proporcionado no se conserva
