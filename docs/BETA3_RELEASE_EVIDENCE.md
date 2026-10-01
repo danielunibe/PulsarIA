@@ -38,7 +38,7 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 | Smoke offline del instalador vigente | PASS local | Hash `D0492C87…A669F989`: instalación/desinstalación exit 0, runtime 54/54, 13 documentos legales y modelos presentes, health antes/después de reiniciar el proceso de la aplicación, carpeta de datos WebView2 aislada y marcador sintético conservado. No ejecutó ingestión, transcripción ni búsqueda; ver [BETA3_LOCAL_INSTALL_SMOKE.json](BETA3_LOCAL_INSTALL_SMOKE.json) |
 | Smoke de instalador anterior | Histórico, hash obsoleto | Un smoke inicial reveló que React no hidrataba; candidatos anteriores quedaron reemplazados tras cambios. No certifica el EXE actual |
 | Actualización desde Eval.3 | PASS local en el hash vigente | El hash `D0492C87…A669F989` conservó 1 job y 1 medio sintéticos, ajustes `en-US`/`oled` y SQLite íntegra; la desinstalación preservó la biblioteca. La carpeta WebView2 se aisló. Falta el artifact exacto de Actions en Windows limpio |
-| Aceptación nativa y TikTok live | Pendiente | Falta Windows x64 limpio, WebView2, UI 1280 × 800 y 860 × 640, IPC autenticado, voz española, indexación, búsqueda y reproducción sobre el artifact definitivo. El worker aislado obtuvo audio no silencioso, pero 0 transcripción y no determina si había voz |
+| Aceptación nativa y TikTok live | Parcial local; cierre pendiente | El onboarding del hash local `D0492C87…A669F989` se observó a 1280 × 800 y 860 × 640; el diálogo cupo y Tab mostró foco visible. No se aceptaron acuerdos y no se abrió la app más allá de la pantalla de derechos. Sigue pendiente Windows x64 limpio, WebView2, IPC autenticado, voz española, indexación, búsqueda y reproducción sobre el artifact definitivo. El worker aislado obtuvo audio no silencioso, pero 0 transcripción y no determina si había voz |
 | Gate legal con SPDX | BLOCKED: 10 hallazgos | Seis traducciones con domicilio pendiente, revisión de licencias/notices, fuentes/build exactos de terceros, `notice_address` y `legal_approval` |
 | Integración, tag y descarga pública | Pendiente | PR #2 sigue en borrador mientras falten los gates previos a integrar. Una vez resueltos, el tag en `main` genera el artifact inmutable de Actions; ese hash deberá aceptarse antes de publicar |
 
@@ -66,6 +66,13 @@ Se consultó nuevamente la [release Gyan 8.1.2](https://github.com/GyanD/codexff
 6. Comprobar los assets públicos y sus hashes; después actualizar las descargas a Beta 3.
 
 La ejecución completa del workflow directo permanece sin verificar hasta resolver esos requisitos. Build local, tests, fixtures y preview web no certifican aceptación humana ni publicación.
+
+### Inspección nativa del primer arranque — 2026-10-01 (PARCIAL)
+
+- Se instaló de nuevo el candidato local `Pulsaria_0.1.0-beta.3_x64-setup.exe`, **687,986,682 bytes**, SHA-256 **`D0492C87BF868A857FB02E8FB25AF7D12F451EFEA0ABA1176D8423B7A669F989`**, en un perfil temporal aislado. La aplicación abrió con `status=ok`, `version=0.1.0-beta.3`; los puertos 8080 y 9001 estaban libres al cerrar la prueba.
+- La ventana nativa mostró el onboarding a **1280 × 800** y **860 × 640**; el diálogo completo cupo en ambas. Tab movió el foco visible entre los controles legales. La captura de 860 × 640 se conserva en [evidence/beta3-onboarding-local-860x640.jpg](evidence/beta3-onboarding-local-860x640.jpg).
+- La biblioteca aislada estaba vacía y la confirmación de derechos de contenido aparecía detrás del diálogo legal. No se aceptó ningún documento ni se marcó la casilla de derechos. No hay evidencia de las funciones tras ese consentimiento ni del procesamiento del TikTok desde la interfaz nativa.
+- El artefacto es un build local, no el artifact inmutable de Actions; esto solo acredita el primer arranque y el encuadre de esos diálogos. La aceptación final permanece pendiente.
 
 ## Verificación del código en GitHub
 
