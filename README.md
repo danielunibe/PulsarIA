@@ -127,10 +127,12 @@ El candidato actual es `0.1.0-beta.3`, preparado en el
 [PR #2](https://github.com/danielunibe/PulsarIA/pull/2). **Beta 3 todavía no está
 publicada**; la descarga pública continúa siendo `v0.1.0-eval.3`.
 
-La verificación local de Beta 3 pasó `verify:mvp` (13/13), 103 pruebas Rust,
-31 pruebas Python y 1 skip live, además de accesibilidad, iconos, modelo local
-y auditoría de producción sin vulnerabilidades. Estos resultados no sustituyen
-la aceptación del instalador definitivo ni la prueba TikTok autorizada.
+En el head `0e0b3378`, la verificación local de Beta 3 pasó `verify:mvp`
+(13/13): 105 pruebas Rust, 32 pruebas Python y 1 prueba live omitida porque esa
+ejecución no recibió una URL. La evidencia separada del candidato también
+registra accesibilidad, iconos, modelo local y auditoría de producción sin
+vulnerabilidades. Estos resultados no sustituyen la aceptación del instalador
+definitivo ni la prueba TikTok autorizada.
 
 El flujo directo separa `build` y `publish`: conserva EXE, SPDX, notices,
 licencia, materiales de terceros, procedencia y hashes como artifact de Actions.

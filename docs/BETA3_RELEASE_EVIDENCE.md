@@ -260,3 +260,9 @@ Conclusión: el código candidato y su migración desde Eval.3 tienen evidencia 
 - El smoke instalado ejecutado contra ese hash pasó: instalación y desinstalación exit 0; runtime **54/54**; 13 documentos legales y avisos de terceros presentes; binarios FFmpeg/FFprobe y licencias presentes; modelos ONNX/Whisper presentes; `/health` correcto antes y después de reiniciar; overrides externos de runtime aislados; y marcador de datos de prueba conservado tras desinstalar.
 - El smoke fue **offline** y usó `APPDATA` temporal aislado. No inició ingestión, así que sus campos de staging y trabajos quedan sin prueba en esta ejecución. No demuestra procesamiento del TikTok autorizado, transcripción, búsqueda, reproducción, aceptación visual/nativa, WebView2 en Windows limpio ni instalación/upgrade desde un artifact de Actions.
 - Es un candidato local y no la build aprobada para publicación. La verificación SPDX no elimina los 10 hallazgos del gate legal; `DIRECT_DOWNLOAD_RELEASE_READY=false`, no existe tag `v0.1.0-beta.3`, PR #2 sigue en borrador y la release pública continúa en Eval.3.
+
+### Reejecución de verify:mvp — 2026-10-01
+
+- Desde el head `0e0b3378e428be9941f8fb8dbf3f0a91d302b54a`, `npm run verify:mvp` terminó **PASS 13/13**: 105 pruebas Rust y 32 Python. Una prueba live se omitió porque esta ejecución no recibió URL.
+- También pasaron lint, TypeScript, build estático, contrato es-MX/en-US, secretos/frontend, API loopback, estructura canónica, runtime 54/54 y onboarding.
+- Este resultado no valida TikTok, voz española, IPC live, búsqueda/reproducción, la interfaz nativa ni el artifact de Actions.
