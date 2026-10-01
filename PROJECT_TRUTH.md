@@ -31,6 +31,13 @@ la aprobación legal humana. El snapshot `media-autobuild_suite` `patch-7` se
 investigó por hash, pero no está vinculado al paquete 8.1.2 y no resuelve ese
 requisito.
 
+**Privacidad del historial:** el repositorio y el PR #2 son públicos. El commit
+`b7e6deea` de la rama del PR conserva el domicilio residencial en su historial;
+el commit `6dc3ae6b` lo retiró del árbol vigente, no de los commits anteriores.
+No se reescribió la rama porque el plan de lanzamiento prohíbe reescribir
+historia. No integrar el PR mientras no se resuelva esta exposición. La decisión
+entre conservar el historial o autorizar su saneamiento se solicitó al usuario.
+
 El 2026-09-30 se envió desde el contacto público de Pulsaria una solicitud a
 `builds@gyan.dev` para obtener los materiales fuente/build exactos del paquete
 Gyan 8.1.2; el correo está confirmado en Enviados y aún no aparece respuesta.

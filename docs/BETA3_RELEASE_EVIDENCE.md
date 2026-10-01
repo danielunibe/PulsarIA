@@ -175,6 +175,11 @@ La auditoría detectó 55 declaraciones Cargo con el separador histórico `/` de
 - Una búsqueda nueva de correo no encontró respuesta de Gyan. No existe tag ni release `v0.1.0-beta.3`; la release pública sigue en `v0.1.0-eval.3`. PR #2 continúa abierto, en borrador y mergeable. Después del head `da878d15`, las actualizaciones documentales protegieron el campo postal, registraron el smoke live y anotaron su transcripción vacía. El head `1cea2a5de91a277b504a4a4738ba0e213afe27e8` pasó [canonical CI, ejecución 36797093431](https://github.com/danielunibe/PulsarIA/actions/runs/36797093431) y [runtime bootstrap preflight, ejecución 36797093347](https://github.com/danielunibe/PulsarIA/actions/runs/36797093347). Estos checks no resuelven las pruebas humanas ni la revisión legal.
 - El test Python live se omitió en la ejecución general de `verify:mvp`; luego se ejecutó por separado y pasó como smoke del worker. La prueba autorizada dentro de la app nativa instalada sigue pendiente. Aceptación visual nativa, procesamiento TikTok mediante IPC, WebView2, instalación/actualización aislada y aceptación del artifact definitivo siguen **PENDIENTES**.
 
+### Privacidad de la rama pública del PR — 2026-10-01
+
+- El repositorio `danielunibe/PulsarIA` es público. El commit `b7e6deea` de `beta2-hardening`, visible en el historial público del PR #2, conserva el domicilio residencial en su snapshot. El commit `6dc3ae6b` dejó el manifiesto actual pendiente y sin el dato, pero no borra el snapshot anterior.
+- El plan vigente prohíbe reescribir la historia. La rama no se alteró por fuerza; el PR no debe integrarse mientras siga sin resolverse la exposición. Se solicitó al usuario una decisión explícita sobre conservar el historial o autorizar su saneamiento. El valor del domicilio se omite de este informe.
+
 ### Candidato local actual y smoke instalado — 2026-09-30
 
 - Construido desde el commit `97a85a28d71476a16378371f8fbfb8fcc6297ba1` con `npm run tauri build -- --bundles nsis` (exit 0). El EXE local es `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.3_x64-setup.exe`, **687,991,012 bytes**, SHA-256 **`E7332B87EC4A8645E831A95DAA3E1B9EA84F0B045102E0872DD344143473EEA6`**.
