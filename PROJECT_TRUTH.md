@@ -19,12 +19,16 @@ el artifact exacto conservado por Actions. `DIRECT_DOWNLOAD_RELEASE_READY=false`
 se mantiene hasta revisión legal y aceptación. No se publica ni se elimina una
 protección para resolver un gate pendiente.
 
-El head remoto del PR #2 es `3c316c93c73371fc3557ab79e6e4ffce8f1370a9`;
-permanece abierto, en borrador y mergeable. Sus [checks canónicos](https://github.com/danielunibe/PulsarIA/actions/runs/36818685000)
-y [preflight de runtime](https://github.com/danielunibe/PulsarIA/actions/runs/36818684957)
-pasaron para ese commit. Todavía no existe tag ni release `v0.1.0-beta.3`; la
-release pública más reciente sigue en `v0.1.0-eval.3`. Estos checks no son
-aceptación legal, visual nativa, live desde IPC ni aprobación del instalador.
+El último commit que cambió código de la aplicación es
+`38f141549d573e277fd0e0931d541cf54d9ad8a7`; los checks del PR pasaron después
+en el head `3c316c93c73371fc3557ab79e6e4ffce8f1370a9`. La actualización de
+evidencia `dd07f011f9e19494179bef54d8837ebca13fd640` también pasó [Canonical
+CI](https://github.com/danielunibe/PulsarIA/actions/runs/36820902701) y el
+[preflight de runtime](https://github.com/danielunibe/PulsarIA/actions/runs/36820902677);
+no modifica el código ni el instalador. El PR #2 sigue abierto, en borrador y
+mergeable. Todavía no existe tag ni release `v0.1.0-beta.3`; la release pública
+más reciente continúa en `v0.1.0-eval.3`. Esos checks no son aceptación legal,
+visual nativa, live desde IPC ni aprobación del instalador.
 
 El usuario autorizó una URL TikTok para la prueba; el enlace no se repite en
 documentación pública. El domicilio residencial proporcionado no se conserva

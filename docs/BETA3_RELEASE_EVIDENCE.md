@@ -206,3 +206,8 @@ La auditoría detectó 55 declaraciones Cargo con el separador histórico `/` de
 - Siguen pendientes la aceptación visual de la ventana nativa, el recorrido de importación autorizado mediante la app instalada con transcripción audible en español y sus verificaciones de indexación/búsqueda/reproducción, la instalación del artifact final descargado de Actions en Windows limpio con observación de WebView2, y el saneamiento o decisión sobre el domicilio residencial conservado en un snapshot histórico público del PR. El smoke de upgrade desde Eval.3 cubrió únicamente datos sintéticos y no sustituye esas aceptaciones.
 
 Conclusión: el código candidato y su migración desde Eval.3 tienen evidencia técnica y checks remotos aprobados, pero todavía no se cumplen los criterios para integrar y publicar Beta 3. No crear el tag, activar la variable ni aprobar el Environment hasta resolver los bloqueos enumerados y aceptar el artifact exacto.
+
+### Verificación de la actualización documental — 2026-09-30
+
+- El commit documental `dd07f011f9e19494179bef54d8837ebca13fd640` registró el estado del PR y el gate; no cambió código, licencia ni instalador. [Canonical CI, ejecución 36820902701](https://github.com/danielunibe/PulsarIA/actions/runs/36820902701) pasó en 10m8s y [runtime bootstrap preflight, ejecución 36820902677](https://github.com/danielunibe/PulsarIA/actions/runs/36820902677) pasó en 19s.
+- La variable `DIRECT_DOWNLOAD_RELEASE_READY` quedó explícitamente configurada en `false`. No se creó `v0.1.0-beta.3`; la publicación visible sigue siendo `v0.1.0-eval.3`. Las checks de ese head acreditan el árbol versionado, no los recorridos humanos, la aprobación legal o el artifact final que todavía debe construirse desde un tag integrado.
