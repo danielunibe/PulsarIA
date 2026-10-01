@@ -450,6 +450,26 @@ fn ensure_column(
     Ok(())
 }
 
+fn ensure_timestamp_column(
+    transaction: &rusqlite::Transaction<'_>,
+    table: &str,
+    column: &str,
+    fallback_expression: &str,
+) -> Result<()> {
+    // SQLite rejects ALTER TABLE ... ADD COLUMN when the new column has a
+    // non-constant default such as CURRENT_TIMESTAMP. Add it as nullable,
+    // then backfill existing rows inside the migration transaction. Callers
+    // that create new rows already provide the timestamp explicitly.
+    ensure_column(transaction, table, column, "DATETIME")?;
+    transaction.execute(
+        &format!(
+            "UPDATE \"{table}\" SET \"{column}\" = coalesce(\"{column}\", {fallback_expression}) WHERE \"{column}\" IS NULL"
+        ),
+        [],
+    )?;
+    Ok(())
+}
+
 fn table_has_column(
     transaction: &rusqlite::Transaction<'_>,
     table: &str,
@@ -665,11 +685,11 @@ fn migrate_playlist_memberships(transaction: &Transaction<'_>) -> Result<()> {
             "position",
             "REAL NOT NULL DEFAULT 0",
         )?;
-        ensure_column(
+        ensure_timestamp_column(
             transaction,
             "playlist_items",
             "added_at",
-            "DATETIME DEFAULT CURRENT_TIMESTAMP",
+            "CURRENT_TIMESTAMP",
         )?;
         ensure_column(
             transaction,
@@ -1217,10 +1237,15 @@ pub fn init_db() -> Result<Connection> {
         ("sort_mode", "TEXT NOT NULL DEFAULT 'manual'"),
         ("smart_query", "TEXT"),
         ("smart_filters_json", "TEXT"),
-        ("updated_at", "DATETIME DEFAULT CURRENT_TIMESTAMP"),
     ] {
         ensure_column(&transaction, "playlists", column, definition)?;
     }
+    ensure_timestamp_column(
+        &transaction,
+        "playlists",
+        "updated_at",
+        "created_at, CURRENT_TIMESTAMP",
+    )?;
 
     transaction.execute(
         "CREATE TABLE IF NOT EXISTS playlist_items (
@@ -6228,6 +6253,70 @@ mod tests {
         assert!(content_id > 0);
         assert_eq!(added_at, "2026-01-02T03:04:05Z");
         assert_eq!(added_by, "legacy_auto");
+    }
+
+    #[test]
+    fn migrates_playlist_updated_at_from_a_legacy_table_with_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE playlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO playlists (name, created_at)
+            VALUES ('Legacy playlist', '2026-01-02T03:04:05Z');",
+        )
+        .unwrap();
+
+        let transaction = conn.transaction().unwrap();
+        ensure_timestamp_column(
+            &transaction,
+            "playlists",
+            "updated_at",
+            "created_at, CURRENT_TIMESTAMP",
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+
+        let (name, created_at, updated_at): (String, String, String) = conn
+            .query_row(
+                "SELECT name, created_at, updated_at FROM playlists WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "Legacy playlist");
+        assert_eq!(updated_at, created_at);
+    }
+
+    #[test]
+    fn migrates_missing_playlist_item_timestamp_without_a_non_constant_default() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE playlist_items (
+                playlist_id INTEGER NOT NULL,
+                content_id INTEGER NOT NULL,
+                PRIMARY KEY (playlist_id, content_id)
+            );
+            INSERT INTO playlist_items (playlist_id, content_id) VALUES (1, 2);",
+        )
+        .unwrap();
+
+        let transaction = conn.transaction().unwrap();
+        migrate_playlist_memberships(&transaction).unwrap();
+        transaction.commit().unwrap();
+
+        let (position, added_at, added_by): (f64, String, String) = conn
+            .query_row(
+                "SELECT position, added_at, added_by FROM playlist_items WHERE playlist_id = 1 AND content_id = 2",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(position, 0.0);
+        assert!(!added_at.is_empty());
+        assert_eq!(added_by, "user");
     }
 
     fn memory_db() -> Connection {
