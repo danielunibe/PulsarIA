@@ -504,3 +504,35 @@ El fix de migración y sus dos pruebas de regresión se registraron en el commit
 build local de prueba se generó del mismo contenido de código; el informe de
 los gates ejecutados el 2026-10-01 está en el archivo local ignorado
 `target-tauri/beta3-current-verification.json`.
+
+### Navegación accesible bilingüe — 2026-10-01
+
+El commit `d53013c5870dc5f0636213d58607ee923137ca31` localiza los nombres
+accesibles de la navegación principal, Playlists, Actividad, Cinema, el
+contador de actividad y los controles nativos de ventana en `es-MX` y `en-US`.
+`scripts/verify-locale.ps1` comprueba las nuevas entradas y su uso. El cambio no
+modifica el flujo ni las acciones.
+
+En ese código pasaron `npm run verify:mvp` (13/13, 105 pruebas Rust y 31
+Python; la prueba live se omitió), `verify:versions`, `verify:frontend-a11y`,
+`verify:icons`, `verify:local-llm`, `verify:api`, `verify:website`, SPDX
+(762 paquetes, 68 archivos, 42 expresiones) y `npm audit --omit=dev`
+(cero vulnerabilidades). Esos resultados no aceptan una ventana nativa ni una
+instalación.
+
+La repetición actual de `verify:legal-release -RequireSbom` permanece
+**BLOCKED con 10 hallazgos**: seis documentos legales aún contienen texto de
+contacto/domicilio pendiente; faltan la revisión de componentes/notices,
+materiales de fuente y build exactos y la aprobación humana; `notice_address` y
+`legal_approval` permanecen pendientes. El usuario identificó el dato postal
+previamente registrado como su domicilio particular; no se recibió una
+autorización expresa para publicarlo, por lo que el manifiesto conserva el
+marcador pendiente y el domicilio no se incorpora al árbol actual. Un snapshot
+histórico público del PR conserva la exposición y sigue sin saneamiento; el PR
+no se debe integrar hasta resolverla.
+
+El instalador local `CE0FB3D9…D88E51CE` se creó antes de este commit y no
+incluye el cambio bilingüe; no es candidato para la aceptación final. La rama
+debe volver a construir NSIS y verificar el nuevo artifact después de resolver
+los gates. La descarga pública continúa en `v0.1.0-eval.3`, no hay tag Beta 3 y
+`DIRECT_DOWNLOAD_RELEASE_READY=false`.

@@ -44,7 +44,7 @@ No ejecutar el patrón si la ruta de datos, EXE o puertos no coinciden con la se
 | Instalación nueva y onboarding | Instalación por usuario, primer arranque y consentimiento sin herramientas de desarrollo | Pendiente |
 | Biblioteca vacía / DEMO | Vacío explicado; DEMO opt-in separado de SQLite y búsqueda | Pendiente |
 | 1280 × 800 / 860 × 640 | Cabecera, navegación, Ajustes y acciones visibles sin recortes que impidan uso | Pendiente |
-| Teclado / foco / idioma | Acciones accesibles, foco visible y cambio persistente es-MX/en-US | Pendiente |
+| Teclado / foco / idioma | Acciones accesibles, foco visible y cambio persistente es-MX/en-US; comprobar que cambien los nombres accesibles de navegación, Cinema y controles de ventana | Pendiente |
 | URL autorizada con voz española | Job completado, audio reproducible y transcripción con palabras reconocibles | Pendiente; una repetición del worker extrajo 41.263 s de audio MP3 mono 16 kHz (media −19.0 dB, pico −6.1 dB), pero generó 0 caracteres y segmentos; no confirma si había voz |
 | Actividad / fallo / reintento | Estado real, mensaje comprensible y reintento sin progreso inventado | Pendiente |
 | URL inválida / duplicado | Rechazo visible; duplicado no crea otro contenido canónico | Pendiente |
