@@ -20,15 +20,15 @@ se mantiene hasta revisión legal y aceptación. No se publica ni se elimina una
 protección para resolver un gate pendiente.
 
 El commit funcional más reciente del PR es
-`d53013c5870dc5f0636213d58607ee923137ca31` (nombres accesibles bilingües). Al
-corte de esta evidencia, el head documental `328e1b57ba912600316464312816d6b40ed29fe5`
-tenía ambos checks completos y el PR #2 seguía abierto, en borrador y mergeable:
-[Canonical CI, ejecución 36895639595](https://github.com/danielunibe/PulsarIA/actions/runs/36895639595)
-y [runtime bootstrap preflight, ejecución 36895639527](https://github.com/danielunibe/PulsarIA/actions/runs/36895639527).
-Un seguimiento documental de privacidad se registra a continuación y debe
-completar su propio ciclo de CI antes de integrar. Los checks de código no
-sustituyen aceptación legal, visual nativa, live desde IPC ni aprobación del
-artifact definitivo de Actions.
+`d53013c5870dc5f0636213d58607ee923137ca31` (nombres accesibles bilingües). El
+head documental `752f437c7bffb43dd5a823207c040a99ba572ad8`, que también registra
+la inspección nativa parcial, pasó ambos checks: [Canonical CI, ejecución
+36905107578](https://github.com/danielunibe/PulsarIA/actions/runs/36905107578) y
+[runtime bootstrap preflight, ejecución
+36905107561](https://github.com/danielunibe/PulsarIA/actions/runs/36905107561).
+El PR #2 sigue abierto, en borrador y mergeable. Los checks de código no
+sustituyen aceptación legal, visual nativa completa, live desde IPC ni
+aprobación del artifact definitivo de Actions.
 
 El último instalador local es `Pulsaria_0.1.0-beta.3_x64-setup.exe`,
 687,986,682 bytes, SHA-256
@@ -50,6 +50,15 @@ sin violaciones de claves foráneas, ajustes `en-US`/`oled` preservados y datos
 conservados después de desinstalar. El resumen saneado está en
 `docs/BETA3_UPGRADE_LOCAL_EVIDENCE.json`. La aceptación aún debe repetirse con
 el artifact de Actions en Windows x64 limpio.
+
+La inspección nativa del primer arranque con ese mismo hash fue **parcial**. En
+un perfil temporal, el diálogo legal cupo a 1280 × 800 y 860 × 640 y Tab mostró
+foco visible; se conserva la captura de 860 × 640 en
+`docs/evidence/beta3-onboarding-local-860x640.jpg`. El host era Windows 11 Pro
+x64, compilación `10.0.26200`, con WebView2 disponible `154.0.4258.37`; no era
+un Windows limpio. No se aceptaron acuerdos ni la política de derechos, así
+que no se recorrió la aplicación detrás de esos controles. Esto no es
+aceptación humana ni prueba live.
 
 `npm run verify:mvp` pasó 13/13 en el checkout
 `0e0b3378e428be9941f8fb8dbf3f0a91d302b54a` (105 pruebas Rust y 32 pruebas
@@ -79,8 +88,8 @@ resuelve la revisión de redistribución.
 La última release pública sigue siendo `v0.1.0-eval.3`; no existe tag ni
 release `v0.1.0-beta.3`, y `DIRECT_DOWNLOAD_RELEASE_READY=false`. El upgrade
 local desde Eval.3 ya pasó con el hash actual; debe repetirse con el artifact
-exacto de Actions en Windows x64 limpio, incluido WebView2. El instalador actual
-aún no tiene aceptación nativa/visual en ambas resoluciones ni aceptación del
+exacto de Actions en Windows x64 limpio, incluido WebView2. La inspección nativa
+solo cubrió parcialmente el onboarding; faltan aceptación humana completa y el
 recorrido live. La decisión sobre los datos residenciales que siguen en un
 commit antiguo del historial público también permanece pendiente; no se
 reescribió la rama.

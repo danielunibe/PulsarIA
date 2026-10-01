@@ -77,6 +77,14 @@ La ejecución completa del workflow directo permanece sin verificar hasta resolv
 
 ## Verificación del código en GitHub
 
+El head documental `752f437c7bffb43dd5a823207c040a99ba572ad8` pasó [Canonical
+CI, ejecución 36905107578](https://github.com/danielunibe/PulsarIA/actions/runs/36905107578)
+y [runtime bootstrap preflight, ejecución
+36905107561](https://github.com/danielunibe/PulsarIA/actions/runs/36905107561).
+La CI canónica terminó `success` el 2026-10-01 a las 18:23:52 UTC. Esto
+verifica el source del PR en ese commit y no reemplaza los gates legales,
+humanos ni del artifact definitivo de Actions.
+
 El commit `501bbb29d8337e070109d58a3525bfb1f7f04360` contiene la preparación técnica Beta 3. Ambos checks terminaron correctamente el 29 de septiembre de 2026:
 
 - [Canonical CI, ejecución 36642176395](https://github.com/danielunibe/PulsarIA/actions/runs/36642176395): `success`, finalizada a las 23:01:58 UTC.
