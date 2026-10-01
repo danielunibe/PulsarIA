@@ -39,9 +39,13 @@ publicable. El manifiesto de contacto no representa una confirmación de
 titularidad legal ni una aprobación de los avisos. El gate legal, regenerado
 con el SPDX actual, sigue bloqueado por `notice_address`, la revisión de
 `THIRD_PARTY_NOTICES.md`, las fuentes y receta exactas del build Gyan/FFmpeg y
-la aprobación legal humana. El snapshot `media-autobuild_suite` `patch-7` se
-investigó por hash, pero no está vinculado al paquete 8.1.2 y no resuelve ese
-requisito.
+la aprobación legal humana. El gate ahora también revisa los ocho documentos
+de EULA, términos, privacidad y política de contenido: detecta texto pendiente
+de confirmación del domicilio físico en seis traducciones. Tres campos de
+contacto españoles que ya tenían un canal público definido se normalizaron con
+ese contacto; ningún dato residencial se añadió. El snapshot
+`media-autobuild_suite` `patch-7` se investigó por hash, pero no está vinculado
+al paquete 8.1.2 y no resuelve ese requisito.
 
 **Privacidad del historial:** el repositorio y el PR #2 son públicos. El commit
 `b7e6deea` de la rama del PR conserva el domicilio residencial en su historial;

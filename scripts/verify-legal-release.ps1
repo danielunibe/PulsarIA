@@ -38,6 +38,30 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot $relative) -PathType Leaf)) { $blockers.Add("Missing required release file: $relative") }
     }
 
+    $userFacingLegalDocuments = @(
+        'EULA.es.md', 'EULA.en.md', 'TERMS_OF_USE.es.md', 'TERMS_OF_USE.en.md',
+        'PRIVACY.es.md', 'PRIVACY.en.md', 'CONTENT_POLICY.es.md', 'CONTENT_POLICY.en.md'
+    )
+    $unresolvedDocumentMarkers = @(
+        '(?i)COMPLETAR\s+ANTES\s+DEL\s+RELEASE',
+        '(?i)PENDING\s+CONFIRMATION(?:\s+AND\s+REVIEW)?',
+        '(?i)PENDIENTE[\s\S]{0,80}CONFIRMAR[\s\S]{0,40}REVISAR',
+        '(?i)REQUIERE[\s\S]{0,40}(CONFIRM|REVIS)',
+        '(?i)REQUIRES?[\s\S]{0,40}(CONFIRM|REVIS)'
+    )
+    foreach ($relative in $userFacingLegalDocuments) {
+        $documentPath = Join-Path $SourceRoot $relative
+        if (-not (Test-Path -LiteralPath $documentPath -PathType Leaf)) { continue }
+        $documentText = Get-Content -LiteralPath $documentPath -Raw
+        $unresolvedDocument = $false
+        foreach ($marker in $unresolvedDocumentMarkers) {
+            if ($documentText -match $marker) { $unresolvedDocument = $true; break }
+        }
+        if ($unresolvedDocument) {
+            $blockers.Add("Unresolved release contact/address text in $relative.")
+        }
+    }
+
     $license = Get-Content -LiteralPath (Join-Path $SourceRoot 'LICENSE') -Raw
     if ($license -notmatch 'Pulsaria Source-Visible Beta License') { $blockers.Add('Root LICENSE is not the Pulsaria source-visible beta license.') }
     if ($license -match '(?im)^MIT License\s*$') { $blockers.Add('The old MIT license is still the root source license.') }

@@ -109,7 +109,7 @@ La versión española es la referencia para usuarios en México. Este EULA se
 interpretará conforme a la legislación aplicable, sin limitar derechos
 irrenunciables del consumidor o de protección de datos.
 
-Contacto legal: COMPLETAR ANTES DEL RELEASE.
+Contacto legal: danielunibe10@gmail.com.
 
 La licencia de código fuente se encuentra en LICENSE. La política de
 contenido, privacidad, copyright y seguridad se encuentra en los documentos

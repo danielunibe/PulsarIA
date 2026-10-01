@@ -108,7 +108,7 @@ Si posteriormente Pulsaria recibe datos personales directamente como parte de
 un canal de soporte, responderá las solicitudes de acceso, rectificación,
 cancelación u oposición conforme a la legislación aplicable.
 
-Solicitud de privacidad y derechos ARCO: COMPLETAR ANTES DEL RELEASE.
+Solicitudes de privacidad y derechos ARCO: danielunibe10@gmail.com.
 
 No envíes vídeos, transcripciones, cookies ni información confidencial por
 issues públicos de GitHub.
