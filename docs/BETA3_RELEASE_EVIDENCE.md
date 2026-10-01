@@ -38,7 +38,7 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 | Smoke offline del instalador vigente | PASS local | Instalación/desinstalación exit 0, runtime 54/54, recursos legales y modelos presentes, health antes/después de reinicio y datos de prueba conservados. No ejecutó ingestión, transcripción ni búsqueda |
 | Smoke de instalador anterior | Histórico, hash obsoleto | Un smoke inicial reveló que React no hidrataba; candidatos anteriores quedaron reemplazados tras cambios. No certifica el EXE actual |
 | Actualización desde Eval.3 | PASS solo en fixture local anterior | El candidato `55F420C9…B2C02C1` migró SQLite, relaciones, trabajos, medios, playlists y ajustes con datos sintéticos. Ese EXE quedó obsoleto; repetir la actualización con el artifact exacto de Actions |
-| Aceptación nativa y TikTok live | Pendiente | Falta Windows x64 limpio, WebView2, UI 1280 × 800 y 860 × 640, IPC autenticado, voz española, indexación, búsqueda y reproducción sobre el artifact definitivo |
+| Aceptación nativa y TikTok live | Pendiente | Falta Windows x64 limpio, WebView2, UI 1280 × 800 y 860 × 640, IPC autenticado, voz española, indexación, búsqueda y reproducción sobre el artifact definitivo. El worker aislado obtuvo audio no silencioso, pero 0 transcripción y no determina si había voz |
 | Gate legal con SPDX | BLOCKED: 10 hallazgos | Seis traducciones con domicilio pendiente, revisión de licencias/notices, fuentes/build exactos de terceros, `notice_address` y `legal_approval` |
 | Integración, tag y descarga pública | Pendiente | PR #2 sigue en borrador; no crear tag ni publicar antes de resolver los gates y aceptar el artifact exacto |
 
@@ -265,3 +265,10 @@ Conclusión: el código candidato y su migración desde Eval.3 tienen evidencia 
 - Desde el head `0e0b3378e428be9941f8fb8dbf3f0a91d302b54a`, `npm run verify:mvp` terminó **PASS 13/13**: 105 pruebas Rust y 32 Python. Una prueba live se omitió porque esta ejecución no recibió URL.
 - También pasaron lint, TypeScript, build estático, contrato es-MX/en-US, secretos/frontend, API loopback, estructura canónica, runtime 54/54 y onboarding.
 - Este resultado no valida TikTok, voz española, IPC live, búsqueda/reproducción, la interfaz nativa ni el artifact de Actions.
+
+### Repetición diagnóstica del TikTok autorizado — 2026-10-01
+
+- Se ejecutó el worker canónico con el runtime Python/FFmpeg preparado y el perfil aislado bajo `%TEMP%`; se deshabilitó el uso de cookies del navegador y se redirigieron descargas, datos, transcripciones, modelos, temporales y artifacts a ese perfil.
+- La descarga terminó con exit 0 y la secuencia de eventos llegó a `completed`. Whisper volvió a emitir **0 caracteres y 0 segmentos**. El audio extraído duró **41.263 s**, era MP3 mono a **16 kHz** y no estaba en silencio (volumen medio **−19.0 dB**, pico **−6.1 dB**). Esto confirma una pista audible, pero no permite distinguir voz de música/ambiente ni acreditar español reconocible.
+- Los archivos de video, audio, modelo y logs creados para esta repetición se eliminaron del directorio temporal después de registrar estas medidas. La prueba fue de worker por CLI; no es aceptación desde la ventana instalada ni verifica IPC, biblioteca, búsqueda o reproducción.
+- La URL no se copia en este informe. Si el usuario confirma que el clip debería contener voz clara, investigar el audio/transcriptor; de lo contrario, hace falta otra URL autorizada con voz española para satisfacer la prueba live.

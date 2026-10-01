@@ -54,9 +54,11 @@ exactos no revisados, `notice_address` y `legal_approval`.
 
 El usuario autorizó una URL TikTok para probarla; el enlace no se repite en
 documentación pública. El smoke live del worker llegó a `completed`, pero
-produjo cero caracteres de transcripción y cero segmentos. Falta aceptación
-live desde la app instalada con IPC autenticado, voz española, indexación,
-búsqueda y reproducción. `notice_address` queda pendiente hasta recibir
+produjo cero caracteres de transcripción y cero segmentos. Una repetición
+aislada extrajo 41.263 segundos de MP3 mono a 16 kHz con señal no silenciosa;
+no permite distinguir voz de música/ambiente ni acreditar voz española.
+Falta aceptación live desde la app instalada con IPC autenticado, voz española,
+indexación, búsqueda y reproducción. `notice_address` queda pendiente hasta recibir
 autorización explícita para publicar un domicilio residencial o un contacto
 postal publicable. El manifiesto de contacto no acredita titularidad legal ni
 aprobación de los avisos. El gate examina los ocho documentos de EULA, términos,
