@@ -1,6 +1,6 @@
 # Pulsaria Beta 3 — evidencia y pendientes de cierre
 
-Actualizado: 2026-09-30. Versión del candidato: **0.1.0-beta.3**.
+Actualizado: 2026-10-01. Versión del candidato: **0.1.0-beta.3**.
 
 **Estado: preparación técnica; publicación bloqueada por entradas y aceptación pendientes.** La última descarga pública sigue siendo `v0.1.0-eval.3`. No existe una release pública Beta 3 ni se ha creado su tag.
 
@@ -23,8 +23,8 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 
 | Gate | Resultado | Evidencia y límites |
 | --- | --- | --- |
-| `verify:mvp` | PASS 13/13 | `target-tauri/beta3-verify-mvp-next-16.3.8.log`; incluye lint, TypeScript, build, locale, Rust, Python, seguridad, estructura, runtime y onboarding |
-| Rust | PASS | 103 tests; 0 fallos |
+| `verify:mvp` | PASS 13/13 | Resumen estructurado de la ejecución del commit `38f141549d573e277fd0e0931d541cf54d9ad8a7` en `target-tauri/beta3-current-verification.json`; incluye lint, TypeScript, build, locale, Rust, Python, seguridad, estructura, runtime y onboarding |
+| Rust | PASS | 105 tests; 0 fallos |
 | Python | PASS offline | 31 tests PASS y 1 skip live; 32 en total |
 | Runtime fuente | PASS | 54 archivos críticos del manifiesto verificados; no son el total de archivos empaquetados ni certifican instalación limpia |
 | Versiones | PASS | Incluye `legal/release-manifest.json` |
@@ -36,10 +36,10 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 | Workflows e Issues | PASS sintaxis, actionlint parcial | El parser YAML valida los dos workflows cambiados en esta revisión; `actionlint` no está disponible en este checkout y los checks de Actions deben repetirse sobre el nuevo commit |
 | Sitio y estructura canónica | PASS | `verify:website`, `verify:canonical` |
 | SPDX agregado | PASS inventario y sintaxis | 762 paquetes, 68 archivos, 42 expresiones únicas validadas; 34 npm, 695 Cargo, 33 Python, 54 runtime, 13 documentos legales y 1 licencia de tercero. No equivale a revisión de licencias |
-| Instalador Beta 3 | PASS build local | `npm run tauri build -- --bundles nsis`, exit 0; candidato descrito abajo |
+| Instalador Beta 3 | PASS build local | `npm run tauri build -- --bundles nsis`, exit 0; candidato `55F420C9…B2C02C1`, 687,988,116 bytes |
 | Smoke offline del primer candidato | PASS histórico, hash rechazado | El health check pasó con F151…, pero la inspección de la ventana detectó que React no hidrataba; no certifica el candidato activo |
-| Actualización desde eval.3 | PARCIAL en fixture | NSIS preservó SQLite, ajustes y archivos sintéticos. No se inició la app tras actualizar; no certifica migración ni biblioteca personal |
-| Aceptación nativa y TikTok live | Pendiente | La corrección de hidratación se verificó en navegador, no en la app instalada. El lanzamiento de la build instalada quedó rechazado por revisión automática de herramientas; TikTok, idiomas, Cinema y Ajustes no están aceptados |
+| Actualización desde eval.3 | PASS local en fixture | El primer arranque de Beta 3 migró SQLite; `/health`, integridad, claves foráneas, trabajos, medios, playlists, ajustes y archivos sintéticos pasaron también tras desinstalar. No es el artifact de Actions ni usa una biblioteca personal |
+| Aceptación nativa y TikTok live | Pendiente | La build instalada nueva respondió `/health` y migró el fixture en un proceso oculto, pero no se inspeccionó su ventana ni se probó interacción humana. TikTok desde IPC, idiomas, Cinema y Ajustes siguen sin aceptar |
 | Gate legal con SPDX | BLOCKED por cuatro asuntos | El SBOM y su sintaxis pasan, pero el manifiesto conserva el domicilio como pendiente y siguen sin resolverse la revisión de notices/licencias, los materiales fuente/build exactos y la aprobación legal humana |
 | Integración, tag y descarga pública | Pendiente | No se publican antes de revisar el candidato |
 
@@ -62,7 +62,7 @@ Se consultó nuevamente la [release Gyan 8.1.2](https://github.com/GyanD/codexff
 1. `public_owner` se presenta como “Daniel Unibe”, denominación ya usada en el PR #2; por delegación del usuario, se eligió como contacto `danielunibe10@gmail.com`, correo que aparece en el perfil público de GitHub. Estos datos no acreditan identidad legal ni control del buzón. `notice_address` queda pendiente hasta contar con autorización explícita para publicar un domicilio residencial o con otro contacto postal publicable.
 2. Resolver `COMPONENT_LICENSE_REVIEW_PENDING`, registrar los materiales exactos aprobados de terceros con URL/hash y completar la aprobación legal humana. El gate legal vigente también mantiene `notice_address` pendiente.
 3. Completar [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) con el artifact definitivo de Actions, Windows sin herramientas de desarrollo, WebView2, actualización, ventana nativa y prueba live de la URL autorizada.
-4. El instalador `AB13…` quedó obsoleto. Existe un nuevo candidato local `E733…` con smoke aislado aprobado, pero aún no es el artefacto definitivo de Actions ni tiene aceptación humana; cerrar primero los asuntos legales y completar la aceptación del hash exacto.
+4. Los instaladores `AB13…` y `E733…` quedaron obsoletos. El candidato local actual `55F420C9…B2C02C1` pasó smoke instalado y actualización desde eval.3 con fixture; aún no es el artifact definitivo de Actions ni tiene aceptación humana. Cerrar primero los asuntos legales y completar la aceptación del hash exacto.
 5. Integrar el PR revisado en `main`, crear el tag nuevo y ejecutar el workflow. Mantener `DIRECT_DOWNLOAD_RELEASE_READY=false` hasta aceptación y revisión; no desactivar el Environment.
 6. Comprobar los assets públicos y sus hashes; después actualizar las descargas a Beta 3.
 
@@ -185,3 +185,13 @@ La auditoría detectó 55 declaraciones Cargo con el separador histórico `/` de
 - Construido desde el commit `97a85a28d71476a16378371f8fbfb8fcc6297ba1` con `npm run tauri build -- --bundles nsis` (exit 0). El EXE local es `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.3_x64-setup.exe`, **687,991,012 bytes**, SHA-256 **`E7332B87EC4A8645E831A95DAA3E1B9EA84F0B045102E0872DD344143473EEA6`**.
 - `npm run verify:installed -- -Configuration release -Bundle nsis -ApiPort 8080` pasó sobre ese mismo hash: instalación y desinstalación exit 0, recursos de runtime **54/54**, 13 documentos legales presentes, `/health` correcto antes y después de reiniciar, `PATH` y overrides externos retirados, perfil y descargas temporales aislados, sin archivos residuales en staging y limpieza exitosa.
 - El smoke no procesó contenido (`ingest`, búsqueda y trabajo final no se ejecutaron). Tampoco valida voz, interfaz nativa, actualización desde Eval.3, WebView2 limpio ni aceptación en un equipo sin herramientas de desarrollo. El EXE local no está firmado y no es aún un artifact de Actions aprobado. Cualquier cambio de fuente o empaquetado exige reconstrucción y una nueva aceptación.
+
+### Corrección SQLite y upgrade desde eval.3 — 2026-10-01
+
+- La actualización instalada desde la release pública `v0.1.0-eval.3` encontró un fallo reproducible de inicio: la tabla histórica `playlists` no tenía `updated_at`, y SQLite rechazaba agregarla con `DEFAULT CURRENT_TIMESTAMP` como default no constante. El arranque se detenía durante la inicialización de `library.db`.
+- Se corrigió la migración: agrega la marca temporal como columna nullable y completa los registros históricos con `created_at` (o `CURRENT_TIMESTAMP` si falta). Se aplicó el mismo patrón a `playlist_items.added_at` para el caso de schema canónico incompleto. Dos regresiones cubren tablas con filas existentes; `cargo fmt --check` y `npm run verify:mvp` pasaron (105/105 Rust, 31 Python aprobadas y 1 prueba live omitida).
+- Reconstruido el instalador NSIS local desde el working tree con esa corrección: **687,988,116 bytes**, SHA-256 **`55F420C9AE73685AF207CE8FA273484F249DAB5C0A9B3775B6D8A4434B2C02C1`**, ProductVersion `0.1.0-beta.3`, `NotSigned`. `npm run verify:installed -- -Configuration release -Bundle nsis -ApiPort 8080` terminó con exit 0: 54/54 recursos, los 13 documentos legales, health inicial y tras reinicio, instalación/desinstalación y conservación del marcador de datos.
+- La prueba de upgrade instaló el NSIS público Eval.3 (`1ABD7589…9551EF`), arrancó ese programa, sembró únicamente una biblioteca/ajustes/medios sintéticos, aplicó el NSIS Beta 3 y arrancó la app nueva con `PATH` y overrides externos retirados. Exit codes de ambas instalaciones: 0; el runtime instalado verificó 54/54; `/health` contestó `0.1.0-beta.3`.
+- Tras el primer arranque Beta 3, `PRAGMA integrity_check=ok`, `foreign_key_check` vacío; seguían 1 job, 1 media, 1 playlist y 1 vínculo. Se conservaron las 2 rutas/hash de medios y 17 ajustes, y la playlist mantuvo su vínculo al job pese al cambio de `job_id` a `content_id`. El reconciliador llenó `media.video_bytes` desde el archivo conservado; el verificador comprueba que coincida exactamente con el tamaño en disco. La misma comprobación volvió a pasar tras desinstalar (`uninstallExit=0`). Evidencia local: `target-tauri/beta3-upgrade-current-smoke-validated.json`.
+- El fixture vivió bajo una carpeta temporal aislada con GUID; no se usó ni modificó la biblioteca personal. El resumen registra `cleanup=false`: el limpiador automático rechazó borrar esa carpeta; se dejó intacta. El smoke instalado no procesó el TikTok autorizado y no certifica transcripción, búsquedas, UI nativa, WebView2 en máquina limpia ni la descarga de Actions.
+- Esta build se creó desde el mismo árbol de código luego registrado en el commit `38f141549d573e277fd0e0931d541cf54d9ad8a7`; el commit de código contiene el fix y sus regresiones. La documentación de evidencia se añadió después y no cambia el paquete. Solo un artifact de Actions, construido desde tag integrado en `main`, puede ser candidato de publicación.

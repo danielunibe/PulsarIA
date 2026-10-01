@@ -74,3 +74,5 @@ Por delegación del usuario, se eligió como presentación pública “Daniel Un
 El 2026-09-30 el usuario proporcionó y autorizó una URL TikTok para la prueba. Se omite el enlace concreto de esta documentación pública; debe comprobarse si contiene voz en español. Recibirlo no demuestra descarga ni transcripción.
 
 El candidato local con hash `F1515FF7FCBA67EA90832711FE5A6FA2B43B567F7B01ACA9AF45FC69DE3CC212` fue rechazado en inspección nativa por falta de hidratación del frontend. Repetir el recorrido con el instalador corregido; ver `BETA3_RELEASE_EVIDENCE.md`.
+
+La prueba aislada de actualización desde Eval.3 se completó después para el instalador local `55F420C9AE73685AF207CE8FA273484F249DAB5C0A9B3775B6D8A4434B2C02C1`: primer arranque Beta 3, migración SQLite, reinicio y desinstalación conservaron la biblioteca sintética, los ajustes y los archivos. La fila de aceptación final sigue pendiente porque este EXE no es el artifact de Actions y faltan WebView2 en un Windows sin herramientas de desarrollo, recorrido humano de la ventana instalada y el procesamiento TikTok desde IPC nativo.

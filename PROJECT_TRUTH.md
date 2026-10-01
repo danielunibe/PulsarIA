@@ -436,3 +436,43 @@ evidencia histórica del mismo flujo. Los workflows usan
 `actions/checkout@v7` y `actions/setup-node@v7`; el smoke NSIS en 8080 y la
 comprobación del gateway ya pasaron, pero la aceptación visual Tauri continúa
 pendiente.
+
+### Seguimiento actual Beta 3 — 2026-10-01
+
+La corrección de Beta 3 para Next.js `16.3.8` pasó `npm run verify:mvp`:
+13/13 gates, 105 pruebas Rust y 31 pruebas Python aprobadas más un skip de la
+prueba live. Se encontraron y añadieron dos regresiones para un fallo de
+migración real al actualizar la biblioteca pública Eval.3: SQLite no permite
+`ALTER TABLE ... ADD COLUMN` con `DEFAULT CURRENT_TIMESTAMP` en una tabla
+existente con filas. La migración ahora agrega timestamps sin ese default y
+completa filas anteriores desde `created_at` o el momento actual.
+
+El instalador local resultante `Pulsaria_0.1.0-beta.3_x64-setup.exe` mide
+687,988,116 bytes y su SHA-256 es
+`55F420C9AE73685AF207CE8FA273484F249DAB5C0A9B3775B6D8A4434B2C02C1`.
+`verify:installed` terminó con instalación/desinstalación y health tras reinicio
+correctos, runtime 54/54 y los 13 documentos legales presentes. Un test de
+upgrade desde el EXE público Eval.3 ejecutó el primer arranque de Beta 3 y
+verificó integridad SQLite, relaciones foráneas, jobs/media/playlists,
+conversión de membresías de playlist a content IDs, ajustes y dos archivos de
+fixture después del upgrade y de la desinstalación. Se usó solo un perfil
+temporal sintético; esto no es aceptación de una biblioteca personal ni del
+artifact de Actions. El perfil temporal de test quedó intacto porque el
+limpiador automático rechazó su eliminación.
+
+La descarga pública sigue en `v0.1.0-eval.3`; `DIRECT_DOWNLOAD_RELEASE_READY`
+sigue `false`. Permanecen pendientes: revisión legal/notices y materiales
+FFmpeg exactos, domicilio postal público autorizado, saneamiento de la
+exposición histórica de ese dato en commits del PR, aceptación de la ventana
+nativa/voz española desde IPC, prueba WebView2 en Windows sin herramientas de
+desarrollo y aprobación del artifact inmutable de Actions. El PR #2 no se
+integra ni se etiqueta hasta resolver esos gates. Ver
+`docs/BETA3_RELEASE_EVIDENCE.md` y `docs/BETA3_ACCEPTANCE.md` para la evidencia
+detallada.
+
+El fix de migración y sus dos pruebas de regresión se registraron en el commit
+`38f141549d573e277fd0e0931d541cf54d9ad8a7` (`src-tauri/src/db.rs`, SHA-256
+`2E9637E52D98E121C15FBEF67097BB07F71FFD4D61E19345E3973CC82E26087D`). La
+build local de prueba se generó del mismo contenido de código; el informe de
+los gates ejecutados el 2026-10-01 está en el archivo local ignorado
+`target-tauri/beta3-current-verification.json`.
