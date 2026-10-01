@@ -37,7 +37,7 @@ La [página actual de builds](https://www.gyan.dev/ffmpeg/builds/) mantiene 8.1.
 
 ### Revisión de la página del proveedor — 2026-10-01
 
-La página de Gyan indica que su última actualización fue el 2026-09-28, lista FFmpeg 9.0.2 (2026-09-19) como release más reciente y conserva 8.1.2 en “previous release”. También clasifica sus builds actuales como estáticas y GPLv3. El instalador candidato Beta 3 conserva el paquete 8.1.2 identificado por hash; esta comprobación solo actualiza el contexto temporal del inventario. No cambia el binario, no prueba la receta ni las fuentes exactas de sus bibliotecas externas y no satisface la revisión de redistribución.
+La página de Gyan consultada el 2026-10-01 muestra como actualización más reciente de builds el 2026-10-01 (git master `0b01ed76aa`, con siguiente actualización indicada para 2026-10-05), lista FFmpeg 9.0.2 (2026-09-19) como release más reciente y conserva 8.1.2 en “previous release”. También clasifica sus builds actuales como estáticas y GPLv3. El instalador candidato Beta 3 conserva el paquete 8.1.2 identificado por hash; esta comprobación solo actualiza el contexto temporal del inventario. No cambia el binario, no prueba la receta ni las fuentes exactas de sus bibliotecas externas y no satisface la revisión de redistribución.
 
 ### OpenAL Soft 1.25.2 — reconstrucción candidata, no atribución exacta
 
