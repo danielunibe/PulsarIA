@@ -30,6 +30,12 @@ El PR #2 sigue abierto, en borrador y mergeable. Los checks de código no
 sustituyen aceptación legal, visual nativa completa, live desde IPC ni
 aprobación del artifact definitivo de Actions.
 
+La sincronización normativa `84eac1303260f523d6fcf2a22e8bc6579a3da387` también
+pasó [Canonical CI, ejecución
+36906743079](https://github.com/danielunibe/PulsarIA/actions/runs/36906743079)
+y [runtime bootstrap preflight, ejecución
+36906743554](https://github.com/danielunibe/PulsarIA/actions/runs/36906743554).
+
 El último instalador local es `Pulsaria_0.1.0-beta.3_x64-setup.exe`,
 687,986,682 bytes, SHA-256
 `D0492C87BF868A857FB02E8FB25AF7D12F451EFEA0ABA1176D8423B7A669F989`,

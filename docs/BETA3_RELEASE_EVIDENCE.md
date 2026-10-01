@@ -85,6 +85,12 @@ La CI canónica terminó `success` el 2026-10-01 a las 18:23:52 UTC. Esto
 verifica el source del PR en ese commit y no reemplaza los gates legales,
 humanos ni del artifact definitivo de Actions.
 
+El seguimiento normativo `84eac1303260f523d6fcf2a22e8bc6579a3da387` volvió a
+pasar [Canonical CI, ejecución
+36906743079](https://github.com/danielunibe/PulsarIA/actions/runs/36906743079)
+y [runtime bootstrap preflight, ejecución
+36906743554](https://github.com/danielunibe/PulsarIA/actions/runs/36906743554).
+
 El commit `501bbb29d8337e070109d58a3525bfb1f7f04360` contiene la preparación técnica Beta 3. Ambos checks terminaron correctamente el 29 de septiembre de 2026:
 
 - [Canonical CI, ejecución 36642176395](https://github.com/danielunibe/PulsarIA/actions/runs/36642176395): `success`, finalizada a las 23:01:58 UTC.
