@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   FaArrowUpRightFromSquare,
   FaShieldHalved,
@@ -31,7 +31,49 @@ export interface LegalConsentModalProps {
 export function LegalConsentModal({ loading, saving, error, onAccept, allowClose = false, onClose }: LegalConsentModalProps) {
   const { locale } = useI18n();
   const [accepted, setAccepted] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const english = locale === 'en-US';
+
+  useEffect(() => {
+    if (!loading) titleRef.current?.focus();
+  }, [loading]);
+
+  const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      if (allowClose) onClose?.();
+      return;
+    }
+
+    if (event.key !== 'Tab') return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>('a[href], input:not(:disabled), button:not(:disabled)')
+    );
+    if (focusable.length === 0) {
+      event.preventDefault();
+      titleRef.current?.focus();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+
+    if (event.shiftKey && currentIndex <= 0) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && currentIndex === -1) {
+      event.preventDefault();
+      first.focus();
+    } else if (!event.shiftKey && currentIndex === focusable.length - 1) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const text = english
     ? {
@@ -76,10 +118,13 @@ export function LegalConsentModal({ loading, saving, error, onAccept, allowClose
 
   return (
     <div
+      ref={dialogRef}
+      onKeyDown={handleDialogKeyDown}
       className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/90 p-5 backdrop-blur-2xl transition-opacity duration-300"
       role="dialog"
       aria-modal="true"
       aria-labelledby="pulsaria-legal-title"
+      aria-describedby="pulsaria-legal-description"
     >
       <div className="w-full max-w-lg rounded-[28px] bg-[#0c0f17] p-7 shadow-[0_30px_90px_rgba(0,0,0,0.95)] overflow-hidden relative font-sans animate-in fade-in zoom-in-95 duration-200">
         {/* Subtle decorative glow */}
@@ -90,7 +135,7 @@ export function LegalConsentModal({ loading, saving, error, onAccept, allowClose
             type="button"
             onClick={onClose}
             aria-label="Cerrar revisión de consentimiento"
-            className="absolute right-5 top-5 z-20 rounded-xl bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white/50 transition-colors hover:bg-white/[0.10] hover:text-white"
+            className="absolute right-5 top-5 z-20 rounded-xl bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase tracking-wider text-white/50 transition-colors hover:bg-white/[0.10] hover:text-white focus-visible:shadow-[0_0_0_2px_rgba(37,244,238,0.45)]"
           >
             Cerrar
           </button>
@@ -101,10 +146,10 @@ export function LegalConsentModal({ loading, saving, error, onAccept, allowClose
             <FaShieldHalved size={22} />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 id="pulsaria-legal-title" className="text-xl font-black tracking-tight text-white">
+            <h1 id="pulsaria-legal-title" ref={titleRef} tabIndex={-1} className="text-xl font-black tracking-tight text-white">
               {text.title}
             </h1>
-            <p className="mt-1.5 text-xs leading-relaxed text-white/60">
+            <p id="pulsaria-legal-description" className="mt-1.5 text-xs leading-relaxed text-white/60">
               {text.description}
             </p>
           </div>
@@ -118,7 +163,7 @@ export function LegalConsentModal({ loading, saving, error, onAccept, allowClose
               href={href}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center justify-between rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] p-3.5 text-xs font-semibold text-white/80 transition-all duration-200 group cursor-pointer"
+              className="flex items-center justify-between rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] p-3.5 text-xs font-semibold text-white/80 transition-all duration-200 group cursor-pointer focus-visible:bg-white/[0.08] focus-visible:shadow-[0_0_0_2px_rgba(37,244,238,0.4)]"
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="text-white/40 group-hover:text-[#25f4ee] transition-colors">
@@ -132,7 +177,7 @@ export function LegalConsentModal({ loading, saving, error, onAccept, allowClose
         </div>
 
         {/* Checkbox agreement */}
-        <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.05] p-4 text-xs leading-relaxed text-white/80 transition-colors relative z-10 select-none">
+        <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.05] p-4 text-xs leading-relaxed text-white/80 transition-colors relative z-10 select-none focus-within:bg-white/[0.06] focus-within:shadow-[0_0_0_2px_rgba(37,244,238,0.35)]">
           <div
             className={`w-5 h-5 rounded-lg flex items-center justify-center transition-all shrink-0 mt-0.5 ${
               accepted
@@ -168,11 +213,15 @@ export function LegalConsentModal({ loading, saving, error, onAccept, allowClose
           type="button"
           disabled={!accepted || saving}
           onClick={() => void onAccept(locale)}
-          className="mt-5 w-full rounded-2xl bg-gradient-to-r from-[#25f4ee] to-[#20dcd6] hover:from-white hover:to-white px-5 py-3.5 text-xs font-black uppercase tracking-[0.14em] text-[#071216] transition-all duration-300 shadow-[0_4px_25px_rgba(37,244,238,0.25)] hover:shadow-[0_6px_30px_rgba(255,255,255,0.3)] hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100 disabled:hover:from-[#25f4ee] disabled:hover:to-[#20dcd6]"
+          className={`mt-5 w-full rounded-2xl px-5 py-3.5 text-xs font-black uppercase tracking-[0.14em] transition-all duration-300 focus-visible:shadow-[0_0_0_2px_rgba(37,244,238,0.45)] ${
+            !accepted || saving
+              ? 'cursor-not-allowed bg-white/[0.06] text-white/40 shadow-none'
+              : 'bg-gradient-to-r from-[#25f4ee] to-[#20dcd6] text-[#071216] shadow-[0_4px_25px_rgba(37,244,238,0.25)] hover:from-white hover:to-white hover:shadow-[0_6px_30px_rgba(255,255,255,0.3)] hover:scale-[1.01] active:scale-[0.99]'
+          }`}
         >
           {saving ? (
             <span className="flex items-center justify-center gap-2">
-              <span className="w-3.5 h-3.5 rounded-full border-2 border-black border-t-transparent animate-spin" />
+              <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
               Guardando…
             </span>
           ) : (
