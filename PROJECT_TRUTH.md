@@ -536,3 +536,27 @@ incluye el cambio bilingüe; no es candidato para la aceptación final. La rama
 debe volver a construir NSIS y verificar el nuevo artifact después de resolver
 los gates. La descarga pública continúa en `v0.1.0-eval.3`, no hay tag Beta 3 y
 `DIRECT_DOWNLOAD_RELEASE_READY=false`.
+
+### Contactos públicos y cobertura del gate legal — 2026-10-01
+
+El commit `fe35613039e641ac64dedc32ff819296c44361fe` completa las referencias
+de contacto en inglés para contenido, reclamaciones, comunidad y seguridad con
+el correo público ya elegido. El EULA inglés ahora distingue ese correo de la
+identidad legal y el domicilio físico, que continúan pendientes de revisión.
+`verify-legal-release.ps1` examina esos documentos además de EULA, términos,
+privacidad y política de contenido; también detecta el marcador
+`TO BE COMPLETED BEFORE RELEASE`.
+
+Se generó un SPDX nuevo desde los documentos actuales y pasó con 762 paquetes,
+68 archivos y 42 expresiones. Su SHA-256 es
+`368E521A76753EF99818B52FC648CDA4F6E2B4B816F94421C1D280BD03847D94`. El gate
+legal se ejecutó contra ese SBOM y sigue **BLOCKED con los mismos 10 asuntos**:
+texto de contacto/domicilio sin resolver en EULA, términos y privacidad ES/EN;
+revisión de notices/licencias; fuentes/build exactos de terceros;
+`notice_address` y `legal_approval`. No quedan marcadores de contacto en los
+documentos adicionales revisados.
+
+No se añadió el domicilio particular al manifiesto ni a los documentos. El
+snapshot histórico público del PR conserva una exposición anterior; no integrar
+hasta resolver el saneamiento. El instalador local `CE0FB3D9…D88E51CE` antecede
+a `fe356130` y tampoco contiene estos documentos actualizados.
