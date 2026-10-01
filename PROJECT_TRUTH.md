@@ -36,14 +36,22 @@ Todavía no existe tag ni release `v0.1.0-beta.3`; la release pública más
 reciente continúa en `v0.1.0-eval.3`. Esos checks no son aceptación legal,
 visual nativa, live desde IPC ni aprobación del instalador.
 
-Desde ese head se reconstruyó un instalador NSIS local de `0.1.0-beta.3`:
-688,003,507 bytes, SHA-256
-`B3A9C641FD71BE7BCBEF09877DA50074EF821F7FA79312ABF6E24136CB759C92`,
+Antes de incorporar la respuesta del proveedor a `THIRD_PARTY_NOTICES.md` se
+construyó un instalador NSIS local de `0.1.0-beta.3`: 688,003,507 bytes,
+SHA-256 `B3A9C641FD71BE7BCBEF09877DA50074EF821F7FA79312ABF6E24136CB759C92`.
+Ese candidato pasó el smoke instalado anterior, pero el cambio del notice que
+se empaqueta lo dejó obsoleto.
+
+El candidato local actual se reconstruyó desde el mismo head de código con el
+notice actualizado: `Pulsaria_0.1.0-beta.3_x64-setup.exe`, 687,973,984 bytes,
+SHA-256 `CE0FB3D98C5B12B44377CE912E5ED776160473419C8CA3D3799FF376D88E51CE`,
 Authenticode `NotSigned`. El smoke instalado pasó con instalación y
-desinstalación exit 0, runtime 54/54, trece recursos legales cotejados, salud
-antes y después de reiniciar, APPDATA aislado y conservación de los datos de
-prueba tras desinstalar. Sigue siendo un candidato local, no el artifact de
-Actions ni un instalador de publicación.
+desinstalación exit 0, runtime 54/54, 13 recursos legales, ONNX/Whisper,
+salud `0.1.0-beta.3` antes y después de reiniciar, perfil APPDATA aislado y
+conservación de datos de prueba tras desinstalar. La prueba fue offline: no
+creó trabajos ni valida ingestión, transcripción, búsqueda o reproducción. El
+hash sigue siendo un candidato local, no el artifact de Actions ni un
+instalador de publicación.
 
 En ese checkout `verify:mvp` pasó 13/13 (105 pruebas Rust, 32 Python y una
 prueba live omitida por falta de URL en esa ejecución); también pasaron versión,
@@ -78,9 +86,16 @@ entre conservar el historial o autorizar su saneamiento se solicitó al usuario.
 
 El 2026-09-30 se envió desde el contacto público de Pulsaria una solicitud a
 `builds@gyan.dev` para obtener los materiales fuente/build exactos del paquete
-Gyan 8.1.2; el correo está confirmado en Enviados y aún no aparece respuesta.
-`legal/third-party-materials.json` continúa en `pending`: el contacto enviado
-no equivale a la entrega ni a la revisión de materiales.
+Gyan 8.1.2. El mantenedor respondió el 2026-10-01 que OpenAL Soft es
+`1.25.2-8-gdd4e07d`, que usa MSYS2 UCRT64/GCC y que sus scripts dependen de su
+configuración y no son portables. El commit upstream
+`dd4e07de0fe73d8c0326c4502f63e71da8ef268b` está ocho commits después del tag
+`1.25.2`; sin embargo, el binario incluido contiene `b472600` y `ab-suite`, y
+esa discrepancia no está conciliada. La respuesta no incluyó las fuentes/patches
+del resto de bibliotecas externas ni el paquete de build completo. Se conserva
+el snapshot upstream OpenAL bajo `target-tauri/beta3-third-party-review/` como
+evidencia candidata, no como material aprobado. `legal/third-party-materials.json`
+continúa en `pending`.
 La revisión de la página pública del proveedor al 2026-10-01 lista 9.0.2 como
 última release y 8.1.2 como anterior. El candidato conserva el binario 8.1.2
 identificado por hash; este cambio de versión pública no aporta la procedencia

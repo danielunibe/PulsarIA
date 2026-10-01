@@ -1,6 +1,6 @@
 # Third-party notices — Pulsaria Beta
 
-Version: 0.1.0-beta.3 · 30 de septiembre de 2026
+Version: 0.1.0-beta.3 · 1 de octubre de 2026
 
 Pulsaria contains third-party software and data. This file is an inventory
 required for a release, not a relicensing of those materials. Each component
@@ -15,7 +15,7 @@ keeps its original license and copyright.
 | Python runtime and packages | `src-tauri/resources/runtime-manifest.json` | Python 3.11.9; the aggregate SPDX inventories bundled distribution metadata | Included; manifest PASS (54 required files) |
 | Colorama | `colorama` 0.4.6 | BSD-3-Clause; full license text at `python/Lib/site-packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt` in the installed resource tree | Included; exact license file hash is recorded in the aggregate SPDX |
 | FFmpeg / FFprobe | `8.1.2-full_build-www.gyan.dev`; exact binary hashes recorded below | GPLv3 build (`--enable-gpl --enable-version3`); license text at `src-tauri/resources/bin/FFMPEG-LICENSE.txt` | Included; corresponding source/build package has not yet been verified for the Beta release |
-| OpenAL Soft | FFmpeg binary string table reports `1.25.2`, build prefix `b472600`, branch label `ab-suite`; Gyan package README lists `latest` | Upstream `COPYING` in the candidate source says GNU Library General Public License v2 (June 1991) | A candidate source tree and public patches were reconstructed, but its commit does not match the binary's embedded prefix; exact Gyan build inputs and redistribution obligations remain under review |
+| OpenAL Soft | Gyan's maintainer identifies `1.25.2-8-gdd4e07d` ([upstream commit](https://github.com/kcat/openal-soft/commit/dd4e07de0fe73d8c0326c4502f63e71da8ef268b)); FFmpeg binary string table reports `1.25.2`, prefix `b472600`, branch `ab-suite` | Upstream `COPYING` at the identified candidate revision says GNU Library General Public License v2 (June 1991) | The reported upstream revision and embedded prefix are not reconciled. A corresponding OpenAL snapshot is retained as evidence only; exact Gyan build inputs, other linked-library sources and redistribution obligations remain under review |
 | yt-dlp | `src-tauri/resources/python/Lib/site-packages/yt_dlp-2026.8.19.dist-info` | Package metadata and runtime manifest | Included; version 2026.8.19 |
 | Faster-Whisper | `src-tauri/resources/python/Lib/site-packages/faster_whisper-1.2.1.dist-info` | Package metadata and runtime manifest | Included; version 1.2.1 |
 | ONNX Runtime | `src-tauri/resources/python` and Rust dependency | Runtime manifest records version 1.29.0 and binary hashes | Included; version and hashes verified |
