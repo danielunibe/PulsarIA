@@ -70,6 +70,7 @@ La ejecución completa del workflow directo permanece sin verificar hasta resolv
 ### Inspección nativa del primer arranque — 2026-10-01 (PARCIAL)
 
 - Se instaló de nuevo el candidato local `Pulsaria_0.1.0-beta.3_x64-setup.exe`, **687,986,682 bytes**, SHA-256 **`D0492C87BF868A857FB02E8FB25AF7D12F451EFEA0ABA1176D8423B7A669F989`**, en un perfil temporal aislado. La aplicación abrió con `status=ok`, `version=0.1.0-beta.3`; los puertos 8080 y 9001 estaban libres al cerrar la prueba.
+- El host fue Windows 11 Pro x64, compilación `10.0.26200`, con WebView2 disponible en `154.0.4258.37`; tenía herramientas de desarrollo y no cuenta como Windows limpio. La observación técnica asistida no constituye aprobación humana del usuario.
 - La ventana nativa mostró el onboarding a **1280 × 800** y **860 × 640**; el diálogo completo cupo en ambas. Tab movió el foco visible entre los controles legales. La captura de 860 × 640 se conserva en [evidence/beta3-onboarding-local-860x640.jpg](evidence/beta3-onboarding-local-860x640.jpg).
 - La biblioteca aislada estaba vacía y la confirmación de derechos de contenido aparecía detrás del diálogo legal. No se aceptó ningún documento ni se marcó la casilla de derechos. No hay evidencia de las funciones tras ese consentimiento ni del procesamiento del TikTok desde la interfaz nativa.
 - El artefacto es un build local, no el artifact inmutable de Actions; esto solo acredita el primer arranque y el encuadre de esos diálogos. La aceptación final permanece pendiente.
