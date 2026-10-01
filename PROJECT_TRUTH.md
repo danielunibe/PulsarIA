@@ -37,11 +37,13 @@ Gyan 8.1.2; el correo está confirmado en Enviados y aún no aparece respuesta.
 `legal/third-party-materials.json` continúa en `pending`: el contacto enviado
 no equivale a la entrega ni a la revisión de materiales.
 
-La prueba live de TikTok y la aceptación visual/funcional de la app instalada
-siguen pendientes. El directorio de datos predeterminado de Pulsaria ya existe;
-no se inspeccionó su contenido y no se inició la app con ese perfil. Completar
-la aceptación en un perfil o Windows de prueba aislado y con el artifact
-definitivo de Actions para preservar la biblioteca personal.
+El worker canónico completó un smoke live con la URL TikTok autorizada; esa
+prueba directa no verificó la interfaz ni la autenticación IPC de la app. La
+aceptación live y visual/funcional de la app instalada sigue pendiente. El
+directorio de datos predeterminado de Pulsaria ya existe; no se inspeccionó su
+contenido y no se inició la app con ese perfil. Completar la aceptación en un
+perfil o Windows de prueba aislado y con el artifact definitivo de Actions para
+preservar la biblioteca personal.
 
 El audit de producción actual detectó el aviso crítico
 [GHSA-vcvr-r3jv-pc5j](https://github.com/vercel/next.js/security/advisories/GHSA-vcvr-r3jv-pc5j)
