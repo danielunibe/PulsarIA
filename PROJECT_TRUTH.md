@@ -42,8 +42,9 @@ El mismo hash local también pasó la actualización desde la release pública
 Eval.3 en un perfil temporal: ambas instalaciones y la desinstalación terminaron
 con exit 0; SQLite y sus claves foráneas quedaron íntegros; se conservaron 1 job,
 1 medio, 1 playlist, su vínculo, 17 ajustes y dos archivos sintéticos tras el
-primer arranque Beta 3 y después de desinstalar. Esta prueba local no sustituye
-repetirla con el artifact de Actions en Windows x64 limpio.
+primer arranque Beta 3 y después de desinstalar. No se reinició Windows. Esta
+prueba local no sustituye repetirla con el artifact de Actions en Windows x64
+limpio.
 
 `npm run verify:mvp` pasó 13/13 en el checkout
 `0e0b3378e428be9941f8fb8dbf3f0a91d302b54a` (105 pruebas Rust y 32 pruebas

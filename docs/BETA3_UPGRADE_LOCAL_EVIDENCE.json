@@ -26,7 +26,8 @@
     "betaUpgradeInstallExit": 0,
     "betaRuntimeManifest": "PASS",
     "betaHealthVersion": "0.1.0-beta.3",
-    "uninstallExit": 0
+    "uninstallExit": 0,
+    "systemRebootTested": false
   },
   "preservedData": {
     "integrityAfterUpgrade": "ok",
@@ -50,5 +51,5 @@
     "settingsAfterUninstallCount": 17,
     "syntheticFilesAfterUninstall": 2
   },
-  "scope": "PASS applies to this local installer and synthetic data on the current Windows host. It does not accept the Actions artifact, clean-machine WebView2, native UI, or live TikTok processing."
+  "scope": "PASS applies to this local installer and synthetic data on the current Windows host. Windows was not rebooted. It does not accept the Actions artifact, clean-machine WebView2, native UI, or live TikTok processing."
 }

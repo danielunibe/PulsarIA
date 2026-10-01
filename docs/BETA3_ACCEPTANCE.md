@@ -53,8 +53,8 @@ No ejecutar el patrón si la ruta de datos, EXE o puertos no coinciden con la se
 | Biblioteca / Playlists / Fuentes | Creación, consulta y persistencia tras reiniciar | Pendiente |
 | Cinema y exportación | Controles operables; MP4/MP3/TXT y formatos de subtítulos que ofrezca el elemento se abren y corresponden al contenido | Pendiente |
 | Ajustes Guardar / Cancelar | Guardar persiste; Cancelar conserva la selección anterior | Pendiente |
-| Reinicio y actualización desde eval.3 | Datos, ajustes, medios y trabajos conservados sin duplicaciones | PASS local sobre `CE0FB3D9…D88E51CE`; pendiente para artifact de Actions y Windows limpio |
-| Desinstalación | La aplicación se retira y los datos de usuario siguen disponibles según el contrato | Pendiente |
+| Reinicio y actualización desde eval.3 | Datos, ajustes, medios y trabajos conservados sin duplicaciones | PASS local de instalación/primer arranque y conservación sobre `CE0FB3D9…D88E51CE`; reinicio de Windows y artifact de Actions pendientes |
+| Desinstalación | La aplicación se retira y los datos de usuario siguen disponibles según el contrato | PASS local para la biblioteca sintética con `CE0FB3D9…D88E51CE`; pendiente para artifact de Actions y Windows limpio |
 
 El smoke TikTok se hace desde la app instalada mediante el cliente IPC autenticado. El modo `RunLive` del script legado queda bloqueado con un diagnóstico explícito: recibía un token sin transmitirlo y el token cambia tras cada arranque. El smoke offline sigue disponible. No registrar tokens ni abrir una ruta pública para obtenerlos.
 
