@@ -19,32 +19,33 @@ el artifact exacto conservado por Actions. `DIRECT_DOWNLOAD_RELEASE_READY=false`
 se mantiene hasta revisión legal y aceptación. No se publica ni se elimina una
 protección para resolver un gate pendiente.
 
-El último commit que cambió código de la aplicación es
-`e3b2e1258138715d9fd580c361ee8c82d29fa977` (accesibilidad del diálogo de
-consentimiento). El PR #2 sigue abierto, en borrador y mergeable; el head
-documental vigente es `9ab57514d12b2da3bd64094b7ce4f69ef18c3830`. Sus dos
-checks pasaron: [Canonical CI, ejecución 36866247737](https://github.com/danielunibe/PulsarIA/actions/runs/36866247737)
-y [runtime bootstrap preflight, ejecución 36866247736](https://github.com/danielunibe/PulsarIA/actions/runs/36866247736).
+El commit funcional más reciente del PR es
+`d53013c5870dc5f0636213d58607ee923137ca31` (nombres accesibles bilingües); el
+head documental actual es `cddbb0692001adff94c92775e2ad9a13d473cfa5`. El PR #2
+sigue abierto, en borrador y mergeable. Sus checks del head actual pasaron:
+[Canonical CI, ejecución 36878954628](https://github.com/danielunibe/PulsarIA/actions/runs/36878954628)
+y [runtime bootstrap preflight, ejecución 36878954604](https://github.com/danielunibe/PulsarIA/actions/runs/36878954604).
 Los checks de código no sustituyen aceptación legal, visual nativa, live desde
 IPC ni aprobación del artifact definitivo de Actions.
 
-El instalador local vigente es `Pulsaria_0.1.0-beta.3_x64-setup.exe`,
-687,973,984 bytes, SHA-256
-`CE0FB3D98C5B12B44377CE912E5ED776160473419C8CA3D3799FF376D88E51CE`,
-Authenticode `NotSigned`. El smoke instalado pasó instalación y
-desinstalación con exit 0, runtime 54/54, 13 recursos legales, ONNX/Whisper,
-`/health` correcto antes y después de reiniciar, perfil APPDATA aislado y
-conservación de datos de prueba tras desinstalar. Fue offline: no creó trabajos
-ni validó ingestión, transcripción, búsqueda o reproducción. Es una build local,
-no el artifact de Actions ni un instalador aprobado para publicar.
+El último instalador local es `Pulsaria_0.1.0-beta.3_x64-setup.exe`,
+687,986,682 bytes, SHA-256
+`D0492C87BF868A857FB02E8FB25AF7D12F451EFEA0ABA1176D8423B7A669F989`,
+ProductVersion/FileVersion `0.1.0-beta.3`, Authenticode `NotSigned`. El
+`verify:installed` de ese hash pasó la instalación/desinstalación (exit 0),
+runtime 54/54, 13 documentos legales, presencia de ONNX/Whisper, `/health`
+antes y después de reiniciar el proceso de la aplicación, aislamiento de
+runtime y conservación de un marcador de datos sintético. La prueba fue
+offline: no validó ingestión,
+transcripción, búsqueda ni reproducción. Es una build local, no el artifact de
+Actions ni un instalador aprobado para publicar. El resumen saneado está en
+`docs/BETA3_LOCAL_INSTALL_SMOKE.json`.
 
-El mismo hash local también pasó la actualización desde la release pública
-Eval.3 en un perfil temporal: ambas instalaciones y la desinstalación terminaron
-con exit 0; SQLite y sus claves foráneas quedaron íntegros; se conservaron 1 job,
-1 medio, 1 playlist, su vínculo, 17 ajustes y dos archivos sintéticos tras el
-primer arranque Beta 3 y después de desinstalar. No se reinició Windows. Esta
-prueba local no sustituye repetirla con el artifact de Actions en Windows x64
-limpio.
+La prueba local anterior de actualización desde Eval.3 usó el hash
+`CE0FB3D98C5B12B44377CE912E5ED776160473419C8CA3D3799FF376D88E51CE` y preservó
+la biblioteca sintética y sus ajustes. El hash más reciente `D0492C87…A669F989`
+aún necesita esa prueba de actualización; también falta repetirla con el
+artifact de Actions en Windows x64 limpio.
 
 `npm run verify:mvp` pasó 13/13 en el checkout
 `0e0b3378e428be9941f8fb8dbf3f0a91d302b54a` (105 pruebas Rust y 32 pruebas
