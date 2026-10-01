@@ -102,10 +102,18 @@ recorrido live. La decisión sobre los datos residenciales que siguen en un
 commit antiguo del historial público también permanece pendiente; no se
 reescribió la rama.
 
-**Privacidad del historial:** la rama pública conserva un valor postal de aviso
-en un commit antiguo (`b7e6deea`) que fue retirado del árbol actual
-(`6dc3ae6b`). No se reescribió la rama. No integrar el PR hasta resolver esa
-exposición; el valor no se repite aquí.
+**Privacidad del historial:** el commit `b7e6deea` conserva un valor postal de
+aviso en su snapshot de la rama pública `beta2-hardening`; el commit
+`6dc3ae6b` lo retiró del árbol actual, no de la historia. La auditoría de refs
+del 2026-10-01 confirmó que `origin/main` y los tags no contienen ese commit;
+solo `origin/beta2-hardening` lo alcanza. Hay 47 commits descendientes que
+cambiarían si se reescribiera esa parte de la historia. El plan vigente prohíbe
+reescribirla, así que no se hizo; no integrar el PR hasta que el usuario
+resuelva el conflicto entre esa instrucción y el requisito de sanear la
+exposición. La guía de GitHub indica que una purga completa requiere reescritura
+coordinada y luego solicitar a Support quitar vistas y referencias cacheadas:
+https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository.
+El valor no se repite aquí.
 
 Por delegación del usuario, la presentación propuesta usa “Daniel Unibe” y el
 correo visible en su perfil público de GitHub. Esto no acredita identidad legal,

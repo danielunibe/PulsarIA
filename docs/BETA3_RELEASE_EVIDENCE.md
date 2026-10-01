@@ -198,8 +198,9 @@ La auditoría detectó 55 declaraciones Cargo con el separador histórico `/` de
 
 ### Privacidad de la rama pública del PR — 2026-10-01
 
-- El repositorio `danielunibe/PulsarIA` es público. El commit `b7e6deea` de `beta2-hardening`, visible en el historial público del PR #2, conserva un valor postal de aviso en su snapshot. El commit `6dc3ae6b` dejó el manifiesto actual sin ese dato, pero no borra el snapshot anterior; el valor no se reproduce en este informe.
-- El plan vigente prohíbe reescribir la historia. La rama no se alteró por fuerza; el PR no debe integrarse mientras siga sin resolverse la exposición. Se solicitó al usuario una decisión explícita sobre conservar el historial o autorizar su saneamiento. El valor del domicilio se omite de este informe.
+- El repositorio `danielunibe/PulsarIA` es público. El commit `b7e6deea` de `beta2-hardening`, visible en el historial público del PR #2, conserva un valor postal de aviso en su snapshot. El commit `6dc3ae6b` dejó el árbol actual sin ese dato, pero no borra el snapshot anterior; el valor no se reproduce en este informe.
+- La auditoría de refs del 2026-10-01 confirmó que `origin/main` y los tags no contienen `b7e6deea`; solo `origin/beta2-hardening` lo alcanza. Hay 47 commits descendientes y 115 commits en total sobre `origin/main` en esa rama. Una purga de historia cambiaría hashes y el diff del PR; la guía oficial de GitHub describe el uso coordinado de `git-filter-repo`/force-push y la solicitud posterior a Support para quitar vistas y referencias cacheadas: [Removing sensitive data from a repository](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository).
+- El plan vigente prohíbe reescribir la historia. No se alteraron refs; el PR no debe integrarse mientras siga sin resolverse la exposición y el conflicto con esa instrucción. Se solicitó al usuario una decisión explícita; el valor del domicilio se omite de este informe.
 
 ### Candidato local actual y smoke instalado — 2026-09-30
 
