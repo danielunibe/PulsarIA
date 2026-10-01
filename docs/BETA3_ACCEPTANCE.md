@@ -60,7 +60,7 @@ El smoke TikTok se hace desde la app instalada mediante el cliente IPC autentica
 
 ## Aprobación y publicación
 
-1. Resolver revisión legal, datos públicos y materiales de terceros; pasar CI del PR final, integrar en `main` y crear el tag aprobado.
+1. Resolver revisión legal, datos públicos y materiales de terceros; completar la aceptación humana local y pasar CI del PR final. Solo entonces integrar en `main` y crear el tag aprobado.
 2. Ejecutar el workflow directo desde `main`. Descargar el artifact producido por `build` y verificar sus hashes.
 3. Completar esta lista con ese instalador, incluidos actualización y prueba live autorizada.
 4. El revisor `danielunibe` comprueba identidad/hash, evidencia y documentos antes de habilitar `DIRECT_DOWNLOAD_RELEASE_READY=true` y aprobar el job `publish` del Environment `direct-download`. No desactivar las protecciones.

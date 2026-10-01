@@ -40,7 +40,7 @@ Checkout: `C:\Users\danie\Desktop\Pulsaria`, rama temporal `beta2-hardening`, PR
 | Actualización desde Eval.3 | PASS local en el hash vigente | El hash `D0492C87…A669F989` conservó 1 job y 1 medio sintéticos, ajustes `en-US`/`oled` y SQLite íntegra; la desinstalación preservó la biblioteca. La carpeta WebView2 se aisló. Falta el artifact exacto de Actions en Windows limpio |
 | Aceptación nativa y TikTok live | Pendiente | Falta Windows x64 limpio, WebView2, UI 1280 × 800 y 860 × 640, IPC autenticado, voz española, indexación, búsqueda y reproducción sobre el artifact definitivo. El worker aislado obtuvo audio no silencioso, pero 0 transcripción y no determina si había voz |
 | Gate legal con SPDX | BLOCKED: 10 hallazgos | Seis traducciones con domicilio pendiente, revisión de licencias/notices, fuentes/build exactos de terceros, `notice_address` y `legal_approval` |
-| Integración, tag y descarga pública | Pendiente | PR #2 sigue en borrador; no crear tag ni publicar antes de resolver los gates y aceptar el artifact exacto |
+| Integración, tag y descarga pública | Pendiente | PR #2 sigue en borrador mientras falten los gates previos a integrar. Una vez resueltos, el tag en `main` genera el artifact inmutable de Actions; ese hash deberá aceptarse antes de publicar |
 
 ## Materiales FFmpeg reunidos
 
@@ -60,9 +60,9 @@ Se consultó nuevamente la [release Gyan 8.1.2](https://github.com/GyanD/codexff
 
 1. `public_owner` se presenta como “Daniel Unibe”, denominación ya usada en el PR #2; por delegación del usuario, se eligió como contacto `danielunibe10@gmail.com`, correo que aparece en el perfil público de GitHub. Estos datos no acreditan identidad legal ni control del buzón. El usuario compartió un domicilio residencial, pero no confirmó expresamente su divulgación pública; se mantiene fuera de los archivos públicos y `notice_address` sigue pendiente hasta confirmar esa divulgación o definir un contacto postal publicable alternativo.
 2. Resolver `COMPONENT_LICENSE_REVIEW_PENDING`, registrar los materiales exactos aprobados de terceros con URL/hash y completar la aprobación legal humana. El gate legal vigente también mantiene `notice_address` pendiente.
-3. Completar [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) con el artifact definitivo de Actions, Windows sin herramientas de desarrollo, WebView2, actualización, ventana nativa y prueba live de la URL autorizada.
-4. Los candidatos anteriores `55F420C9…B2C02C1`, `AB13…`, `E733…` y `CE0FB3D9…D88E51CE` quedaron superados. El instalador local vigente `D0492C87…A669F989` pasó el smoke offline y la actualización desde el asset público Eval.3, con datos de WebView2 aislados. Falta repetir ambos recorridos con el artifact exacto de Actions en Windows x64 limpio.
-5. Integrar el PR revisado en `main`, crear el tag nuevo y ejecutar el workflow. Mantener `DIRECT_DOWNLOAD_RELEASE_READY=false` hasta aceptación y revisión; no desactivar el Environment.
+3. Completar la aceptación humana local de la ventana instalada y el recorrido live autorizado desde la app mediante IPC autenticado. La UI, transcripción española, indexación, búsqueda y reproducción siguen sin evidencia.
+4. Los candidatos anteriores `55F420C9…B2C02C1`, `AB13…`, `E733…` y `CE0FB3D9…D88E51CE` quedaron superados. El instalador local vigente `D0492C87…A669F989` pasó el smoke offline y la actualización desde el asset público Eval.3, con datos de WebView2 aislados. Después de integrar y crear el tag, repetir esos recorridos con el artifact exacto de Actions en Windows x64 limpio.
+5. Integrar el PR revisado solo tras resolver los gates legales, la privacidad del historial y la aceptación humana local. Crear entonces el tag nuevo en `main` y ejecutar el workflow de build; mantener `DIRECT_DOWNLOAD_RELEASE_READY=false` hasta aceptar ese artifact exacto y concluir la revisión. No desactivar el Environment.
 6. Comprobar los assets públicos y sus hashes; después actualizar las descargas a Beta 3.
 
 La ejecución completa del workflow directo permanece sin verificar hasta resolver esos requisitos. Build local, tests, fixtures y preview web no certifican aceptación humana ni publicación.
