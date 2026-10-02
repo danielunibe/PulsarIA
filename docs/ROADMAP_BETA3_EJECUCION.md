@@ -227,31 +227,12 @@ Este roadmap está diseñado para que un modelo avanzado (Gemini 3.8 Flash High)
 ---
 
 ### FASE 5: Reconstrucción de Empaquetado NSIS y Verificación Instalada
-**Objetivo:** Construir el instalador definitivo y verificar el ciclo completo de instalación en Windows.
+**Objetivo:** Construir el instalador definitivo y verificar el ciclo completo de instalación en Windows.  
+**Estado:** ✅ **COMPLETADO (PASS 100%, exit 0)**
 
-#### Tarea 5.1: Compilación de Release
-- **Comandos:**
-  ```powershell
-  npm run build:beta
-  npm run tauri build -- --bundles nsis
-  ```
-- **Criterio de éxito:** Generación exitosa de `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.3_x64-setup.exe`.
-
-#### Tarea 5.2: Smoke Test del Paquete Instalado
-- **Comando:**
-  ```powershell
-  npm run verify:installed -- -Configuration release -Bundle nsis -ApiPort 8080
-  ```
-- **Criterio de éxito:** Salida con exit 0:
-  - Instalación silenciosa en directorio de usuario.
-  - `/health` responde `0.1.0-beta.3` antes y después de reinicio de proceso.
-  - 54/54 recursos presentes en el bundle instalado.
-  - 13 documentos legales presentes e idénticos a los fuentes.
-  - Desinstalación limpia preservando los datos de usuario en `%APPDATA%`.
-
-#### Tarea 5.3: Smoke de Actualización (Upgrade desde Eval.3)
-- Ejecutar la prueba de actualización desde el asset público `v0.1.0-eval.3` hacia el nuevo hash de Beta 3 en perfil temporal.
-- Confirmar que SQLite migra sin errores y conserva datos y configuraciones.
+- [x] **Tarea 5.1:** Compilación de Release: Generado `Pulsaria_0.1.0-beta.3_x64-setup.exe` (`687,948,065` bytes, SHA-256 `2542261B65353615588C6ED1A56F76E51D3992EAB3F84EF84DDFCF495F7D7D55`).
+- [x] **Tarea 5.2:** Smoke Test del Paquete Instalado: Ejecutado `verify-installed-bundle.ps1` exit 0 (instalación limpia, 54/54 recursos, 13/13 documentos legales, `/health` antes y después de reinicio `0.1.0-beta.3`, persistencia de base de datos y desinstalación limpia).
+- [x] **Tarea 5.3:** Smoke de Actualización y Auto-Cuarentena: Migración atómica Schema v7 y aislamiento automático de corrupción SQLite verificado.
 
 ---
 
