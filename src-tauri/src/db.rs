@@ -820,6 +820,145 @@ fn configure_connection(connection: &Connection) -> Result<()> {
 }
 
 pub fn init_db() -> Result<Connection> {
+    match init_db_core() {
+        Ok(connection) => Ok(connection),
+        Err(initial_error) => {
+            let data_dir = data_dir_path();
+            let database_path = data_dir.join("library.db");
+
+            if !database_path.is_file() {
+                return Err(initial_error);
+            }
+
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
+            tracing::warn!(
+                "library.db failed to initialize at {}: {}. Initiating quarantine and self-healing...",
+                database_path.display(),
+                initial_error
+            );
+
+            let quarantine_path =
+                match quarantine_corrupt_database(&data_dir, &database_path, &stamp) {
+                    Ok(path) => Some(path),
+                    Err(e) => {
+                        tracing::error!("Failed to quarantine database: {e}");
+                        None
+                    }
+                };
+
+            let restored_from_backup = try_restore_newest_backup(&data_dir, &database_path);
+
+            match init_db_core() {
+                Ok(recovered_conn) => {
+                    let (summary, detail) = if restored_from_backup {
+                        (
+                            "Base de datos recuperada desde copia de seguridad previa tras detectar daño",
+                            "restored_from_backup",
+                        )
+                    } else {
+                        (
+                            "Base de datos dañada fue aislada en cuarentena y se inició una base de datos limpia",
+                            "fresh_database_after_quarantine",
+                        )
+                    };
+                    let quarantine_info = quarantine_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "quarantine_failed".to_string());
+
+                    let _ = insert_health_event(
+                        &recovered_conn,
+                        "database_quarantine_recovery",
+                        "warning",
+                        summary,
+                        Some(detail),
+                        Some(&quarantine_info),
+                    );
+                    Ok(recovered_conn)
+                }
+                Err(recovery_error) => {
+                    tracing::error!("Database recovery failed after quarantine: {recovery_error}");
+                    Err(recovery_error)
+                }
+            }
+        }
+    }
+}
+
+fn quarantine_corrupt_database(
+    data_dir: &Path,
+    database_path: &Path,
+    stamp: &str,
+) -> std::io::Result<PathBuf> {
+    let backups_dir = data_dir.join("backups");
+    fs::create_dir_all(&backups_dir)?;
+    let quarantine_path = backups_dir.join(format!("library-corrupt-{}.db", stamp));
+
+    if database_path.is_file() {
+        if let Err(rename_err) = fs::rename(database_path, &quarantine_path) {
+            tracing::warn!(
+                "Could not rename corrupt database, attempting copy: {}",
+                rename_err
+            );
+            fs::copy(database_path, &quarantine_path)?;
+            let _ = fs::remove_file(database_path);
+        }
+    }
+
+    let wal_path = data_dir.join("library.db-wal");
+    if wal_path.is_file() {
+        let wal_dest = backups_dir.join(format!("library-corrupt-{}.db-wal", stamp));
+        if let Err(_) = fs::rename(&wal_path, &wal_dest) {
+            if fs::copy(&wal_path, &wal_dest).is_ok() {
+                let _ = fs::remove_file(&wal_path);
+            }
+        }
+    }
+
+    let shm_path = data_dir.join("library.db-shm");
+    if shm_path.is_file() {
+        let _ = fs::remove_file(&shm_path);
+    }
+
+    Ok(quarantine_path)
+}
+
+fn try_restore_newest_backup(data_dir: &Path, database_path: &Path) -> bool {
+    let backups_dir = data_dir.join("backups");
+    let Ok(entries) = fs::read_dir(&backups_dir) else {
+        return false;
+    };
+
+    let mut candidates: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            name.starts_with("library-pre-v") && name.ends_with(".db")
+        })
+        .collect();
+
+    candidates.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+
+    for candidate in candidates {
+        if let Ok(conn) = Connection::open(&candidate) {
+            let integrity: rusqlite::Result<String> =
+                conn.query_row("PRAGMA integrity_check;", [], |r| r.get(0));
+            if let Ok(result) = integrity {
+                if result.eq_ignore_ascii_case("ok") {
+                    drop(conn);
+                    if let Ok(_) = fs::copy(&candidate, database_path) {
+                        tracing::info!("Restored database from healthy backup {:?}", candidate);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn init_db_core() -> Result<Connection> {
     // Keep all writable application data in one configurable location. In
     // development this resolves to the repository's data/ directory; in an
     // installed build it falls back to the user's application data folder.
@@ -7668,5 +7807,94 @@ mod tests {
         assert!(clusters.iter().any(|cluster| {
             cluster.contains(&first) && cluster.contains(&third) && !cluster.contains(&second)
         }));
+    }
+
+    #[test]
+    fn init_db_auto_quarantines_corrupted_database_and_creates_fresh_db() {
+        let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
+        let original_dir = std::env::var_os("PULSAR_DATA_DIR");
+        let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let test_dir = std::env::temp_dir().join(format!("pulsar-corrupt-test-{}", stamp));
+        fs::create_dir_all(&test_dir).unwrap();
+        std::env::set_var("PULSAR_DATA_DIR", &test_dir);
+
+        let db_path = test_dir.join("library.db");
+        // Write invalid garbage into library.db
+        fs::write(&db_path, b"NOT_A_VALID_SQLITE_DATABASE_CORRUPT_BYTES").unwrap();
+
+        // Calling init_db() must not crash or fail; it should quarantine and create fresh DB
+        let conn = init_db().expect("init_db must succeed by self-healing corrupt database");
+        let is_ok: String = conn
+            .query_row("PRAGMA integrity_check;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(is_ok.to_lowercase(), "ok");
+
+        // Verify quarantine file exists in backups/
+        let backups_dir = test_dir.join("backups");
+        assert!(backups_dir.is_dir());
+        let quarantined = fs::read_dir(&backups_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                name.starts_with("library-corrupt-") && name.ends_with(".db")
+            });
+        assert!(
+            quarantined.is_some(),
+            "Quarantined corrupt file must exist in backups"
+        );
+
+        drop(conn);
+        if let Some(val) = original_dir {
+            std::env::set_var("PULSAR_DATA_DIR", val);
+        } else {
+            std::env::remove_var("PULSAR_DATA_DIR");
+        }
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn init_db_restores_from_healthy_backup_when_database_is_corrupt() {
+        let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
+        let original_dir = std::env::var_os("PULSAR_DATA_DIR");
+        let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let test_dir = std::env::temp_dir().join(format!("pulsar-restore-test-{}", stamp));
+        fs::create_dir_all(&test_dir).unwrap();
+        std::env::set_var("PULSAR_DATA_DIR", &test_dir);
+
+        let db_path = test_dir.join("library.db");
+        let backups_dir = test_dir.join("backups");
+        fs::create_dir_all(&backups_dir).unwrap();
+
+        // 1. Create a valid database with a job
+        let job_id = {
+            let conn = init_db().unwrap();
+            let id = insert_job(&conn, "https://www.tiktok.com/@backup/video/777").unwrap();
+            // Drop connection to flush to disk
+            id
+        };
+
+        // 2. Copy the valid database to backups/ as a pre-migration backup
+        let backup_path = backups_dir.join("library-pre-v7-20261001-120000-000-0.db");
+        fs::copy(&db_path, &backup_path).unwrap();
+
+        // 3. Corrupt the active library.db
+        fs::write(&db_path, b"MALFORMED_HEADER_GARBAGE_PAYLOAD_HERE").unwrap();
+
+        // 4. init_db() should quarantine the corrupt file and restore from the backup
+        let conn = init_db().expect("init_db must succeed by restoring from healthy backup");
+        let restored_job = get_job_by_id(&conn, job_id)
+            .unwrap()
+            .expect("job must be restored");
+        assert_eq!(restored_job.url, "https://www.tiktok.com/@backup/video/777");
+
+        drop(conn);
+        if let Some(val) = original_dir {
+            std::env::set_var("PULSAR_DATA_DIR", val);
+        } else {
+            std::env::remove_var("PULSAR_DATA_DIR");
+        }
+        let _ = fs::remove_dir_all(&test_dir);
     }
 }

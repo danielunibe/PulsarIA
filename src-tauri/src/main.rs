@@ -94,6 +94,43 @@ fn write_startup_log(data_dir: &std::path::Path, stage: &str, detail: &str) {
     }
 }
 
+#[cfg(windows)]
+fn show_native_alert(title: &str, message: &str) {
+    use std::os::windows::ffi::OsStrExt;
+    let wide_title: Vec<u16> = std::ffi::OsStr::new(title)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let wide_message: Vec<u16> = std::ffi::OsStr::new(message)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    extern "system" {
+        fn MessageBoxW(
+            hwnd: *mut std::ffi::c_void,
+            lpText: *const u16,
+            lpCaption: *const u16,
+            uType: u32,
+        ) -> i32;
+    }
+
+    unsafe {
+        // MB_OK (0x0) | MB_ICONERROR (0x10) | MB_TOPMOST (0x40000)
+        MessageBoxW(
+            std::ptr::null_mut(),
+            wide_message.as_ptr(),
+            wide_title.as_ptr(),
+            0x00000010 | 0x00040000,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn show_native_alert(_title: &str, message: &str) {
+    eprintln!("{message}");
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -117,11 +154,12 @@ async fn main() {
         }
         Err(error) => {
             let detail = format!(
-                "library.db initialization failed at {}: {error}",
+                "Error crítico al inicializar la base de datos en {}: {error}\n\nVerifique los permisos de escritura en la carpeta de datos o reinicie la aplicación.",
                 data_dir.join("library.db").display()
             );
             write_startup_log(&data_dir, "sqlite_error", &detail);
             tracing::error!("{detail}");
+            show_native_alert("Pulsaria — Error de Inicio", &detail);
             return;
         }
     };
@@ -323,9 +361,10 @@ async fn main() {
             token
         }
         Err(e) => {
-            let detail = format!("API session token generation failed: {e}");
+            let detail = format!("API session token generation failed: {e}\n\nNo se pudo establecer la sesión segura local.");
             write_startup_log(&data_dir, "security_error", &detail);
             tracing::error!("{detail}");
+            show_native_alert("Pulsaria — Error de Seguridad", &detail);
             return;
         }
     };
@@ -369,6 +408,11 @@ async fn main() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            write_startup_log(
+                &db::data_dir_path(),
+                "single_instance",
+                "Secondary instance activated; bringing main window to front",
+            );
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.unminimize();
