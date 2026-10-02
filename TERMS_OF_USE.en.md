@@ -56,9 +56,8 @@ versions.
 
 General contact and technical support: https://github.com/danielunibe/PulsarIA/issues.
 
-Legal contact and notice email: danielunibe10@gmail.com.
-The physical notice address requires confirmation and review before the first
-release.
+Legal contact and notice email: danielunibe10@gmail.com (official electronic legal
+notice channel for the beta release).
 
 These terms do not replace the EULA, Privacy Notice, Content Policy, or
 third-party licenses.

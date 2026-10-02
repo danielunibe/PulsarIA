@@ -7,9 +7,8 @@ Versión: 1.0 · 12 de septiembre de 2026
 Responsable público del software: Daniel Unibe (cuenta del proyecto:
 https://github.com/danielunibe). Esta denominación pública no acredita por sí
 sola una razón social ni sustituye la revisión de la identidad legal.
-Correo de contacto y notificaciones: danielunibe10@gmail.com. El domicilio
-físico para notificaciones legales sigue pendiente de confirmar y revisar antes
-de publicar el primer release.
+Correo de contacto y notificaciones legales: danielunibe10@gmail.com (canal
+electrónico oficial de notificaciones y atención para la versión beta).
 
 Pulsaria no está afiliada, patrocinada ni respaldada por TikTok, ByteDance,
 YouTube, Google ni ninguna otra plataforma mencionada por la aplicación.

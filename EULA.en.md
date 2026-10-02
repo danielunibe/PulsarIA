@@ -5,10 +5,8 @@ Version: 1.0 · September 12, 2026
 ## 1. Licensor
 
 Pulsaria is a free beta distributed by the rights holder expressly identified
-in the official release, as an individual or entity. The legal identity and
-physical notice address still require confirmation and review before the first
-public release. The current public product and legal contact details appear
-in Section 10.
+in the official release, as an individual or entity. The official public product
+and legal contact details appear in Section 10.
 
 Pulsaria is not affiliated with, sponsored by, or endorsed by TikTok,
 ByteDance, YouTube, Google, or any other platform mentioned by the
@@ -106,9 +104,8 @@ The Spanish version controls for users in Mexico. This EULA is interpreted
 under applicable law without limiting non-waivable consumer or privacy rights.
 
 Public product contact: Daniel Unibe (GitHub account: danielunibe).
-Legal contact and notice email: danielunibe10@gmail.com.
-The legal identity and physical notice address still require confirmation and
-review before the first release.
+Legal contact and notice email: danielunibe10@gmail.com (official electronic legal
+notice channel for the beta release).
 
 The source license is in LICENSE. Content, privacy, copyright, and security
 policies are in the corresponding documents in the official repository.

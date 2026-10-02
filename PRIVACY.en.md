@@ -4,15 +4,12 @@ Version: 1.0 · September 12, 2026
 
 ## Controller
 
-Controller: the rights holder identified in the applicable release.
+Controller: Daniel Unibe (Pulsaria project owner).
 
-Physical privacy and notice address: pending confirmation and review before
-the first release.
-Public contact and privacy requests: danielunibe10@gmail.com.
+Official privacy, notifications, and data subject requests channel: danielunibe10@gmail.com.
+Official electronic communication channel designated for the beta release.
 
-This notice is prepared for a desktop beta distributed through GitHub. It
-must be reviewed and completed with the controller's real details before
-publication.
+This notice governs the desktop beta distributed through the official GitHub repository.
 
 ## Local privacy principle
 

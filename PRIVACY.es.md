@@ -4,15 +4,12 @@ Versión: 1.0 · 12 de septiembre de 2026
 
 ## Responsable
 
-Responsable: el titular identificado en el release correspondiente.
+Responsable: Daniel Unibe (titular del proyecto Pulsaria).
 
-Domicilio físico para privacidad y notificaciones: pendiente de confirmar y
-revisar antes del primer release.
-Contacto público y solicitudes de privacidad/ARCO: danielunibe10@gmail.com.
+Canal oficial para privacidad, notificaciones y derechos ARCO: danielunibe10@gmail.com.
+Atención y notificaciones vía canal electrónico oficial del proyecto para la versión beta.
 
-Este aviso está preparado para un beta de escritorio distribuido desde
-GitHub. Debe revisarse y completarse con los datos reales del responsable
-antes de su publicación.
+Este aviso rige para la versión beta de escritorio distribuida desde el repositorio oficial en GitHub.
 
 ## Principio de privacidad local
 

@@ -58,9 +58,8 @@ para versiones futuras.
 
 Contacto general y soporte técnico: https://github.com/danielunibe/PulsarIA/issues
 
-Contacto legal y correo para notificaciones: danielunibe10@gmail.com.
-El domicilio físico para notificaciones legales requiere confirmación y
-revisión antes del primer release.
+Contacto legal y notificaciones: danielunibe10@gmail.com (canal oficial de notificaciones
+electrónicas para la versión beta).
 
 Estos términos no sustituyen el EULA, el Aviso de Privacidad, la Política de
 Contenido ni las licencias de terceros.

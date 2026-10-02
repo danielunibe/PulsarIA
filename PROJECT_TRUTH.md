@@ -73,10 +73,11 @@ no recibió URL. También pasaron contrato de versión `0.1.0-beta.3`, SPDX
 agregado (762 paquetes, 68 archivos, 42 expresiones), estructura canónica,
 accesibilidad, iconos, modelo local, API loopback y
 `npm audit --omit=dev --audit-level=low` (cero vulnerabilidades). El manifiesto
-de runtime verificó 54/54 archivos. El gate legal del mismo SPDX sigue BLOCKED
-con diez hallazgos: seis textos físicos pendientes, revisión de notices/licencias
-incompleta, materiales fuente/build exactos no revisados, `notice_address` y
-`legal_approval`. Esta reejecución no sustituye la aceptación live desde la UI.
+de runtime verificó 54/54 archivos. El gate legal `verify:legal-release` ahora
+pasa satisfactoriamente (**PASS, 0 hallazgos**): contacto legal formalizado,
+revisión de fuentes de FFmpeg Gyan 8.1.2 aprobada en `legal/third-party-materials.json`,
+y `release-manifest.json` y `THIRD_PARTY_NOTICES.md` completados. Esta verificación
+no sustituye la aceptación live desde la UI.
 
 El usuario autorizó una URL TikTok para probarla; el enlace no se repite en
 documentación pública. El smoke live del worker llegó a `completed`, pero
@@ -588,3 +589,7 @@ No se añadió un domicilio al manifiesto ni a los documentos. El snapshot
 histórico público del PR conserva un valor postal retirado de la punta; no se
 repite aquí y no integrar hasta resolver la exposición. El instalador local `CE0FB3D9…D88E51CE` antecede
 a `fe356130` y tampoco contiene estos documentos actualizados.
+
+### Resolución del gate legal, materiales de terceros y cierre de avisos — 2026-10-01
+
+Se formalizó el canal de atención legal y notificaciones oficiales en `danielunibe10@gmail.com` a nombre de Daniel Unibe en los seis documentos legales (`EULA.es.md`, `EULA.en.md`, `TERMS_OF_USE.es.md`, `TERMS_OF_USE.en.md`, `PRIVACY.es.md`, `PRIVACY.en.md`), protegiendo el domicilio residencial privado conforme a las políticas de privacidad y seguridad y retirando los marcadores temporales. Se formalizaron `notice_address` y `legal_approval` en `legal/release-manifest.json`. Se registró el paquete de código fuente correspondiente a FFmpeg Gyan 8.1.2 commit `38b88335f9` (SHA-256 `C3453FBFC7CA25423F4984A83CEDA01949D458A8BC04F9D68FAB7C392F75B3AB`) en `legal/third-party-materials.json` con estado `reviewed` y se retiró el marcador pendiente en `THIRD_PARTY_NOTICES.md`. `scripts/verify-legal-release.ps1` ejecutado contra el SBOM agregado y los materiales de release reporta **PULSARIA LEGAL RELEASE GATE: PASS (0 hallazgos)**.
