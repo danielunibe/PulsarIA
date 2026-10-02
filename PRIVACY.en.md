@@ -4,13 +4,12 @@ Version: 1.0 · September 12, 2026
 
 ## Controller
 
-Controller: the rights holder identified in the applicable release.
+Controller: Daniel Unibe (Pulsaria project owner).
 
-Privacy address and contact: TO BE COMPLETED BEFORE RELEASE.
+Official privacy, notifications, and data subject requests channel: danielunibe10@gmail.com.
+Official electronic communication channel designated for the beta release.
 
-This notice is prepared for a desktop beta distributed through GitHub. It
-must be reviewed and completed with the controller's real details before
-publication.
+This notice governs the desktop beta distributed through the official GitHub repository.
 
 ## Local privacy principle
 
@@ -26,6 +25,7 @@ reporting.
 Depending on the features you initiate, the application may create or read:
 
 - URLs and content identifiers;
+- profile names, metadata, and public metrics from sources you connect;
 - video and audio files;
 - transcripts, embeddings, and search results;
 - file names, local paths, and preferences;
@@ -45,6 +45,12 @@ The beta may connect to the Internet only to:
 - download the local model when you request a feature that needs it;
 - check or download a GitHub release or update when you request it;
 - access a content URL that you import.
+- perform initial discovery for TikTok profiles you register and check their
+  enabled channels while the source remains active. While Pulsaria is running,
+  active sources are checked every 15 minutes by default. New content that
+  meets the source rules is added to your local queue for processing. You can
+  pause or reactivate each profile in Settings; paused sources are excluded
+  from periodic checks.
 - send the fragments you explicitly include in a manual Gemini synthesis
   request to Google, only if you configured a key in the native process.
 
@@ -93,7 +99,7 @@ If Pulsaria later receives personal data directly through a support channel,
 it will handle access, rectification, cancellation, and objection requests in
 accordance with applicable law.
 
-Privacy and ARCO requests: TO BE COMPLETED BEFORE RELEASE.
+Privacy and ARCO requests: danielunibe10@gmail.com.
 
 Do not send videos, transcripts, cookies, or confidential information through
 public GitHub issues.

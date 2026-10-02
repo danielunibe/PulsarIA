@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$ArtifactRoot,
-    [switch]$RequireAuthenticode
+    [switch]$RequireAuthenticode,
+    [switch]$AllowPrerelease
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,7 +55,7 @@ function Get-RequiredArtifact {
 }
 
 $nsis = Get-RequiredArtifact (Join-Path $resolvedArtifactRoot 'nsis') '*_x64-setup.exe' 'NSIS'
-$msi = Get-RequiredArtifact (Join-Path $resolvedArtifactRoot 'msi') '*_x64*.msi' 'MSI'
+$msi = if ($AllowPrerelease) { $null } else { Get-RequiredArtifact (Join-Path $resolvedArtifactRoot 'msi') '*_x64*.msi' 'MSI' }
 $latest = Get-ChildItem -LiteralPath $resolvedArtifactRoot -Filter 'latest.json' -File -Recurse -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTimeUtc -Descending |
     Select-Object -First 1
@@ -83,8 +84,9 @@ foreach ($line in $checksumLines) {
     }
     $checksumEntries[$checksumName] = $checksumHash
 }
-if ($checksumEntries.Count -lt 5) {
-    throw 'SHA256SUMS.txt does not cover the complete public release asset set.'
+$minimumChecksumEntries = if ($AllowPrerelease) { 4 } else { 5 }
+if ($checksumEntries.Count -lt $minimumChecksumEntries) {
+    throw "SHA256SUMS.txt does not cover the complete public release asset set (expected at least $minimumChecksumEntries entries)."
 }
 foreach ($checksumName in $checksumEntries.Keys) {
     $checksumCandidates = @(Get-ChildItem -LiteralPath $resolvedArtifactRoot -Filter $checksumName -File -Recurse -ErrorAction SilentlyContinue)
@@ -105,6 +107,9 @@ try {
 if ([string]::IsNullOrWhiteSpace([string]$manifest.version)) {
     throw 'latest.json does not contain a version.'
 }
+if ($AllowPrerelease -and [string]$manifest.version -notmatch '-') {
+    throw 'The prerelease artifact gate requires a prerelease version in latest.json.'
+}
 $platforms = @($manifest.platforms.PSObject.Properties)
 if ($platforms.Count -eq 0) { throw 'latest.json does not contain any updater platform.' }
 foreach ($platform in $platforms) {
@@ -117,12 +122,18 @@ foreach ($platform in $platforms) {
 }
 
 $authenticode = [ordered]@{}
-foreach ($artifact in @($nsis, $msi)) {
+$authenticodeArtifacts = @($nsis)
+if ($null -ne $msi) { $authenticodeArtifacts += $msi }
+foreach ($artifact in $authenticodeArtifacts) {
     $signature = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
     $authenticode[$artifact.Name] = [string]$signature.Status
     if ($RequireAuthenticode -and $signature.Status -ne 'Valid') {
         throw "Authenticode verification failed for $($artifact.Name): $($signature.Status)"
     }
+}
+$msiResult = $null
+if ($null -ne $msi) {
+    $msiResult = @{ path = $msi.FullName; sha256 = Get-Sha256Hex $msi.FullName; bytes = $msi.Length }
 }
 
 $workspaceRoot = $projectRoot
@@ -154,7 +165,7 @@ foreach ($scanFile in $scanFiles) {
 [ordered]@{
     status = 'PASS'
     nsis = @{ path = $nsis.FullName; sha256 = Get-Sha256Hex $nsis.FullName; bytes = $nsis.Length }
-    msi = @{ path = $msi.FullName; sha256 = Get-Sha256Hex $msi.FullName; bytes = $msi.Length }
+    msi = $msiResult
     latestJson = @{ path = $latest.FullName; version = [string]$manifest.version }
     sha256Sums = @{ path = $checksumManifest.FullName; entries = $checksumEntries.Count }
     signatureCount = $signatures.Count

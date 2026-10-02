@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "review_status": "reviewed",
+  "review_note": "Upstream FFmpeg source archive corresponding to Gyan 8.1.2 commit 38b88335f99e76ed89ff3c93f877fdefce736c13 reviewed and verified for Beta 3.",
+  "files": [
+    {
+      "name": "third-party-ffmpeg-38b88335f9-source.zip",
+      "url": "https://codeload.github.com/FFmpeg/FFmpeg/zip/38b88335f99e76ed89ff3c93f877fdefce736c13",
+      "sha256": "C3453FBFC7CA25423F4984A83CEDA01949D458A8BC04F9D68FAB7C392F75B3AB"
+    }
+  ]
+}

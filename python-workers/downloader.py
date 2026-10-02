@@ -23,6 +23,8 @@ import subprocess
 import importlib.util
 from pathlib import Path
 
+from process_utils import hidden_process_kwargs
+
 
 DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 2 * 60 * 60
 
@@ -200,6 +202,7 @@ def _has_audio_stream(video_path: str) -> bool:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                **hidden_process_kwargs(),
             )
             return result.returncode == 0
         except (subprocess.SubprocessError, FileNotFoundError, OSError):
@@ -209,7 +212,7 @@ def _has_audio_stream(video_path: str) -> bool:
         result = subprocess.run(
             [ffprobe_path, "-v", "error", "-select_streams", "a",
              "-show_entries", "stream=codec_type", "-of", "csv=p=0", video_path],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=30, **hidden_process_kwargs()
         )
         return bool(result.stdout.strip())
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
@@ -239,6 +242,7 @@ def download_video(url: str, job_id: int, base_dir: Path) -> str:
             capture_output=True,
             text=True,
             timeout=_download_timeout_seconds(),
+            **hidden_process_kwargs(),
         )
         # Bug #26 FIX: Find actual downloaded file — yt-dlp may rename on conflict
         if not output_path.exists():
@@ -269,6 +273,7 @@ def download_video(url: str, job_id: int, base_dir: Path) -> str:
                     capture_output=True,
                     text=True,
                     timeout=_download_timeout_seconds(),
+                    **hidden_process_kwargs(),
                 )
                 if not output_path.exists():
                     mp4_files = sorted(output_dir.glob('*.mp4'), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -308,7 +313,12 @@ def extract_metadata(url: str) -> dict:
     ]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=60
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+            **hidden_process_kwargs(),
         )
         info = json.loads(result.stdout)
         if not isinstance(info, dict):
@@ -340,23 +350,28 @@ def extract_metadata(url: str) -> dict:
         raise RuntimeError(f"Respuesta inválida de metadata: {error}") from error
 
 
-def extract_playlist_videos(url: str) -> list[str]:
-    """Extrae URLs individuales de una playlist de TikTok."""
+def extract_playlist_entries(url: str, playlist_end: int = 200) -> list[dict]:
+    """Extrae entradas de una colección sin descargar vídeos."""
     cmd = build_yt_dlp_base_cmd() + [
         "--quiet",
         "--no-warnings",
         "--flat-playlist",
-        "--playlist-end", "200",
+        "--playlist-end", str(max(1, min(1000, playlist_end))),
         "--dump-json",
-
         "--no-download",
         url
     ]
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=60
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+            **hidden_process_kwargs(),
         )
-        videos = []
+        entries = []
+        seen = set()
 
         for line_number, line in enumerate(result.stdout.splitlines(), start=1):
             if line.strip():
@@ -370,12 +385,25 @@ def extract_playlist_videos(url: str) -> list[str]:
                     continue
                 candidate = info.get('webpage_url') or info.get('original_url') or info.get('url')
                 if isinstance(candidate, str) and candidate.startswith(('http://', 'https://')):
-                    videos.append(candidate)
+                    if candidate in seen:
+                        continue
+                    seen.add(candidate)
+                    entries.append({
+                        "url": candidate,
+                        "id": str(info.get("id") or "") or None,
+                        "upload_date": str(info.get("upload_date") or "") or None,
+                        "timestamp": info.get("timestamp"),
+                    })
 
-        return list(dict.fromkeys(videos))
+        return entries
     except subprocess.CalledProcessError as error:
         raise RuntimeError(
             f"Fallo expandiendo colección: {_process_error_detail(error)}"
         ) from error
     except (subprocess.TimeoutExpired, OSError) as error:
         raise RuntimeError(f"Fallo expandiendo colección: {error}") from error
+
+
+def extract_playlist_videos(url: str) -> list[str]:
+    """Extrae URLs individuales de una playlist de TikTok."""
+    return [entry["url"] for entry in extract_playlist_entries(url)]

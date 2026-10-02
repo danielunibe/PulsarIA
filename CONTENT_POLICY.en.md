@@ -47,4 +47,4 @@ browser profile or enable cookies on a device you do not control.
 For review or removal requests concerning material related to Pulsaria, see
 COPYRIGHT_AND_TAKEDOWN.en.md.
 
-Content contact: TO BE COMPLETED BEFORE RELEASE.
+Content contact: danielunibe10@gmail.com.

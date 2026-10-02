@@ -2,6 +2,30 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ProcessingQuality, useSettings, VideoFit } from '@/lib/settings-context';
+import {
+  readOnboardingDraft,
+  writeOnboardingDraft,
+  type OnboardingDraft,
+} from '@/lib/onboarding-draft';
+
+const RUNTIME_CHECK_TIMEOUT_MS = 30_000;
+
+export interface RuntimeResourceCheck {
+  name: string;
+  path: string;
+  required: boolean;
+  available: boolean;
+  message: string;
+}
+
+export interface RuntimePreflight {
+  ready: boolean;
+  offline_ready?: boolean;
+  resources: RuntimeResourceCheck[];
+  checks: Record<string, boolean>;
+  missing: string[];
+  message: string;
+}
 
 export interface HardwareProfile {
   cpu_name: string;
@@ -30,6 +54,33 @@ export interface WhisperModelStatus {
   revision?: string | null;
   path: string;
   message?: string | null;
+}
+
+export type LocalModelPhase = 'idle' | 'downloading' | 'verifying' | 'preparing' | 'validating' | 'ready' | 'error' | 'cancelled';
+
+export type LocalModelErrorCode =
+  | 'network_error' | 'timeout' | 'insufficient_space' | 'permission_denied'
+  | 'invalid_path' | 'download_failed' | 'verification_failed' | 'corrupt_model'
+  | 'preparation_failed' | 'validation_failed' | 'model_already_preparing'
+  | 'process_crashed' | 'cancelled' | 'unknown';
+
+export interface LocalModelError {
+  code: LocalModelErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+export interface LocalModelSetupState {
+  phase: LocalModelPhase;
+  model: 'tiny' | 'small' | 'medium';
+  progress: number | null;
+  downloadedBytes?: number | null;
+  totalBytes?: number | null;
+  etaSeconds?: number | null;
+  subphase?: string | null;
+  message?: string | null;
+  failedPhase?: LocalModelPhase | null;
+  error?: LocalModelError | null;
 }
 
 export interface SetupSaveOptions {
@@ -61,58 +112,98 @@ export function useProcessingSettings() {
   const [preparationError, setPreparationError] = useState<string | null>(null);
   const [initializationError, setInitializationError] = useState<string | null>(null);
   const [runtimeReady, setRuntimeReady] = useState(false);
+  const [runtimeTimedOut, setRuntimeTimedOut] = useState(false);
+  const [runtimePreflight, setRuntimePreflight] = useState<RuntimePreflight | null>(null);
   const [setupCompleted, setSetupCompleted] = useState(false);
-  const [setupPreferencesReady, setSetupPreferencesReady] = useState(false);
+  const [initialDraft] = useState(readOnboardingDraft);
+  const [setupPreferencesReady, setSetupPreferencesReady] = useState(Boolean(initialDraft?.preferencesSaved));
+  const [setupPostponed, setSetupPostponed] = useState(Boolean(initialDraft?.postponed));
+  const [modelSetupState, setModelSetupState] = useState<LocalModelSetupState | null>(null);
   const preparationRequestRef = useRef(0);
+  const refreshRequestRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!isTauriRuntime()) {
       setLoading(false);
       return;
     }
+    const requestId = ++refreshRequestRef.current;
     setLoading(true);
     setInitializationError(null);
+    setRuntimeTimedOut(false);
+    setRuntimePreflight(null);
+    setRuntimeReady(false);
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const [detectedHardware, persistedSettings] = await Promise.all([
-        invoke<HardwareProfile>('get_hardware_profile'),
-        invoke<ProcessingSettings>('get_processing_settings'),
-      ]);
-      const runtime = await invoke<{ ready?: boolean; message?: string }>('get_runtime_preflight');
-      if (runtime.ready === false) {
-        throw new Error(runtime.message || 'El runtime local no está listo.');
-      }
-      const detectedModel = await invoke<WhisperModelStatus>('get_whisper_model_status', {
-        model: persistedSettings.whisper_model,
+      const loadRuntime = async () => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const [detectedHardware, persistedSettings] = await Promise.all([
+          invoke<HardwareProfile>('get_hardware_profile'),
+          invoke<ProcessingSettings>('get_processing_settings'),
+        ]);
+        const runtime = await invoke<RuntimePreflight>('get_runtime_preflight');
+        if (!runtime.ready) {
+          return { detectedHardware, persistedSettings, runtime, detectedModel: null, reconciledState: null };
+        }
+        const detectedModel = await invoke<WhisperModelStatus>('get_whisper_model_status', {
+          model: persistedSettings.whisper_model,
+        });
+        const reconciledState = await invoke<LocalModelSetupState>('get_local_model_state', {
+          model: persistedSettings.whisper_model,
+        });
+        return { detectedHardware, persistedSettings, runtime, detectedModel, reconciledState };
+      };
+      const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('PULSAR_RUNTIME_CHECK_TIMEOUT')), RUNTIME_CHECK_TIMEOUT_MS);
       });
-      setHardware(detectedHardware);
-      setProcessing(persistedSettings);
-      setModelStatus(detectedModel);
+      const result = await Promise.race([loadRuntime(), timeout]);
+      if (requestId !== refreshRequestRef.current) return;
+      setHardware(result.detectedHardware);
+      setProcessing(result.persistedSettings);
+      setRuntimePreflight(result.runtime);
+      if (!result.runtime.ready) {
+        setRuntimeReady(false);
+        setInitializationError(result.runtime.message || 'La comprobación local detectó recursos que necesitan atención.');
+        return;
+      }
+      setModelStatus(result.detectedModel);
+      setModelSetupState(result.reconciledState);
       setRuntimeReady(true);
       updateSettings({
-        processingQuality: persistedSettings.quality,
-        processingProfile: persistedSettings.profile,
-        videoFit: persistedSettings.video_fit,
+        processingQuality: result.persistedSettings.quality,
+        processingProfile: result.persistedSettings.profile,
+        videoFit: result.persistedSettings.video_fit,
       });
     } catch (error) {
+      if (requestId !== refreshRequestRef.current) return;
       setRuntimeReady(false);
       const message = error instanceof Error ? error.message : String(error);
-      setInitializationError(message || 'No se pudo inicializar el motor local.');
+      if (message === 'PULSAR_RUNTIME_CHECK_TIMEOUT') {
+        setRuntimeTimedOut(true);
+        setInitializationError(null);
+      } else {
+        setInitializationError(message || 'No se pudo inicializar el motor local.');
+      }
     } finally {
-      setLoading(false);
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (requestId === refreshRequestRef.current) setLoading(false);
     }
   }, [updateSettings]);
 
   useEffect(() => {
-    try {
-      setSetupPreferencesReady(Boolean(localStorage.getItem('pulsaria-mvp-setup')));
-    } catch {
-      setSetupPreferencesReady(false);
-    }
     queueMicrotask(() => {
       void refresh();
     });
   }, [refresh]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    void import('@tauri-apps/api/event').then(({ listen }) => listen<LocalModelSetupState>('local-model-state', (event) => {
+      setModelSetupState(event.payload);
+    })).then((dispose) => { unlisten = dispose; });
+    return () => { unlisten?.(); };
+  }, []);
 
   const prepareForQuality = useCallback(async (quality: number) => {
     if (!isTauriRuntime()) return null;
@@ -230,6 +321,7 @@ export function useProcessingSettings() {
     setInitializationError(null);
     setSetupCompleted(true);
     setSetupPreferencesReady(true);
+    setSetupPostponed(false);
     return next;
   }, [prepareForQuality, updateSettings]);
 
@@ -253,29 +345,80 @@ export function useProcessingSettings() {
     }
   }, []);
 
+  const recoverModel = useCallback(async (mode: 'retry' | 'repair') => {
+    if (!isTauriRuntime() || !processing?.whisper_model) return null;
+    const { invoke } = await import('@tauri-apps/api/core');
+    setPreparationError(null);
+    const command = mode === 'repair' ? 'repair_local_model' : 'retry_local_model_setup';
+    try {
+      const result = await invoke<WhisperModelStatus>(command, { model: processing.whisper_model });
+      setModelStatus(result);
+      return result;
+    } catch (error) {
+      setPreparationError(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }, [processing?.whisper_model]);
+
+  const postponeSetup = useCallback((progress: Pick<OnboardingDraft, 'answers' | 'step' | 'intentQuestion'>) => {
+    const currentDraft = readOnboardingDraft();
+    writeOnboardingDraft({
+      schemaVersion: 1,
+      answers: progress.answers,
+      step: progress.step,
+      intentQuestion: progress.intentQuestion,
+      postponed: true,
+      preferencesSaved: setupPreferencesReady || Boolean(currentDraft?.preferencesSaved),
+    });
+    setSetupPostponed(true);
+    setSetupCompleted(false);
+  }, [setupPreferencesReady]);
+
+  const resumeSetup = useCallback(() => {
+    const currentDraft = readOnboardingDraft();
+    if (currentDraft?.postponed) writeOnboardingDraft({ ...currentDraft, postponed: false });
+    setSetupPostponed(false);
+    setSetupCompleted(false);
+  }, []);
+
+  const dismissSetup = useCallback(() => {
+    const currentDraft = readOnboardingDraft();
+    if (currentDraft) {
+      writeOnboardingDraft({ ...currentDraft, step: 'success', postponed: false, preferencesSaved: true });
+    }
+    setSetupCompleted(false);
+    setSetupPreferencesReady(true);
+    setSetupPostponed(false);
+  }, []);
+
+  const needsSetup = isTauriRuntime() && !setupCompleted && Boolean(
+    !setupPreferencesReady || (processing && (!processing.configured || !modelStatus?.ready)),
+  );
+
   return {
     hardware,
     processing,
     modelStatus,
+    modelSetupState,
     preparing,
     preparationError,
     initializationError,
     loading,
     isNative: isTauriRuntime(),
     runtimeReady,
-    needsSetup: isTauriRuntime() && !setupCompleted && Boolean(
-      !setupPreferencesReady || (processing && (!processing.configured || !modelStatus?.ready)),
-    ),
-    showSetup: isTauriRuntime() && Boolean(
-      loading || initializationError || setupCompleted || (processing && (!processing.configured || !modelStatus?.ready)),
-    ) || (isTauriRuntime() && !setupPreferencesReady),
-    dismissSetup: () => {
-      setSetupCompleted(false);
-      setSetupPreferencesReady(true);
-    },
+    runtimeTimedOut,
+    runtimePreflight,
+    needsSetup,
+    setupPostponed,
+    showSetup: isTauriRuntime() && Boolean(setupCompleted || (!setupPostponed && (loading || initializationError || runtimeTimedOut || needsSetup))),
+    postponeSetup,
+    resumeSetup,
+    dismissSetup,
     refresh,
     save,
     prepareForQuality,
     cancelPreparation,
+    retryModel: () => recoverModel('retry'),
+    repairModel: () => recoverModel('repair'),
   };
 }

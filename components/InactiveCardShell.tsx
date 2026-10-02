@@ -3,7 +3,7 @@
 // ============================================================
 
 import { TIKTOK_LOGO_PATH } from '@/lib/design-tokens';
-import { FaHeart, FaCommentDots, FaBookmark, FaShare } from 'react-icons/fa6';
+import { FaHeart, FaCommentDots, FaBookmark, FaShare } from '@/components/icon-library';
 
 const icons = [FaHeart, FaCommentDots, FaBookmark, FaShare];
 
@@ -99,4 +99,3 @@ function SkeletonBar({ width, hovered }: { width: string, hovered: boolean }) {
         </div>
     );
 }
-

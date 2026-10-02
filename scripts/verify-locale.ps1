@@ -7,8 +7,14 @@ $checks = @(
     @{ Path = 'lib/settings-context.tsx'; Pattern = 'localStorage.setItem.*pulsar-settings'; Label = 'Locale persistence' },
     @{ Path = 'lib/i18n.tsx'; Pattern = 'export function I18nProvider'; Label = 'I18n provider' },
     @{ Path = 'lib/i18n.tsx'; Pattern = "translations\['es-MX'\]"; Label = 'Spanish fallback' },
+    @{ Path = 'lib/i18n.tsx'; Pattern = "navSearch: 'Buscar en la biblioteca'"; Label = 'Spanish navigation labels' },
+    @{ Path = 'lib/i18n.tsx'; Pattern = "navPrimary: 'Main navigation'"; Label = 'English navigation labels' },
+    @{ Path = 'components/Sidebar.tsx'; Pattern = "aria-label=\{t\('navPrimary'\)\}"; Label = 'Localized sidebar accessible name' },
+    @{ Path = 'components/Sidebar.tsx'; Pattern = "t\('navCinemaUnavailable'\)"; Label = 'Localized Cinema availability name' },
+    @{ Path = 'components/Sidebar.tsx'; Pattern = "t\('navPendingActivityCount'"; Label = 'Localized pending activity count' },
+    @{ Path = 'components/Header.tsx'; Pattern = "t\('windowMinimize'\)"; Label = 'Localized native window controls' },
     @{ Path = 'components/ProcessingSetupModal.tsx'; Pattern = 'setLocale\(value\)'; Label = 'First-launch selector' },
-    @{ Path = 'components/SettingsPanel.tsx'; Pattern = 'setLocale\(value\)'; Label = 'Settings selector' }
+    @{ Path = 'components/settings/GeneralTab.tsx'; Pattern = 'setLocale\(value\)'; Label = 'Settings selector' }
 )
 
 foreach ($check in $checks) {

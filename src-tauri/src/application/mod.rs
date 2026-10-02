@@ -1,10 +1,13 @@
 pub mod collection_service;
 pub mod embedding_cache;
 pub mod hybrid_search;
+pub mod profile_discovery_service;
 pub mod query_analytics;
 pub mod query_planner;
+pub mod query_understanding;
 pub mod queue_service;
 pub mod recall_benchmark;
 pub mod reranker;
 pub mod search_service;
 pub mod semantic_chunker;
+pub mod unified_search;

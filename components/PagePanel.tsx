@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'motion/react';
-import { FaTableCells, FaListUl, FaGrip, FaArrowDownWideShort, FaCheck, FaSliders, FaFilter } from 'react-icons/fa6';
+import { FaTableCells, FaTableList, FaGrip, FaArrowDownWideShort, FaCheck, FaSliders, FaFilter } from '@/components/icon-library';
 
 export type GridLayout = 'grid' | 'list' | 'compact';
 export type GridColumns = 2 | 3 | 4 | 0; // 0 = auto
@@ -22,7 +22,7 @@ export interface PageConfig {
   sortKey: SortKey;
   /** Si es true, oculta jobs que no están en estado 'complete' */
   showOnlyCompleted: boolean;
-  /** Si es true, muestra solo jobs con errores */
+  /** Si es true, añade al grid los registros que terminaron con error */
   showErrors: boolean;
   /** Filtrar por estado de retención: 'keep', 'online', o 'all' */
   keepStatusFilter?: string;
@@ -59,8 +59,8 @@ export function PagePanel({ config, onChange }: PagePanelProps) {
     <div 
       className="flex flex-col gap-3.5 p-4 rounded-[20px] border transition-all font-sans"
       style={{
-        background: 'rgba(14, 16, 22, 0.75)',
-        backdropFilter: 'blur(20px)',
+        background: 'rgba(20, 20, 24, 0.85)',
+        backdropFilter: 'blur(24px)',
         borderColor: 'rgba(255, 255, 255, 0.08)',
         boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
       }}
@@ -86,7 +86,7 @@ export function PagePanel({ config, onChange }: PagePanelProps) {
         <div className="flex gap-1.5 p-1 rounded-xl bg-white/[0.03] border border-white/5">
           {[
             { id: 'grid', label: 'Grid', icon: FaTableCells },
-            { id: 'list', label: 'Lista', icon: FaListUl },
+            { id: 'list', label: 'Lista', icon: FaTableList },
             { id: 'compact', label: 'Compacto', icon: FaGrip },
           ].map(opt => {
             const Icon = opt.icon;

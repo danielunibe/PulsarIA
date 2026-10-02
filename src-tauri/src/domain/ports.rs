@@ -28,6 +28,28 @@ pub trait EmbeddingEngine: Send + Sync {
     fn generate_embedding(&self, text: &str) -> Result<Vec<f32>, String>;
 }
 
+/// Versioned metadata contract for embedding implementations. The current
+/// desktop engine still uses `EmbeddingEngine` for backwards compatibility,
+/// while new indexes record these values per provider/model.
+pub trait EmbeddingProvider: EmbeddingEngine {
+    fn provider_id(&self) -> &str;
+    fn model_version(&self) -> &str;
+    fn dimensions(&self) -> usize;
+}
+
+/// Optional, local-only visual provider. No concrete implementation is
+/// required for text-first search; keyframes and OCR remain valid evidence
+/// when this capability is unavailable.
+pub trait VisionProvider: Send + Sync {
+    fn provider_id(&self) -> &str;
+    fn model_version(&self) -> &str;
+    fn is_available(&self) -> bool;
+    fn analyze_keyframe(
+        &self,
+        artifact_path: &str,
+    ) -> Result<super::models::VisionAnalysis, String>;
+}
+
 pub trait VectorIndex: Send + Sync {
     fn insert(
         &self,
@@ -42,4 +64,11 @@ pub trait VectorIndex: Send + Sync {
     // Persistence
     fn snapshot_index(&self, file_path: &str) -> Result<(), String>;
     fn load_index(&self, file_path: &str) -> Result<(), String>;
+}
+
+pub trait ProfileMetadataProvider: Send + Sync {
+    fn resolve_profile_metadata(
+        &self,
+        handle_or_url: &str,
+    ) -> impl std::future::Future<Output = Result<super::models::ProfileMetadataSnapshot, String>> + Send;
 }

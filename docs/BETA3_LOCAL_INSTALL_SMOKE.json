@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "verifiedOn": "2026-10-01",
+  "candidate": {
+    "version": "0.1.0-beta.3",
+    "fileName": "Pulsaria_0.1.0-beta.3_x64-setup.exe",
+    "sizeBytes": 687986682,
+    "sha256": "D0492C87BF868A857FB02E8FB25AF7D12F451EFEA0ABA1176D8423B7A669F989",
+    "productVersion": "0.1.0-beta.3",
+    "fileVersion": "0.1.0-beta.3",
+    "authenticode": "NotSigned",
+    "sourceCommit": "cddbb0692001adff94c92775e2ad9a13d473cfa5",
+    "artifactType": "local build; not a GitHub Actions artifact"
+  },
+  "verification": {
+    "command": "npm run verify:installed -- -Configuration release -Bundle nsis -ApiPort 8080",
+    "exitCode": 0,
+    "installExitCode": 0,
+    "uninstallExitCode": 0,
+    "runtimeManifest": {
+      "status": "PASS",
+      "checkedFiles": 54,
+      "presentFiles": 54
+    },
+    "packagedResources": {
+      "legalDocuments": 13,
+      "ffmpegAndFfprobe": true,
+      "ffmpegLicense": true,
+      "thirdPartyNotices": true,
+      "modelNotice": true,
+      "sourceLicense": true,
+      "onnxModel": true,
+      "whisperModel": true
+    },
+    "healthBeforeAppRestart": "ok",
+    "healthAfterAppRestart": "ok",
+    "webView2UserDataFolderIsolated": true,
+    "testDataMarkerPreservedAfterUninstall": true,
+    "runtimeOverridesIsolated": true,
+    "temporaryProfileCleanup": true
+  },
+  "notExercised": [
+    "TikTok ingestion or Spanish speech transcription",
+    "literal or semantic search",
+    "playback or export",
+    "staging cleanup after ingestion",
+    "upgrade from Eval.3 for this exact installer hash",
+    "Windows OS reboot",
+    "native visual acceptance at 1280x800 and 860x640",
+    "WebView2 behavior on a clean Windows x64 host",
+    "GitHub Actions artifact acceptance"
+  ],
+  "publicationStatus": "not approved for publication"
+}

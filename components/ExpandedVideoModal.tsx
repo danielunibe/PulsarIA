@@ -10,13 +10,12 @@ import {
     FaBolt, FaCheckDouble, FaClock, FaCopy, FaShareNodes,
     FaMagnifyingGlass, FaVolumeHigh, FaVolumeXmark, FaExpand,
     FaTerminal, FaCode, FaCheck, FaRotateLeft, FaStar, FaThumbtack,
-    FaCamera
-} from 'react-icons/fa6';
+    FaCamera, FaFilm
+} from '@/components/icon-library';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useSemanticIO } from '@/hooks/useSemanticIO';
-import { useSettings } from '@/lib/settings-context';
 import { apiFetch } from '@/lib/api-client';
 
 // ============================================================
@@ -36,6 +35,10 @@ interface ExpandedVideoModalProps {
     video: ExpandedVideoData;
     /** Callback para cerrar el modal */
     onClose: () => void;
+    /** Abre el modo Cinema en este video (opcional; oculta el boton si no viene) */
+    onOpenCinema?: () => void;
+    /** Timestamp del momento que originó la apertura desde una búsqueda. */
+    initialTime?: number;
 }
 
 type SourceState = 'local' | 'online' | 'unavailable';
@@ -107,8 +110,7 @@ async function resolveArtifactUrl(path: string): Promise<string | undefined> {
  * - Importación de archivos UNIB existentes
  * - Búsqueda semántica inline sobre la transcripción
  */
-export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) {
-    const { settings } = useSettings();
+export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }: ExpandedVideoModalProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const semanticInputRef = useRef<HTMLInputElement>(null);
     const [mounted, setMounted] = useState(false);
@@ -136,6 +138,23 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
     const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutput[]>([]);
     const [generatedOutputUrls, setGeneratedOutputUrls] = useState<Record<number, string>>({});
     const [savingFrame, setSavingFrame] = useState(false);
+
+    useEffect(() => {
+        if (initialTime === undefined || !Number.isFinite(initialTime)) return;
+        const seekToMatch = () => {
+            const element = videoRef.current;
+            if (!element) return;
+            const requestedTime = Math.max(0, initialTime);
+            const duration = Number.isFinite(element.duration) && element.duration > 0 ? element.duration : requestedTime;
+            element.currentTime = Math.min(requestedTime, duration);
+            setRawCurrentTime(element.currentTime);
+        };
+        const element = videoRef.current;
+        if (!element) return;
+        if (element.readyState >= 1) seekToMatch();
+        element.addEventListener('loadedmetadata', seekToMatch);
+        return () => element.removeEventListener('loadedmetadata', seekToMatch);
+    }, [initialTime, video.videoSrc]);
 
     const { exportSemantic, importSemantic, downloadUnib, exporting, importing, error: semanticError, exportedContent } = useSemanticIO();
 
@@ -609,7 +628,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                 role="dialog"
                 aria-modal="true"
                 aria-label="Reproductor y análisis de video"
-                className="w-full max-w-[1240px] h-[88vh] min-h-0 max-h-[calc(100vh-2rem)] rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-[0_25px_80px_rgba(0,0,0,0.9)] border border-white/10 relative"
+                className="pulsaria-detail-modal w-full max-w-[1240px] h-[88vh] min-h-0 max-h-[calc(100vh-2rem)] rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-[0_25px_80px_rgba(0,0,0,0.9)] border border-white/10 relative"
                 style={{
                     background: 'linear-gradient(145deg, rgba(16,18,27,0.98) 0%, rgba(8,10,15,0.99) 100%)',
                     boxShadow: '0 30px 90px rgba(0,0,0,0.9)'
@@ -620,7 +639,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                 transition={{ type: 'spring', damping: 28, stiffness: 350 }}
             >
                 {/* ── Left Column: Video Cinema Player ── */}
-                <div className="w-full md:w-[48%] h-[42%] min-h-0 md:h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
+                <div className="pulsaria-detail-media-pane w-full md:w-[48%] h-[42%] min-h-0 md:h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
                     {/* Compact metadata header; the product identity already lives in the main window. */}
                     <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
                         <div className="flex items-center gap-2">
@@ -656,13 +675,13 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                     </div>
 
                     {/* Video Player Shell */}
-                    <div className="flex-1 rounded-2xl overflow-hidden relative bg-black flex items-center justify-center shadow-2xl group">
+                    <div className="pulsaria-detail-video-viewport flex-1 min-h-0 rounded-2xl overflow-hidden relative bg-black flex items-center justify-center shadow-2xl">
                         {video.videoSrc ? (
                             <video
                                 ref={videoRef}
                                 src={video.videoSrc}
                                 poster={video.thumb}
-                                className={`w-full h-full ${settings.videoFit === 'cover' ? 'object-cover' : 'object-contain'}`}
+                                className="pulsaria-detail-video block h-full w-full object-contain"
                                 playsInline
                                 loop
                                 autoPlay
@@ -702,10 +721,13 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                             </div>
                         )}
 
-                        {playbackError && video.videoSrc && <div className="pointer-events-none absolute inset-x-0 top-3 flex justify-center"><span className="rounded-lg border border-white/10 bg-black/55 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-white/55">Video no disponible</span></div>}
+                    </div>
 
-                        {/* Bottom Overlay Controls */}
-                        {video.videoSrc && <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent flex flex-col gap-2.5 opacity-90 group-hover:opacity-100 transition-opacity">
+                    {playbackError && video.videoSrc && <div className="mt-2 shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white/55">Video no disponible</div>}
+
+                    {/* Controles fuera del lienzo de video: la imagen queda limpia y
+                        el reproductor conserva la relación de aspecto del archivo. */}
+                    {video.videoSrc && <div className="pulsaria-detail-controls mt-3 shrink-0 rounded-2xl border border-white/10 bg-white/[0.04] p-3 flex flex-col gap-2.5">
                             {/* Seekbar */}
                             <div className="flex items-center gap-3">
                                 <span className="text-[#25f4ee] font-mono text-[11px] font-bold shrink-0">{currentTime}</span>
@@ -771,13 +793,23 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                                     >
                                         <FaRotateLeft size={11} />
                                     </button>
+                                    {onOpenCinema && (
+                                        <button
+                                            type="button"
+                                            aria-label="Abrir en modo Cinema"
+                                            onClick={onOpenCinema}
+                                            className="w-8 h-8 rounded-lg bg-[#25f4ee]/15 hover:bg-[#25f4ee]/25 border border-[#25f4ee]/30 flex items-center justify-center text-[#25f4ee] transition-all"
+                                            title="Abrir en modo Cinema"
+                                        >
+                                            <FaFilm size={11} />
+                                        </button>
+                                    )}
                                 </div>
                             </div>
-                        </div>}
-                    </div>
+                    </div>}
 
                     {/* Video Info Summary Footer */}
-                    <div className="mt-4 pt-3 border-t border-white/10 flex flex-col gap-1.5 shrink-0">
+                    <div className="pulsaria-detail-meta mt-4 pt-3 border-t border-white/10 flex flex-col gap-1.5 shrink-0">
                         <h3 className="text-white font-bold text-sm truncate" title={video.title}>
                             {video.title || `TikTok Video #${video.id}`}
                         </h3>
@@ -791,11 +823,11 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                 </div>
 
                 {/* ── Right Column: AAA Inspector, Transcript & Export ── */}
-                <div className="w-full md:w-[52%] h-[58%] min-h-0 md:h-full flex flex-col p-5 bg-[#0b0d14]/90 overflow-hidden relative">
+                <div className="pulsaria-detail-inspector w-full md:w-[52%] h-[58%] min-h-0 md:h-full flex flex-col p-5 bg-[#0b0d14]/90 overflow-hidden relative">
                     {/* Header Action Row */}
-                    <div className="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
+                    <div className="pulsaria-detail-inspector-header flex min-w-0 items-center justify-between gap-3 pb-3 border-b border-white/10 shrink-0">
                         {/* Tab Switcher */}
-                        <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 gap-1">
+                        <div className="pulsaria-detail-tabs flex min-w-0 max-w-full shrink overflow-x-auto bg-black/40 p-1 rounded-xl border border-white/10 gap-1">
                             <button
                                 type="button"
                                 aria-pressed={activeTab === 'transcript'}
@@ -855,7 +887,7 @@ export function ExpandedVideoModal({ video, onClose }: ExpandedVideoModalProps) 
                             type="button"
                             aria-label="Cerrar reproductor"
                             onClick={onClose}
-                            className="w-8 h-8 rounded-xl bg-white/5 hover:bg-[#fe2c55]/20 hover:text-[#fe2c55] border border-white/10 flex items-center justify-center text-white/70 hover:scale-105 transition-all"
+                            className="w-8 h-8 shrink-0 rounded-xl bg-white/5 hover:bg-[#fe2c55]/20 hover:text-[#fe2c55] border border-white/10 flex items-center justify-center text-white/70 hover:scale-105 transition-all"
                             title="Cerrar (Esc)"
                         >
                             <FaXmark size={14} />

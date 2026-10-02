@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
+import { useI18n } from '@/lib/i18n';
 import styles from './WelcomeAnimation.module.css';
 
 interface WelcomeAnimationProps {
@@ -13,7 +14,9 @@ const PARTICLES = Array.from({ length: 18 }, (_, index) => index);
 
 export function WelcomeAnimation({ onFinish }: WelcomeAnimationProps) {
   const reducedMotion = useReducedMotion();
+  const { t } = useI18n();
   const overlayRef = useRef<HTMLDivElement>(null);
+  const skipButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     overlayRef.current?.focus({ preventScroll: true });
@@ -49,6 +52,7 @@ export function WelcomeAnimation({ onFinish }: WelcomeAnimationProps) {
       onKeyDown={(event) => {
         if (event.key === 'Tab') {
           event.preventDefault();
+          skipButtonRef.current?.focus({ preventScroll: true });
           return;
         }
         if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
@@ -74,8 +78,19 @@ export function WelcomeAnimation({ onFinish }: WelcomeAnimationProps) {
         <p className={styles.eyebrow}><span />Pulsaria · Espacio local</p>
         <h1><span>Tu conocimiento.</span><strong>Tu ritmo.</strong></h1>
         <p className={styles.message}>Preparando una biblioteca que permanece contigo.</p>
-        <p className={styles.skip}>Haz clic o pulsa Escape para continuar</p>
+        <p className={styles.skip}>{t('skipIntroHint')}</p>
       </motion.div>
+      <button
+        ref={skipButtonRef}
+        type="button"
+        className={styles.skipButton}
+        onClick={(event) => {
+          event.stopPropagation();
+          onFinish();
+        }}
+      >
+        {t('skipIntro')}
+      </button>
     </div>
   );
 }

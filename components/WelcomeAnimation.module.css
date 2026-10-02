@@ -109,6 +109,37 @@
   text-transform: uppercase;
 }
 
+.skipButton {
+  position: absolute;
+  z-index: 2;
+  top: max(1.25rem, env(safe-area-inset-top));
+  right: max(1.25rem, env(safe-area-inset-right));
+  padding: .7rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .08);
+  color: rgba(255, 255, 255, .86);
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+.skipButton:hover {
+  background: rgba(37, 244, 238, .14);
+  color: white;
+  box-shadow: 0 0 28px rgba(37, 244, 238, .16);
+}
+
+.skipButton:focus-visible {
+  outline: 2px solid #25f4ee;
+  outline-offset: 4px;
+}
+
 .particles span {
   position: absolute;
   left: calc(var(--particle-index) * 5.5%);

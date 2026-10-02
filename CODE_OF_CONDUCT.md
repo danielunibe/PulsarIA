@@ -16,7 +16,7 @@ personal data, or content that you do not have permission to share.
 
 Reports may be sent privately to the project contact:
 
-Community contact: TO BE COMPLETED BEFORE RELEASE.
+Community contact: danielunibe10@gmail.com.
 
 Project maintainers may edit, close, hide, or reject content that violates
 this code or creates legal, privacy, or security risk.

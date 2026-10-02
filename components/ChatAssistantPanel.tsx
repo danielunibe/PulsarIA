@@ -1,7 +1,8 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { FaRobot, FaPaperPlane } from "react-icons/fa6";
+import { FaRobot, FaPaperPlane } from "@/components/icon-library";
 import { generateChatResponse } from "@/lib/local-llm";
+import { useSettings } from "@/lib/settings-context";
 import type { JobRecord } from "@/hooks/use-jobs";
 
 interface Message { role: "user" | "assistant"; content: string; }
@@ -15,6 +16,7 @@ type ChatJob = JobRecord & { transcript?: string; text?: string };
  * y envía los primeros 5 videos procesados al sidecar local.
  */
 export function ChatAssistantPanel({ jobs = [] }: { jobs?: ChatJob[] }) {
+  const { settings } = useSettings();
   const [messages, setMessages] = useState<Message[]>([{ role: "assistant", content: "Hola, soy el asistente de investigación de Pulsaria. Pregúntame sobre tus videos transcritos y te ayudo a encontrar información." }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,9 +32,9 @@ export function ChatAssistantPanel({ jobs = [] }: { jobs?: ChatJob[] }) {
     setLoading(true);
     try {
       const completed = jobs.filter((j) => j.status === "complete");
-      const contextChunks = completed.slice(0, 5).map((j) => `Título: ${j.title || j.url}
+      const contextChunks = completed.slice(0, settings.analysisDepth === 'deep' ? 12 : 5).map((j) => `Título: ${j.title || j.url}
 ${j.transcript || j.text || ""}`).filter(Boolean);
-      const response = await generateChatResponse(query, contextChunks);
+      const response = await generateChatResponse(query, contextChunks, settings.analysisDepth);
       setMessages((prev) => [...prev, { role: "assistant", content: response }]);
     } catch (e) {
       setMessages((prev) => [...prev, { role: "assistant", content: "Hubo un error al generar la respuesta." }]);
@@ -56,7 +58,7 @@ ${j.transcript || j.text || ""}`).filter(Boolean);
           <div className="w-5 h-5 rounded-[6px] bg-[#8a5cff]/20 flex items-center justify-center text-[#8a5cff]">
             <FaRobot size={11} />
           </div>
-        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">Asistente RAG</span>
+        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">Asistente RAG · {settings.analysisDepth === 'deep' ? 'ANÁLISIS PROFUNDO' : 'ESTÁNDAR'}</span>
         </div>
         <span
           title="La síntesis usa un modelo local. Los fragmentos no se envían a un servicio cloud."

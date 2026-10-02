@@ -11,22 +11,25 @@ palabras o por significado desde una biblioteca local.
 
 ## Descargar e instalar
 
-Puedes descargar directamente
-[`Pulsaria_0.1.0_x64-setup.exe`](https://github.com/danielunibe/PulsarIA/releases/download/v0.1.0-eval.3/Pulsaria_0.1.0_x64-setup.exe)
-o consultar la [release de evaluación completa](https://github.com/danielunibe/PulsarIA/releases/tag/v0.1.0-eval.3).
-El instalador es para Windows x64 y no requiere instalar Node.js, Rust,
-Python, FFmpeg ni FFprobe por separado.
+La versión pública actual es `v0.1.0-eval.3`. Puedes descargar gratis el
+instalador NSIS o MSI para Windows x64, o consultar la
+[release completa](https://github.com/danielunibe/PulsarIA/releases/tag/v0.1.0-eval.3):
+
+- [Descargar NSIS (EXE)](https://github.com/danielunibe/PulsarIA/releases/download/v0.1.0-eval.3/Pulsaria_0.1.0_x64-setup.exe)
+- [Descargar MSI](https://github.com/danielunibe/PulsarIA/releases/download/v0.1.0-eval.3/Pulsaria_0.1.0_x64_en-US.msi)
 
 Antes de ejecutar el archivo, comprueba su integridad en PowerShell:
 
 ```powershell
 Get-FileHash .\Pulsaria_0.1.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\Pulsaria_0.1.0_x64_en-US.msi -Algorithm SHA256
 ```
 
-El hash de la compilación de evaluación es:
+SHA-256 de los assets publicados en GitHub:
 
 ```text
-C1B8683BA5D5137DB319B68D2F849FCF629EB9F6F19D1607D80D30FE0F7D90B8
+NSIS: 1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF
+MSI:  F092CDFA6DC736F13FEF8B17302B81E1BB181796639D68676F7244154DDCB2F4
 ```
 
 Durante la instalación puedes conservar la carpeta propuesta. Al finalizar,
@@ -118,23 +121,36 @@ No se deben copiar Python, modelos, FFmpeg, instaladores ni bases de datos al
 repositorio. La preparación externa y su SHA-256 se verifican mediante el
 workflow de release.
 
-## Validación actual
+## Estado de Beta 3
 
-La punta publicada de `main` es `f6f046fa`. La validación reproducible actual
-incluye:
+El candidato actual es `0.1.0-beta.3`, preparado en el
+[PR #2](https://github.com/danielunibe/PulsarIA/pull/2). **Beta 3 todavía no está
+publicada**; la descarga pública continúa siendo `v0.1.0-eval.3`.
 
-- `npm run verify:mvp`: 13/13 gates PASS.
-- Rust: formato, check y 60 tests PASS.
-- Python: 26 tests PASS; el único skip corresponde a una URL TikTok live no
-  suministrada en CI.
-- Runtime preparado: 51/51 recursos canónicos PASS en staging local.
-- Smoke NSIS instalado: instalación, arranque, health, reinicio y
-  desinstalación PASS.
+En el head `0e0b3378`, la verificación local de Beta 3 pasó `verify:mvp`
+(13/13): 105 pruebas Rust, 32 pruebas Python y 1 prueba live omitida porque esa
+ejecución no recibió una URL. La evidencia separada del candidato también
+registra accesibilidad, iconos, modelo local y auditoría de producción sin
+vulnerabilidades. Estos resultados no sustituyen la aceptación del instalador
+definitivo ni la prueba TikTok autorizada.
 
-Estos resultados no sustituyen una prueba visual nativa, una certificación
-live con voz reconocible, una firma Authenticode o una publicación estable.
-Consulta [docs/MVP_STATUS.md](docs/MVP_STATUS.md) y
-[PROJECT_TRUTH.md](PROJECT_TRUTH.md) para los límites de evidencia.
+El flujo directo separa `build` y `publish`: conserva EXE, SPDX, notices,
+licencia, materiales de terceros, procedencia y hashes como artifact de Actions.
+El Environment `direct-download` aprueba ese mismo artifact antes de publicarlo;
+no se recompila después de aceptar. Por delegación del usuario, se eligió la
+presentación “Daniel Unibe”, ya usada en el PR #2, y como contacto el correo
+visible en su perfil público de GitHub; no acreditan identidad legal, control
+del buzón ni domicilio de notificación. La revisión legal y la aceptación
+siguen pendientes, y
+`DIRECT_DOWNLOAD_RELEASE_READY` permanece en `false`.
+
+Consulta el [informe Beta 3](docs/BETA3_RELEASE_EVIDENCE.md), la
+[aceptación del instalador](docs/BETA3_ACCEPTANCE.md) y los
+[checks del PR](https://github.com/danielunibe/PulsarIA/pull/2/checks).
+[PROJECT_TRUTH.md](PROJECT_TRUTH.md) conserva la autoridad normativa.
+
+Para soporte utiliza las [plantillas de Issues](https://github.com/danielunibe/PulsarIA/issues/new/choose)
+sin adjuntar datos privados.
 
 ## Release y updater
 
@@ -143,6 +159,17 @@ NSIS/MSI, firmas Tauri, `latest.json`, `.sig` y `SHA256SUMS.txt` cuando el
 Environment `release` tiene todas las credenciales y el runtime externo.
 Mientras `RELEASE_READY` no sea `true`, las etiquetas no ejecutan un job de
 release incompleto y quedan sin notificaciones de fallo.
+
+La ruta de descarga directa está en
+[direct-download-release.yml](.github/workflows/direct-download-release.yml).
+Es una ejecución manual para un tag revisado: genera SPDX, valida
+el runtime y materiales de terceros, construye y prueba NSIS y guarda el paquete
+para aceptación. Solo el job de publicación requiere
+`DIRECT_DOWNLOAD_RELEASE_READY=true` y aprobación del Environment. Los gates
+legales deben pasar antes de construir el paquete público. La
+ejecución debe despacharse desde `main`; el tag tiene que apuntar a un commit ya integrado
+en `main` y su versión debe coincidir con la fuente. No firma el instalador ni
+crea artefactos del updater.
 
 La release de evaluación no activa el updater público. Una release estable
 requiere clave pública Tauri, clave privada, certificado Authenticode,

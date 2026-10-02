@@ -10,13 +10,14 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 /**
  * Temas visuales disponibles para la aplicación.
  * 
- * - `carbon`: Tema oscuro premium con glassmorphism (default)
- * - `chromatic`: Tema con acentos de color más vibrantes
+ * - `chromatic`: Tema Pulsaria con los acentos de marca (default)
+ * - `carbon`: Tema oscuro premium con glassmorphism
  * - `aurora`: Tema inspirado en la aurora boreal
  * - `oled`: Tema puro negro para pantallas OLED
  * - `cyberpunk`: Tema futurista con neón
+ * - `solar`: Tema cálido de atardecer ámbar
  */
-export type AppTheme = 'carbon' | 'chromatic' | 'aurora' | 'oled' | 'cyberpunk';
+export type AppTheme = 'carbon' | 'chromatic' | 'aurora' | 'oled' | 'cyberpunk' | 'solar';
 
 /**
  * Política de retención de archivos de video procesados.
@@ -27,6 +28,10 @@ export type AppTheme = 'carbon' | 'chromatic' | 'aurora' | 'oled' | 'cyberpunk';
 export type RetentionPolicy = 'keep' | 'online';
 export type ProcessingQuality = 'fast' | 'balanced' | 'high';
 export type VideoFit = 'cover' | 'contain';
+export type SubtitleStyle = 'auto' | 'karaoke' | 'minimal' | 'cinematic';
+export type PlaybackProfile = 'efficient' | 'intelligent' | 'maximum' | 'gpu-experimental';
+export type PerformanceMode = 'intelligent' | 'efficient' | 'maximum';
+export type AnalysisDepth = 'standard' | 'deep';
 export type StorageIntent = 'knowledge' | 'balanced' | 'archive';
 export type Locale = 'es-MX' | 'en-US';
 
@@ -61,6 +66,30 @@ export interface SystemSettings {
     quotaBytes: number;
     /** Reserva mínima de espacio libre, en bytes. */
     reserveBytes: number;
+    /** Muestra la cápsula de TikToks en la barra superior. */
+    showTikTokPill: boolean;
+    /** Versiona las preferencias visuales para no heredar ocultamientos de builds antiguas. */
+    visualPreferencesVersion: number;
+    subtitleEnabled: boolean;
+    subtitleStyle: SubtitleStyle;
+    playbackProfile: PlaybackProfile;
+    gpuEnhancementEnabled: boolean;
+    /** Governor local de recursos GPU/CPU. */
+    performanceMode: PerformanceMode;
+    backgroundProcessing: boolean;
+    startInBackground: boolean;
+    idleThresholdSeconds: number;
+    acOnlyForMaximum: boolean;
+    preferredAdapterId: string | null;
+    analysisDepth: AnalysisDepth;
+    performanceProfileVersion: number;
+    lastVerifiedAccelerators: string | null;
+    /** Reproduce videos locales al mantener el cursor sobre una tarjeta. */
+    hoverAutoplay: boolean;
+    /** Muestra la capa opt-in de material DEMO local. */
+    showDemoVideos: boolean;
+    /** Oculta la ventana en la bandeja al cerrarla en Tauri. */
+    keepInTrayOnClose: boolean;
 }
 
 interface SettingsContextValue {
@@ -86,6 +115,20 @@ interface NativeSettingsResponse {
         quotaBytes: number;
         reserveBytes: number;
         minScore: number;
+        keepInTrayOnClose?: boolean;
+        subtitleEnabled?: boolean;
+        subtitleStyle?: SubtitleStyle;
+        playbackProfile?: PlaybackProfile;
+        gpuEnhancementEnabled?: boolean;
+        performanceMode?: PerformanceMode;
+        backgroundProcessing?: boolean;
+        startInBackground?: boolean;
+        idleThresholdSeconds?: number;
+        acOnlyForMaximum?: boolean;
+        preferredAdapterId?: string | null;
+        analysisDepth?: AnalysisDepth;
+        performanceProfileVersion?: number;
+        lastVerifiedAccelerators?: string | null;
     };
     source: 'native' | 'migrated' | 'default' | string;
 }
@@ -93,17 +136,35 @@ interface NativeSettingsResponse {
 const defaultSettings: SystemSettings = {
     locale: 'es-MX',
     formats: ['mp4', 'mp3', 'txt'],
-    theme: 'carbon',
+    theme: 'chromatic',
     // Rust expands USERPROFILE/HOME and creates the .pulsaria/media layout.
     folder: '%USERPROFILE%\\Downloads\\Pulsaria',
     retention: 'keep',
     cookiesBrowser: '',
     processingQuality: 78,
     processingProfile: 'high',
-    videoFit: 'cover',
+    videoFit: 'contain',
     storageIntent: 'knowledge',
     quotaBytes: 5 * 1024 ** 3,
     reserveBytes: 2 * 1024 ** 3,
+    showTikTokPill: true,
+    visualPreferencesVersion: 1,
+    subtitleEnabled: true,
+    subtitleStyle: 'auto',
+    playbackProfile: 'intelligent',
+    gpuEnhancementEnabled: false,
+    performanceMode: 'intelligent',
+    backgroundProcessing: true,
+    startInBackground: false,
+    idleThresholdSeconds: 60,
+    acOnlyForMaximum: true,
+    preferredAdapterId: null,
+    analysisDepth: 'standard',
+    performanceProfileVersion: 1,
+    lastVerifiedAccelerators: null,
+    hoverAutoplay: true,
+    showDemoVideos: false,
+    keepInTrayOnClose: true,
 };
 
 function profileForQuality(quality: number): ProcessingQuality {
@@ -120,7 +181,7 @@ function normalizeSettings(value: unknown): SystemSettings {
     const formats = Array.isArray(candidate.formats)
         ? [...new Set(candidate.formats.filter((format): format is string => typeof format === 'string' && format.trim().length > 0))]
         : defaultSettings.formats;
-    const theme: AppTheme = ['carbon', 'chromatic', 'aurora', 'oled', 'cyberpunk'].includes(String(candidate.theme))
+    const theme: AppTheme = ['carbon', 'chromatic', 'aurora', 'oled', 'cyberpunk', 'solar'].includes(String(candidate.theme))
         ? candidate.theme as AppTheme
         : defaultSettings.theme;
     const retention: RetentionPolicy = candidate.retention === 'online' || candidate.retention === 'keep'
@@ -131,7 +192,9 @@ function normalizeSettings(value: unknown): SystemSettings {
         || candidate.cookiesBrowser === 'firefox'
         ? candidate.cookiesBrowser
         : '';
-    const videoFit: VideoFit = candidate.videoFit === 'contain' ? 'contain' : 'cover';
+    const videoFit: VideoFit = candidate.videoFit === 'contain' || candidate.videoFit === 'cover'
+        ? candidate.videoFit
+        : defaultSettings.videoFit;
     const storageIntent: StorageIntent = candidate.storageIntent === 'archive'
         || candidate.storageIntent === 'balanced'
         || candidate.storageIntent === 'knowledge'
@@ -146,6 +209,40 @@ function normalizeSettings(value: unknown): SystemSettings {
     const folder = typeof candidate.folder === 'string' && candidate.folder.trim().length > 0
         ? candidate.folder
         : defaultSettings.folder;
+    const visualPreferencesVersion = typeof candidate.visualPreferencesVersion === 'number'
+        ? Math.max(1, Math.floor(candidate.visualPreferencesVersion))
+        : 0;
+    // Builds anteriores podían persistir la cápsula oculta aunque todavía no
+    // existiera el ajuste explícito. Beta 2 la vuelve a mostrar una vez; a
+    // partir de la versión 1 se respeta el toggle del usuario.
+    const showTikTokPill = visualPreferencesVersion >= 1 ? candidate.showTikTokPill !== false : true;
+    const hoverAutoplay = candidate.hoverAutoplay !== false;
+    const showDemoVideos = candidate.showDemoVideos === true;
+    const keepInTrayOnClose = candidate.keepInTrayOnClose !== false;
+    const subtitleEnabled = candidate.subtitleEnabled !== false;
+    const subtitleStyle: SubtitleStyle = ['auto', 'karaoke', 'minimal', 'cinematic'].includes(String(candidate.subtitleStyle))
+        ? candidate.subtitleStyle as SubtitleStyle : defaultSettings.subtitleStyle;
+    const legacyPlayback = String(candidate.playbackProfile);
+    const playbackProfile: PlaybackProfile = legacyPlayback === 'gpu-experimental'
+        ? 'intelligent'
+        : ['efficient', 'intelligent', 'maximum'].includes(legacyPlayback)
+            ? legacyPlayback as PlaybackProfile
+            : defaultSettings.playbackProfile;
+    const gpuEnhancementEnabled = false;
+    const performanceMode: PerformanceMode = ['intelligent', 'efficient', 'maximum'].includes(String(candidate.performanceMode))
+        ? candidate.performanceMode as PerformanceMode
+        : legacyPlayback === 'gpu-experimental'
+            ? 'intelligent'
+            : legacyPlayback === 'efficient' || legacyPlayback === 'maximum'
+                ? legacyPlayback
+                : defaultSettings.performanceMode;
+    const idleThresholdSeconds = typeof candidate.idleThresholdSeconds === 'number' && Number.isFinite(candidate.idleThresholdSeconds)
+        ? Math.max(15, Math.min(86_400, Math.round(candidate.idleThresholdSeconds)))
+        : defaultSettings.idleThresholdSeconds;
+    const analysisDepth: AnalysisDepth = candidate.analysisDepth === 'deep' ? 'deep' : 'standard';
+    const preferredAdapterId = typeof candidate.preferredAdapterId === 'string' && candidate.preferredAdapterId.trim()
+        ? candidate.preferredAdapterId
+        : null;
 
     return {
         locale: candidate.locale === 'en-US' ? 'en-US' : defaultSettings.locale,
@@ -160,6 +257,28 @@ function normalizeSettings(value: unknown): SystemSettings {
         storageIntent,
         quotaBytes,
         reserveBytes,
+        showTikTokPill,
+        visualPreferencesVersion: 1,
+        hoverAutoplay,
+        showDemoVideos,
+        keepInTrayOnClose,
+        subtitleEnabled,
+        subtitleStyle,
+        playbackProfile,
+        gpuEnhancementEnabled,
+        performanceMode,
+        backgroundProcessing: candidate.backgroundProcessing !== false,
+        startInBackground: candidate.startInBackground === true,
+        idleThresholdSeconds,
+        acOnlyForMaximum: candidate.acOnlyForMaximum !== false,
+        preferredAdapterId,
+        analysisDepth,
+        performanceProfileVersion: typeof candidate.performanceProfileVersion === 'number'
+            ? Math.max(1, Math.floor(candidate.performanceProfileVersion))
+            : defaultSettings.performanceProfileVersion,
+        lastVerifiedAccelerators: typeof candidate.lastVerifiedAccelerators === 'string'
+            ? candidate.lastVerifiedAccelerators
+            : null,
     };
 }
 
@@ -219,6 +338,24 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                             storageIntent: response.settings.storageIntent,
                             quotaBytes: response.settings.quotaBytes,
                             reserveBytes: response.settings.reserveBytes,
+                            showTikTokPill: localCandidate?.showTikTokPill,
+                            visualPreferencesVersion: localCandidate?.visualPreferencesVersion,
+                            subtitleEnabled: response.settings.subtitleEnabled ?? localCandidate?.subtitleEnabled,
+                            subtitleStyle: response.settings.subtitleStyle ?? localCandidate?.subtitleStyle,
+                            playbackProfile: response.settings.playbackProfile ?? localCandidate?.playbackProfile,
+                            gpuEnhancementEnabled: response.settings.gpuEnhancementEnabled ?? localCandidate?.gpuEnhancementEnabled,
+                            performanceMode: response.settings.performanceMode ?? localCandidate?.performanceMode,
+                            backgroundProcessing: response.settings.backgroundProcessing ?? localCandidate?.backgroundProcessing,
+                            startInBackground: response.settings.startInBackground ?? localCandidate?.startInBackground,
+                            idleThresholdSeconds: response.settings.idleThresholdSeconds ?? localCandidate?.idleThresholdSeconds,
+                            acOnlyForMaximum: response.settings.acOnlyForMaximum ?? localCandidate?.acOnlyForMaximum,
+                            preferredAdapterId: response.settings.preferredAdapterId ?? localCandidate?.preferredAdapterId,
+                            analysisDepth: response.settings.analysisDepth ?? localCandidate?.analysisDepth,
+                            performanceProfileVersion: response.settings.performanceProfileVersion ?? localCandidate?.performanceProfileVersion,
+                            lastVerifiedAccelerators: response.settings.lastVerifiedAccelerators ?? localCandidate?.lastVerifiedAccelerators,
+                            hoverAutoplay: localCandidate?.hoverAutoplay,
+                            showDemoVideos: localCandidate?.showDemoVideos,
+                            keepInTrayOnClose: response.settings.keepInTrayOnClose,
                         });
                         if (response.source === 'default' && localCandidate) {
                             next = normalizeSettings({ ...next, ...localCandidate });

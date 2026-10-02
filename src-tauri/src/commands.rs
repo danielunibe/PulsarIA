@@ -4,12 +4,18 @@
 //! the composition root to pure bootstrap logic.
 
 use crate::api::middleware::security::{is_valid_sandbox_url, validate_sandbox_url};
-use crate::application::collection_service::sync_due_collections;
+use crate::application::collection_service::{
+    connect_tiktok_source as connect_tiktok_source_service, sync_collection_source_by_id,
+    update_profile_source_settings as update_profile_source_settings_service,
+    ConnectTikTokSourceResult, ProfileSourceSelection, RegisterProfileSourceResult, SourceRules,
+    SourceWatchConfig,
+};
 use crate::application::queue_service::QueueService;
 use crate::application::semantic_chunker::SemanticChunker;
 use crate::db;
 pub use crate::domain::models::{SearchConfig, EMBEDDING_DIMS};
 use crate::embedding;
+use crate::infrastructure::acceleration;
 use crate::storage;
 use crate::url_utils::is_collection_source;
 use rusqlite::params;
@@ -22,13 +28,20 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex as StdMutex};
-use tauri::{Emitter, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::Mutex;
 #[cfg(windows)]
 use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
 #[cfg(windows)]
 use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+
+fn hidden_std_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
+    let mut command = Command::new(program);
+    crate::process_control::hide_std_command(&mut command);
+    command
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkerConfig {
@@ -80,7 +93,7 @@ impl Default for ProcessingSettings {
             whisper_model: "tiny".into(),
             device: "cpu".into(),
             compute_type: "int8".into(),
-            video_fit: "cover".into(),
+            video_fit: "contain".into(),
             configured: false,
         }
     }
@@ -180,6 +193,196 @@ pub struct WhisperModelStatus {
     pub message: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalModelSetupCheckpoint {
+    pub schema_version: u32,
+    pub model: String,
+    pub revision: Option<String>,
+    pub phase: String,
+    pub model_path: String,
+    pub download_complete: bool,
+    pub verified: bool,
+    pub prepared: bool,
+    pub validated: bool,
+    pub downloaded_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub last_error: Option<LocalModelError>,
+    #[serde(default)]
+    pub failed_phase: Option<String>,
+    pub started_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalModelError {
+    pub code: LocalModelErrorCode,
+    pub message: String,
+    pub retryable: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ModelFileStatus {
+    Valid,
+    Missing,
+    SizeMismatch,
+    HashMismatch,
+}
+
+#[derive(Clone, Debug)]
+struct ModelFileInspection {
+    relative_path: PathBuf,
+    status: ModelFileStatus,
+    expected_size: Option<u64>,
+    actual_size: Option<u64>,
+    expected_sha256: Option<String>,
+    actual_sha256: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalModelErrorCode {
+    NetworkError,
+    Timeout,
+    InsufficientSpace,
+    PermissionDenied,
+    InvalidPath,
+    DownloadFailed,
+    VerificationFailed,
+    CorruptModel,
+    PreparationFailed,
+    ValidationFailed,
+    ModelAlreadyPreparing,
+    ProcessCrashed,
+    Cancelled,
+    Unknown,
+}
+
+impl LocalModelErrorCode {
+    fn retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::NetworkError
+                | Self::Timeout
+                | Self::DownloadFailed
+                | Self::VerificationFailed
+                | Self::CorruptModel
+                | Self::PreparationFailed
+                | Self::ValidationFailed
+                | Self::ProcessCrashed
+                | Self::Cancelled
+        )
+    }
+}
+
+fn classify_local_model_error(phase: &str, message: &str) -> LocalModelError {
+    let code = if message.contains("LOCAL_MODEL_PREPARATION_ACTIVE") {
+        LocalModelErrorCode::ModelAlreadyPreparing
+    } else if message.to_ascii_lowercase().contains("permission") {
+        LocalModelErrorCode::PermissionDenied
+    } else if message.to_ascii_lowercase().contains("timeout") {
+        LocalModelErrorCode::Timeout
+    } else if phase == "downloading" {
+        LocalModelErrorCode::DownloadFailed
+    } else if phase == "verifying" {
+        LocalModelErrorCode::VerificationFailed
+    } else if phase == "validating" {
+        LocalModelErrorCode::ValidationFailed
+    } else {
+        LocalModelErrorCode::PreparationFailed
+    };
+    LocalModelError {
+        retryable: code.retryable(),
+        code,
+        message: message.chars().take(300).collect(),
+    }
+}
+
+fn local_model_checkpoint_path() -> PathBuf {
+    settings_data_dir().join("local-model-setup.json")
+}
+
+fn persist_local_model_checkpoint(checkpoint: &LocalModelSetupCheckpoint) -> Result<(), String> {
+    let directory = settings_data_dir();
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let content = serde_json::to_vec_pretty(checkpoint).map_err(|error| error.to_string())?;
+    atomic_write(&local_model_checkpoint_path(), &content)
+}
+
+fn load_local_model_checkpoint() -> Option<LocalModelSetupCheckpoint> {
+    fs::read(local_model_checkpoint_path())
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+}
+
+fn checkpoint_phase(
+    model: &str,
+    phase: &str,
+    download_complete: bool,
+    verified: bool,
+    prepared: bool,
+    validated: bool,
+    last_error: Option<LocalModelError>,
+    failed_phase: Option<String>,
+) -> LocalModelSetupCheckpoint {
+    let now = chrono::Utc::now().to_rfc3339();
+    LocalModelSetupCheckpoint {
+        schema_version: 1,
+        model: model.to_string(),
+        revision: model_revision(model).map(str::to_string),
+        phase: phase.to_string(),
+        model_path: whisper_cache_root()
+            .join(model)
+            .to_string_lossy()
+            .to_string(),
+        download_complete,
+        verified,
+        prepared,
+        validated,
+        downloaded_bytes: None,
+        total_bytes: None,
+        last_error,
+        failed_phase,
+        started_at: now.clone(),
+        updated_at: now,
+    }
+}
+
+fn apply_checkpoint_transition(model: &str, phase: &str) -> LocalModelSetupCheckpoint {
+    let (download_complete, verified, prepared, validated) = match phase {
+        "downloading" => (false, false, false, false),
+        "verifying" => (true, false, false, false),
+        "preparing" => (true, true, false, false),
+        "validating" => (true, true, true, false),
+        "ready" => (true, true, true, true),
+        _ => (false, false, false, false),
+    };
+    checkpoint_phase(
+        model,
+        phase,
+        download_complete,
+        verified,
+        prepared,
+        validated,
+        None,
+        None,
+    )
+}
+
+fn persist_setup_error(model: &str, failed_phase: &str, error: LocalModelError) {
+    let previous = load_local_model_checkpoint();
+    let mut checkpoint = previous.unwrap_or_else(|| {
+        checkpoint_phase(model, failed_phase, false, false, false, false, None, None)
+    });
+    checkpoint.model = model.to_string();
+    checkpoint.phase = "error".into();
+    checkpoint.failed_phase = Some(failed_phase.to_string());
+    checkpoint.last_error = Some(error);
+    checkpoint.updated_at = chrono::Utc::now().to_rfc3339();
+    let _ = persist_local_model_checkpoint(&checkpoint);
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct RuntimeHealth {
     pub model: WhisperModelStatus,
@@ -187,6 +390,8 @@ pub struct RuntimeHealth {
     pub backpressure_active: bool,
     pub worker_capacity: usize,
     pub idle_workers: usize,
+    pub processing_paused: bool,
+    pub background_admission_paused: bool,
     pub autostart_enabled: bool,
     pub api_ready: bool,
     pub api_error: Option<String>,
@@ -239,7 +444,35 @@ pub struct AppSettingsSnapshot {
     pub chunk_size: usize,
     pub chunk_overlap: usize,
     pub autostart_enabled: bool,
+    #[serde(default = "default_keep_in_tray_on_close")]
+    pub keep_in_tray_on_close: bool,
     pub updater_status: String,
+    #[serde(default = "default_subtitle_enabled")]
+    pub subtitle_enabled: bool,
+    #[serde(default = "default_subtitle_style")]
+    pub subtitle_style: String,
+    #[serde(default = "default_playback_profile")]
+    pub playback_profile: String,
+    #[serde(default)]
+    pub gpu_enhancement_enabled: bool,
+    #[serde(default = "default_performance_mode")]
+    pub performance_mode: String,
+    #[serde(default)]
+    pub background_processing: bool,
+    #[serde(default)]
+    pub start_in_background: bool,
+    #[serde(default = "default_idle_threshold_seconds")]
+    pub idle_threshold_seconds: u64,
+    #[serde(default = "default_ac_only_for_maximum")]
+    pub ac_only_for_maximum: bool,
+    #[serde(default)]
+    pub preferred_adapter_id: Option<String>,
+    #[serde(default = "default_analysis_depth")]
+    pub analysis_depth: String,
+    #[serde(default = "default_performance_profile_version")]
+    pub performance_profile_version: u32,
+    #[serde(default)]
+    pub last_verified_accelerators: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -288,6 +521,34 @@ const CURRENT_PRIVACY_VERSION: &str = "0.1";
 const CURRENT_CONTENT_POLICY_VERSION: &str = "0.1";
 
 const APP_SETTINGS_SCHEMA_VERSION: u32 = 1;
+
+fn default_keep_in_tray_on_close() -> bool {
+    true
+}
+fn default_subtitle_enabled() -> bool {
+    true
+}
+fn default_subtitle_style() -> String {
+    "auto".into()
+}
+fn default_playback_profile() -> String {
+    "intelligent".into()
+}
+fn default_performance_mode() -> String {
+    "intelligent".into()
+}
+fn default_idle_threshold_seconds() -> u64 {
+    60
+}
+fn default_ac_only_for_maximum() -> bool {
+    true
+}
+fn default_analysis_depth() -> String {
+    "standard".into()
+}
+fn default_performance_profile_version() -> u32 {
+    1
+}
 const ALLOWED_FORMATS: &[&str] = &[
     "mp4", "mkv", "webm", "mov", "mp3", "wav", "flac", "ogg", "m4a", "txt", "srt", "vtt", "json",
 ];
@@ -327,7 +588,7 @@ fn default_app_settings() -> AppSettingsSnapshot {
         schema_version: APP_SETTINGS_SCHEMA_VERSION,
         source: "default".into(),
         locale: detected_system_locale(),
-        theme: "carbon".into(),
+        theme: "chromatic".into(),
         download_dir: default_download_dir().to_string_lossy().to_string(),
         formats: vec!["mp4".into(), "mp3".into(), "txt".into()],
         retention: "keep".into(),
@@ -349,7 +610,21 @@ fn default_app_settings() -> AppSettingsSnapshot {
         // Autostart is opt-in for new installations. A persisted legacy
         // snapshot can still carry the user's previous choice.
         autostart_enabled: false,
+        keep_in_tray_on_close: true,
         updater_status: "BLOCKED_EXTERNAL".into(),
+        subtitle_enabled: true,
+        subtitle_style: "auto".into(),
+        playback_profile: "intelligent".into(),
+        gpu_enhancement_enabled: false,
+        performance_mode: "intelligent".into(),
+        background_processing: true,
+        start_in_background: false,
+        idle_threshold_seconds: 60,
+        ac_only_for_maximum: true,
+        preferred_adapter_id: None,
+        analysis_depth: "standard".into(),
+        performance_profile_version: 1,
+        last_verified_accelerators: None,
     }
 }
 
@@ -421,7 +696,7 @@ fn validate_app_settings(settings: &AppSettingsSnapshot) -> Result<(), String> {
     }
     if !matches!(
         settings.theme.as_str(),
-        "carbon" | "chromatic" | "aurora" | "oled" | "cyberpunk"
+        "carbon" | "chromatic" | "aurora" | "oled" | "cyberpunk" | "solar"
     ) {
         return Err("Tema no compatible".into());
     }
@@ -450,6 +725,23 @@ fn validate_app_settings(settings: &AppSettingsSnapshot) -> Result<(), String> {
         || !matches!(settings.video_fit.as_str(), "cover" | "contain")
     {
         return Err("Los parámetros de procesamiento no son válidos".into());
+    }
+    if !matches!(
+        settings.subtitle_style.as_str(),
+        "auto" | "karaoke" | "minimal" | "cinematic"
+    ) || !matches!(
+        settings.playback_profile.as_str(),
+        "efficient" | "intelligent" | "maximum" | "gpu-experimental"
+    ) {
+        return Err("La configuración de reproducción no es válida".into());
+    }
+    if !matches!(
+        settings.performance_mode.as_str(),
+        "intelligent" | "efficient" | "maximum"
+    ) || !(15..=86_400).contains(&settings.idle_threshold_seconds)
+        || !matches!(settings.analysis_depth.as_str(), "standard" | "deep")
+    {
+        return Err("La política de rendimiento no es válida".into());
     }
     if storage::SetupIntent::parse(&settings.storage_intent).is_none() {
         return Err("La intención de almacenamiento no es válida".into());
@@ -482,6 +774,35 @@ pub fn snapshot_processing_settings(settings: &AppSettingsSnapshot) -> Processin
     }
 }
 
+fn has_verified_acceleration(serialized: Option<&str>, names: &[&str]) -> bool {
+    let Some(serialized) = serialized else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(serialized) else {
+        return false;
+    };
+    let persisted_manifest = value
+        .get("status")
+        .and_then(|status| status.get("runtimeManifestSha256"))
+        .and_then(serde_json::Value::as_str);
+    if persisted_manifest != acceleration::runtime_manifest_sha256().as_deref() {
+        return false;
+    }
+    value
+        .get("results")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|result| {
+            result.get("state").and_then(serde_json::Value::as_str) == Some("verified")
+                && result
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .map(|name| names.contains(&name))
+                    .unwrap_or(false)
+        })
+}
+
 pub fn apply_app_settings_environment(settings: &AppSettingsSnapshot) {
     std::env::set_var("PULSAR_DOWNLOAD_DIR", &settings.download_dir);
     std::env::set_var("PULSAR_DEFAULT_RETENTION", &settings.retention);
@@ -499,6 +820,39 @@ pub fn apply_app_settings_environment(settings: &AppSettingsSnapshot) {
     } else {
         std::env::set_var("PULSAR_COOKIES_FROM_BROWSER", &settings.cookies_browser);
     }
+    std::env::set_var("PULSAR_PERFORMANCE_MODE", &settings.performance_mode);
+    std::env::set_var(
+        "PULSAR_BACKGROUND_PROCESSING",
+        settings.background_processing.to_string(),
+    );
+    std::env::set_var(
+        "PULSAR_IDLE_THRESHOLD_SECONDS",
+        settings.idle_threshold_seconds.to_string(),
+    );
+    let nvenc_verified = has_verified_acceleration(
+        settings.last_verified_accelerators.as_deref(),
+        &["ffmpeg_nvenc_encode"],
+    );
+    let nvdec_verified = has_verified_acceleration(
+        settings.last_verified_accelerators.as_deref(),
+        &["ffmpeg_nvdec_decode"],
+    );
+    let whisper_cuda_verified = has_verified_acceleration(
+        settings.last_verified_accelerators.as_deref(),
+        &["whisper_cuda_probe"],
+    );
+    std::env::set_var(
+        "PULSAR_FFMPEG_VIDEO_ENCODER",
+        if nvenc_verified { "nvenc" } else { "cpu" },
+    );
+    std::env::set_var(
+        "PULSAR_WHISPER_CUDA_VERIFIED",
+        whisper_cuda_verified.to_string(),
+    );
+    std::env::set_var(
+        "PULSAR_FFMPEG_HWACCEL",
+        if nvdec_verified { "nvdec" } else { "cpu" },
+    );
     apply_processing_environment(&snapshot_processing_settings(settings));
 }
 
@@ -551,10 +905,31 @@ fn persist_app_settings(settings: &AppSettingsSnapshot) -> Result<(), String> {
     Ok(())
 }
 
+fn normalize_legacy_acceleration_settings(settings: &mut AppSettingsSnapshot) {
+    settings.gpu_enhancement_enabled = false;
+    if settings.playback_profile == "gpu-experimental" {
+        settings.playback_profile = "intelligent".into();
+        settings.performance_mode = "intelligent".into();
+    }
+    if settings.performance_mode.is_empty() {
+        settings.performance_mode = default_performance_mode();
+    }
+    if settings.idle_threshold_seconds == 0 {
+        settings.idle_threshold_seconds = default_idle_threshold_seconds();
+    }
+    if settings.analysis_depth.is_empty() {
+        settings.analysis_depth = default_analysis_depth();
+    }
+    if settings.performance_profile_version == 0 {
+        settings.performance_profile_version = default_performance_profile_version();
+    }
+}
+
 pub fn load_persisted_app_settings() -> AppSettingsSnapshot {
     let canonical = settings_data_dir().join("app-settings.json");
     if let Ok(contents) = fs::read_to_string(&canonical) {
         if let Ok(mut settings) = serde_json::from_str::<AppSettingsSnapshot>(&contents) {
+            normalize_legacy_acceleration_settings(&mut settings);
             if validate_app_settings(&settings).is_ok() {
                 settings.source = "native".into();
                 apply_app_settings_environment(&settings);
@@ -627,6 +1002,29 @@ pub struct SystemMetrics {
     pub average_db_time_ms: f32,
     pub model_load_time_ms: f32,
     pub total_queries_run: u64,
+    #[serde(default)]
+    pub first_frame_time_ms: Option<f32>,
+    #[serde(default)]
+    pub transcription_seconds_per_audio_minute: Option<f32>,
+    #[serde(default)]
+    pub llm_tokens_per_second: Option<f32>,
+    #[serde(default)]
+    pub queue_throughput_per_minute: Option<f32>,
+    #[serde(default)]
+    pub active_backends: Vec<String>,
+    #[serde(default)]
+    pub max_vram_bytes: Option<u64>,
+    #[serde(default)]
+    pub fallbacks_count: u64,
+    #[serde(default)]
+    pub last_benchmark_at: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TranscriptWord {
+    pub word: String,
+    pub start: f64,
+    pub end: f64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -635,6 +1033,8 @@ pub struct TranscriptChunk {
     pub chunk_text: String,
     pub start: f64,
     pub end: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<Vec<TranscriptWord>>,
 }
 
 #[derive(Serialize)]
@@ -797,7 +1197,7 @@ pub fn load_persisted_processing_settings() -> ProcessingSettings {
 }
 
 fn gpu_probe() -> (Option<String>, Option<u64>) {
-    let output = Command::new("nvidia-smi")
+    let output = hidden_std_command("nvidia-smi")
         .args([
             "--query-gpu=name,memory.total",
             "--format=csv,noheader,nounits",
@@ -827,12 +1227,55 @@ fn gpu_probe() -> (Option<String>, Option<u64>) {
 }
 
 fn bundled_cuda_runtime_exists() -> bool {
-    crate::runtime::path("python/Lib/site-packages/ctranslate2/cudnn64_9.dll").is_file()
+    let root = crate::runtime::path("python/Lib/site-packages");
+    let mut has_cudnn = false;
+    let mut has_cublas = false;
+    let mut has_cudart = false;
+    let mut directories = vec![root];
+    while let Some(directory) = directories.pop() {
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for file in entries.flatten() {
+            if file.path().is_dir() {
+                directories.push(file.path());
+                continue;
+            }
+            let name = file.file_name().to_string_lossy().to_ascii_lowercase();
+            has_cudnn |= name.starts_with("cudnn") && name.ends_with(".dll");
+            has_cublas |= name.starts_with("cublas") && name.ends_with(".dll");
+            has_cudart |= name.starts_with("cudart") && name.ends_with(".dll");
+        }
+    }
+    has_cudnn && has_cublas && has_cudart
+}
+
+fn ctranslate2_cuda_device_count() -> Option<u32> {
+    let python = crate::runtime::python_executable();
+    if !python.is_file() {
+        return None;
+    }
+    let output = hidden_std_command(python)
+        .args([
+            "-c",
+            "import ctranslate2; print(ctranslate2.get_cuda_device_count())",
+        ])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.trim().parse::<u32>().ok())
 }
 
 fn detect_hardware_profile() -> HardwareProfile {
     let (gpu_name, vram_bytes) = gpu_probe();
-    let whisper_gpu_supported = gpu_name.is_some() && bundled_cuda_runtime_exists();
+    let whisper_gpu_supported = gpu_name.is_some()
+        && bundled_cuda_runtime_exists()
+        && ctranslate2_cuda_device_count().unwrap_or(0) > 0
+        && std::env::var("PULSAR_WHISPER_CUDA_VERIFIED")
+            .ok()
+            .as_deref()
+            == Some("true");
     let logical_cores = num_cpus::get().max(1);
     let ram_bytes = total_ram_bytes();
     let recommended_quality =
@@ -951,9 +1394,292 @@ fn effective_processing_settings(
     })
 }
 
+fn apply_performance_mode_to_processing(
+    settings: &AppSettingsSnapshot,
+    mut processing: ProcessingSettings,
+) -> ProcessingSettings {
+    if settings.performance_mode == "maximum"
+        && (has_verified_acceleration(
+            settings.last_verified_accelerators.as_deref(),
+            &["whisper_cuda_probe"],
+        ) || detect_hardware_profile().whisper_gpu_supported)
+    {
+        processing.device = "cuda".into();
+        processing.compute_type = if settings.processing_quality >= 72 {
+            "float16".into()
+        } else {
+            "int8_float16".into()
+        };
+    } else {
+        processing.device = "cpu".into();
+        processing.compute_type = "int8".into();
+    }
+    processing
+}
+
 #[tauri::command]
 pub fn get_hardware_profile() -> HardwareProfile {
     detect_hardware_profile()
+}
+
+pub(crate) fn merge_persisted_acceleration_verification(
+    status: &mut acceleration::AccelerationStatus,
+    serialized: Option<&str>,
+) {
+    let Some(serialized) = serialized else { return };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(serialized) else {
+        return;
+    };
+    let persisted_manifest = value
+        .get("status")
+        .and_then(|status| status.get("runtimeManifestSha256"))
+        .and_then(serde_json::Value::as_str);
+    if persisted_manifest != status.runtime_manifest_sha256.as_deref() {
+        return;
+    }
+    let Some(results) = value.get("results").and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for result in results {
+        if result.get("state").and_then(serde_json::Value::as_str) != Some("verified") {
+            continue;
+        }
+        let Some(result_name) = result.get("name").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let capability_name = match result_name {
+            "whisper_cuda_probe" => "whisper_cuda",
+            "ffmpeg_nvenc_encode" | "ffmpeg_nvdec_decode" => "ffmpeg_nvdec_nvenc",
+            "llama_cuda_devices" => "llm_cuda",
+            _ => continue,
+        };
+        if let Some(capability) = status
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.name == capability_name)
+        {
+            capability.state = acceleration::CapabilityState::Verified;
+            capability.reason = result
+                .get("detail")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            capability.measured_ms = result
+                .get("durationMs")
+                .and_then(serde_json::Value::as_u64)
+                .map(u128::from);
+        }
+    }
+}
+
+pub(crate) fn mark_active_accelerators(
+    status: &mut acceleration::AccelerationStatus,
+    settings: &AppSettingsSnapshot,
+) {
+    let whisper_active = settings.device == "cuda"
+        && status.capabilities.iter().any(|capability| {
+            capability.name == "whisper_cuda"
+                && matches!(
+                    capability.state,
+                    acceleration::CapabilityState::Verified | acceleration::CapabilityState::Active
+                )
+        });
+    let nvenc_active = std::env::var("PULSAR_FFMPEG_VIDEO_ENCODER").ok().as_deref()
+        == Some("nvenc")
+        && status.capabilities.iter().any(|capability| {
+            capability.name == "ffmpeg_nvdec_nvenc"
+                && matches!(
+                    capability.state,
+                    acceleration::CapabilityState::Verified | acceleration::CapabilityState::Active
+                )
+        });
+    for capability in &mut status.capabilities {
+        if (capability.name == "whisper_cuda" && whisper_active)
+            || (capability.name == "ffmpeg_nvdec_nvenc" && nvenc_active)
+        {
+            capability.state = acceleration::CapabilityState::Active;
+            capability.reason =
+                Some("La política actual está usando este backend verificado.".into());
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformancePolicyInput {
+    pub mode: String,
+    #[serde(default)]
+    pub background_processing: Option<bool>,
+    #[serde(default)]
+    pub start_in_background: Option<bool>,
+    #[serde(default)]
+    pub idle_threshold_seconds: Option<u64>,
+    #[serde(default)]
+    pub ac_only_for_maximum: Option<bool>,
+    #[serde(default)]
+    pub preferred_adapter_id: Option<String>,
+    #[serde(default)]
+    pub analysis_depth: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_acceleration_status(
+    state: State<'_, AppState>,
+) -> Result<acceleration::AccelerationStatus, String> {
+    let settings = state.app_settings.read().await.clone();
+    let mut status = acceleration::probe(
+        &settings.performance_mode,
+        settings.preferred_adapter_id.as_deref(),
+    );
+    merge_persisted_acceleration_verification(
+        &mut status,
+        settings.last_verified_accelerators.as_deref(),
+    );
+    mark_active_accelerators(&mut status, &settings);
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn get_performance_policy(
+    state: State<'_, AppState>,
+) -> Result<acceleration::PerformancePolicy, String> {
+    let settings = state.app_settings.read().await.clone();
+    let mut status = acceleration::probe(
+        &settings.performance_mode,
+        settings.preferred_adapter_id.as_deref(),
+    );
+    merge_persisted_acceleration_verification(
+        &mut status,
+        settings.last_verified_accelerators.as_deref(),
+    );
+    mark_active_accelerators(&mut status, &settings);
+    Ok(acceleration::performance_policy(
+        &settings.performance_mode,
+        settings.background_processing,
+        settings.ac_only_for_maximum,
+        settings.idle_threshold_seconds,
+        &status,
+    ))
+}
+
+#[tauri::command]
+pub async fn set_performance_policy(
+    input: PerformancePolicyInput,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<acceleration::PerformancePolicy, String> {
+    let mut next = state.app_settings.read().await.clone();
+    next.performance_mode = input.mode;
+    if let Some(value) = input.background_processing {
+        next.background_processing = value;
+    }
+    if let Some(value) = input.start_in_background {
+        next.start_in_background = value;
+    }
+    if let Some(value) = input.idle_threshold_seconds {
+        next.idle_threshold_seconds = value;
+    }
+    if let Some(value) = input.ac_only_for_maximum {
+        next.ac_only_for_maximum = value;
+    }
+    next.preferred_adapter_id = input.preferred_adapter_id;
+    if let Some(value) = input.analysis_depth {
+        next.analysis_depth = value;
+    }
+    next.playback_profile = next.performance_mode.clone();
+    let current_processing = snapshot_processing_settings(&next);
+    let effective_processing = apply_performance_mode_to_processing(&next, current_processing);
+    next.device = effective_processing.device;
+    next.compute_type = effective_processing.compute_type;
+    next.source = "native".into();
+    validate_app_settings(&next)?;
+    persist_app_settings(&next)?;
+    apply_app_settings_environment(&next);
+    *state.app_settings.write().await = next.clone();
+    let mut status =
+        acceleration::probe(&next.performance_mode, next.preferred_adapter_id.as_deref());
+    merge_persisted_acceleration_verification(
+        &mut status,
+        next.last_verified_accelerators.as_deref(),
+    );
+    mark_active_accelerators(&mut status, &next);
+    let policy = acceleration::performance_policy(
+        &next.performance_mode,
+        next.background_processing,
+        next.ac_only_for_maximum,
+        next.idle_threshold_seconds,
+        &status,
+    );
+    state
+        .queue
+        .set_background_admission_paused(!policy.background_allowed);
+    let _ = app_handle.emit("acceleration-status-changed", &status);
+    Ok(policy)
+}
+
+#[tauri::command]
+pub async fn run_acceleration_benchmark(
+    sample_path: Option<String>,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<acceleration::AccelerationBenchmark, String> {
+    let settings = state.app_settings.read().await.clone();
+    let mode = settings.performance_mode.clone();
+    let preferred_adapter_id = settings.preferred_adapter_id.clone();
+    let mut report = tokio::task::spawn_blocking(move || {
+        acceleration::benchmark(
+            &mode,
+            preferred_adapter_id.as_deref(),
+            sample_path.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| format!("No se pudo completar el benchmark de aceleración: {error}"))?;
+
+    for result in &report.results {
+        let capability_name = match result.name.as_str() {
+            "whisper_cuda_probe" => Some("whisper_cuda"),
+            "ffmpeg_nvenc_encode" | "ffmpeg_nvdec_decode" => Some("ffmpeg_nvdec_nvenc"),
+            "llama_cuda_devices" => Some("llm_cuda"),
+            _ => None,
+        };
+        if let Some(name) = capability_name {
+            if let Some(capability) = report
+                .status
+                .capabilities
+                .iter_mut()
+                .find(|capability| capability.name == name)
+            {
+                capability.measured_ms = Some(result.duration_ms);
+                if matches!(result.state, acceleration::CapabilityState::Verified) {
+                    capability.state = acceleration::CapabilityState::Verified;
+                    capability.reason = Some(result.detail.clone());
+                }
+            }
+        }
+    }
+
+    let mut next = settings;
+    next.last_verified_accelerators = Some(
+        serde_json::to_string(&report)
+            .map_err(|error| format!("No se pudo guardar el resultado del benchmark: {error}"))?,
+    );
+    persist_app_settings(&next)?;
+    apply_app_settings_environment(&next);
+    mark_active_accelerators(&mut report.status, &next);
+    *state.app_settings.write().await = next;
+    let _ = app_handle.emit("acceleration-status-changed", &report.status);
+    Ok(report)
+}
+
+#[tauri::command]
+pub async fn reset_performance_profile(state: State<'_, AppState>) -> Result<(), String> {
+    let mut next = state.app_settings.read().await.clone();
+    next.last_verified_accelerators = None;
+    next.performance_profile_version = next.performance_profile_version.saturating_add(1).max(1);
+    persist_app_settings(&next)?;
+    apply_app_settings_environment(&next);
+    *state.app_settings.write().await = next;
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1023,21 +1749,21 @@ fn runtime_executable_check(
     }
 
     let executable = PathBuf::from(&check.path);
-    match Command::new(&executable).args(probe_args).output() {
+    match hidden_std_command(&executable).args(probe_args).output() {
         Ok(output) if output.status.success() => {
             check.message = format!("Ejecutable disponible y responde a {:?}", probe_args);
         }
         Ok(output) => {
             check.available = false;
             check.message = format!(
-                "El ejecutable terminó con código {:?}; reinstala el runtime o corrige la ruta",
+                "El ejecutable terminó con código {:?}; revisa la ruta empaquetada y la salida del runtime",
                 output.status.code()
             );
         }
         Err(error) => {
             check.available = false;
             check.message = format!(
-                "No se pudo ejecutar {}: {}; reinstala el runtime o corrige la ruta",
+                "No se pudo ejecutar {}: {}; revisa la ruta y los permisos del recurso",
                 executable.display(),
                 error
             );
@@ -1046,22 +1772,27 @@ fn runtime_executable_check(
     check
 }
 
+const REQUIRED_PYTHON_WORKERS: &[&str] = &[
+    "main.py",
+    "downloader.py",
+    "events.py",
+    "models.py",
+    "transcriber.py",
+    "visual_analyzer.py",
+    "audio_extractor.py",
+    "daemon.py",
+    "embed_query.py",
+    "export_onnx.py",
+    "export_onnx_embeddings.py",
+    "prepare_whisper_model.py",
+    "output_generator.py",
+    "source_scanner.py",
+    "profile_metadata.py",
+    "process_utils.py",
+];
+
 fn runtime_worker_check() -> RuntimeResourceCheck {
-    const WORKERS: &[&str] = &[
-        "main.py",
-        "downloader.py",
-        "events.py",
-        "models.py",
-        "transcriber.py",
-        "visual_analyzer.py",
-        "audio_extractor.py",
-        "daemon.py",
-        "embed_query.py",
-        "export_onnx.py",
-        "export_onnx_embeddings.py",
-        "prepare_whisper_model.py",
-    ];
-    let missing = WORKERS
+    let missing = REQUIRED_PYTHON_WORKERS
         .iter()
         .filter(|name| !crate::runtime::worker_script(name).is_file())
         .copied()
@@ -1074,11 +1805,103 @@ fn runtime_worker_check() -> RuntimeResourceCheck {
         required: true,
         available: missing.is_empty(),
         message: if missing.is_empty() {
-            format!("{} workers encontrados", WORKERS.len())
+            format!(
+                "{} archivos de worker encontrados",
+                REQUIRED_PYTHON_WORKERS.len()
+            )
         } else {
-            format!("Faltan workers Python: {}", missing.join(", "))
+            format!("Faltan archivos Workers Python: {}", missing.join(", "))
         },
     }
+}
+
+fn runtime_manifest_check() -> RuntimeResourceCheck {
+    let path = crate::runtime::path("runtime-manifest.json");
+    let mut check = RuntimeResourceCheck {
+        name: "Manifiesto de runtime".to_string(),
+        path: path.to_string_lossy().to_string(),
+        required: true,
+        available: path.is_file(),
+        message: if path.is_file() {
+            "Manifiesto encontrado".to_string()
+        } else {
+            "Falta runtime-manifest.json en la raíz de recursos instalada".to_string()
+        },
+    };
+    if !check.available {
+        return check;
+    }
+
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            check.available = false;
+            check.message = format!("No se pudo leer el manifiesto: {error}");
+            return check;
+        }
+    };
+    let manifest: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            check.available = false;
+            check.message = format!("Manifiesto JSON incorrecto: {error}");
+            return check;
+        }
+    };
+
+    if manifest
+        .get("manifestKind")
+        .and_then(serde_json::Value::as_str)
+        != Some("pulsaria-runtime-resources")
+        || manifest.get("platform").and_then(serde_json::Value::as_str) != Some("windows-x86_64")
+        || manifest.get("version").and_then(serde_json::Value::as_str)
+            != Some(env!("CARGO_PKG_VERSION"))
+        || manifest
+            .pointer("/contract/status")
+            .and_then(serde_json::Value::as_str)
+            != Some("PASS")
+    {
+        check.available = false;
+        check.message = "Manifiesto incorrecto: tipo, plataforma, versión o estado de contrato no coincide con este paquete"
+            .to_string();
+        return check;
+    }
+
+    let records = manifest
+        .get("components")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|component| component.get("files").and_then(serde_json::Value::as_array))
+        .flatten()
+        .collect::<Vec<_>>();
+    let undeclared = REQUIRED_PYTHON_WORKERS
+        .iter()
+        .filter(|worker| {
+            let expected_path = format!("python-workers/{worker}");
+            !records.iter().any(|record| {
+                record.get("path").and_then(serde_json::Value::as_str)
+                    == Some(expected_path.as_str())
+                    && record.get("required").and_then(serde_json::Value::as_bool) == Some(true)
+                    && record.get("status").and_then(serde_json::Value::as_str) == Some("present")
+            })
+        })
+        .copied()
+        .collect::<Vec<_>>();
+    if !undeclared.is_empty() {
+        check.available = false;
+        check.message = format!(
+            "Manifiesto incorrecto: faltan las declaraciones requeridas para Workers Python: {}",
+            undeclared.join(", ")
+        );
+    } else {
+        check.message = format!(
+            "Manifiesto válido para Pulsaria {} y {} workers",
+            env!("CARGO_PKG_VERSION"),
+            REQUIRED_PYTHON_WORKERS.len()
+        );
+    }
+    check
 }
 
 fn probe_worker_imports(check: &mut RuntimeResourceCheck) {
@@ -1087,14 +1910,15 @@ fn probe_worker_imports(check: &mut RuntimeResourceCheck) {
     }
     let Some(python) = first_resource_path(&["python/python.exe"]) else {
         check.available = false;
-        check.message = "No se encontró python.exe para probar los workers".to_string();
+        check.message = "No se encontró python.exe dentro de la raíz canónica del runtime para probar los workers"
+            .to_string();
         return;
     };
     let worker_dir = crate::runtime::worker_script("main.py")
         .parent()
         .map(PathBuf::from)
         .unwrap_or_else(|| crate::runtime::root().join("python-workers"));
-    let probe = Command::new(&python)
+    let probe = hidden_std_command(&python)
         .current_dir(worker_dir)
         .args(["-c", "import main"])
         .output();
@@ -1139,7 +1963,7 @@ pub fn get_runtime_preflight() -> RuntimePreflight {
             &["assets/models/models--Systran--faster-whisper-tiny"],
             true,
         ),
-        runtime_check("Manifiesto de runtime", &["runtime-manifest.json"], true),
+        runtime_manifest_check(),
     ];
     if let Some(workers) = resources
         .iter_mut()
@@ -1174,7 +1998,7 @@ pub fn get_runtime_preflight() -> RuntimePreflight {
             .to_string()
     } else {
         format!(
-            "Runtime incompleto. Reinstala el paquete o corrige estos recursos: {}.",
+            "Runtime local incompleto; revisa el detalle de estos recursos: {}.",
             missing.join(", ")
         )
     };
@@ -1570,6 +2394,69 @@ fn bundled_whisper_model_available(model: &str) -> bool {
         })
 }
 
+fn inspect_model_files(model: &str) -> Vec<ModelFileInspection> {
+    let directory = whisper_cache_root().join(model);
+    let manifest_path = directory.join("pulsaria-model-manifest.json");
+    let manifest = fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok());
+    [
+        "config.json",
+        "model.bin",
+        "tokenizer.json",
+        "vocabulary.txt",
+    ]
+    .into_iter()
+    .map(|name| {
+        let entry = manifest
+            .as_ref()
+            .and_then(|value| value.get("files"))
+            .and_then(|files| files.get(name));
+        let expected_size = entry
+            .and_then(|value| value.get("size"))
+            .and_then(|value| value.as_u64());
+        let expected_sha256 = entry
+            .and_then(|value| value.get("sha256"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        let path = directory.join(name);
+        let metadata = fs::metadata(&path).ok();
+        let actual_size = metadata.as_ref().map(|value| value.len());
+        let actual_sha256 = actual_size.and_then(|_| {
+            fs::File::open(&path).ok().and_then(|mut file| {
+                let mut hasher = Sha256::new();
+                let mut buffer = vec![0_u8; 1024 * 1024];
+                loop {
+                    let read = file.read(&mut buffer).ok()?;
+                    if read == 0 {
+                        break;
+                    }
+                    hasher.update(&buffer[..read]);
+                }
+                Some(format!("{:x}", hasher.finalize()))
+            })
+        });
+        let status = if actual_size.is_none() {
+            ModelFileStatus::Missing
+        } else if expected_size != actual_size {
+            ModelFileStatus::SizeMismatch
+        } else if expected_sha256.as_deref() != actual_sha256.as_deref() {
+            ModelFileStatus::HashMismatch
+        } else {
+            ModelFileStatus::Valid
+        };
+        ModelFileInspection {
+            relative_path: PathBuf::from(name),
+            status,
+            expected_size,
+            actual_size,
+            expected_sha256,
+            actual_sha256,
+        }
+    })
+    .collect()
+}
+
 fn inspect_whisper_model(model: &str) -> WhisperModelStatus {
     let directory = whisper_cache_root().join(model);
     let manifest_path = directory.join("pulsaria-model-manifest.json");
@@ -1660,6 +2547,86 @@ fn inspect_whisper_model(model: &str) -> WhisperModelStatus {
 }
 
 #[tauri::command]
+pub async fn get_local_model_state(model: String) -> Result<serde_json::Value, String> {
+    reconcile_local_model_state(&model)
+}
+
+fn reconcile_local_model_state(model: &str) -> Result<serde_json::Value, String> {
+    model_revision(model).ok_or_else(|| "Modelo Whisper no soportado".to_string())?;
+    let status = inspect_whisper_model(model);
+    let checkpoint = load_local_model_checkpoint().filter(|value| value.model == model);
+    if status.ready {
+        let checkpoint = checkpoint_phase(model, "ready", true, true, true, true, None, None);
+        let _ = persist_local_model_checkpoint(&checkpoint);
+        return Ok(serde_json::json!({"phase":"ready","model":model,"progress":1.0,"error":null}));
+    }
+    let Some(checkpoint) = checkpoint else {
+        return Ok(serde_json::json!({"phase":"idle","model":model,"progress":0.0,"error":null}));
+    };
+    if checkpoint.phase == "error" {
+        return Ok(serde_json::json!({
+            "phase": "error",
+            "model": model,
+            "progress": null,
+            "downloadedBytes": checkpoint.downloaded_bytes,
+            "totalBytes": checkpoint.total_bytes,
+            "failedPhase": checkpoint.failed_phase,
+            "error": checkpoint.last_error,
+        }));
+    }
+    let phase = if checkpoint.phase == "downloading" && !checkpoint.download_complete {
+        "downloading"
+    } else if checkpoint.download_complete && !checkpoint.verified {
+        "verifying"
+    } else if checkpoint.verified && !checkpoint.prepared {
+        "preparing"
+    } else if checkpoint.prepared && !checkpoint.validated {
+        "validating"
+    } else {
+        "error"
+    };
+    if phase == "error" {
+        return Ok(
+            serde_json::json!({"phase":"error","model":model,"progress":0.0,"failedPhase":checkpoint.failed_phase,"error":checkpoint.last_error}),
+        );
+    }
+    Ok(
+        serde_json::json!({"phase":phase,"model":model,"progress":null,"error":checkpoint.last_error}),
+    )
+    /*
+    if !status.ready {
+        if let Some(checkpoint) = load_local_model_checkpoint().filter(|value| value.model == model)
+        {
+            return Ok(serde_json::json!({
+                "phase": checkpoint.phase,
+                "model": model,
+                "progress": null,
+                "downloadedBytes": checkpoint.downloaded_bytes,
+                "totalBytes": checkpoint.total_bytes,
+                "error": checkpoint.last_error,
+            }));
+        }
+    }
+    let phase = if status.ready { "ready" } else { "error" };
+    let error = if status.ready {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!({
+            "code": "corrupt_model",
+            "message": status.message.clone().unwrap_or_else(|| "El modelo local no superó la verificación.".into()),
+            "retryable": true,
+        })
+    };
+    Ok(serde_json::json!({
+        "phase": phase,
+        "model": model,
+        "progress": if status.ready { 1.0 } else { 0.0 },
+        "message": status.message,
+        "error": error,
+    }))*/
+}
+
+#[tauri::command]
 pub async fn get_whisper_model_status(model: String) -> Result<WhisperModelStatus, String> {
     model_revision(&model).ok_or_else(|| "Modelo Whisper no soportado".to_string())?;
     Ok(inspect_whisper_model(&model))
@@ -1668,12 +2635,61 @@ pub async fn get_whisper_model_status(model: String) -> Result<WhisperModelStatu
 #[tauri::command]
 pub async fn prepare_whisper_model(
     model: String,
+    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
+) -> Result<WhisperModelStatus, String> {
+    run_prepare_whisper_model(model, app_handle, state, false, "downloading").await
+}
+
+async fn run_prepare_whisper_model(
+    model: String,
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+    repair: bool,
+    start_phase: &str,
 ) -> Result<WhisperModelStatus, String> {
     model_revision(&model).ok_or_else(|| "Modelo Whisper no soportado".to_string())?;
     if inspect_whisper_model(&model).ready {
         return Ok(inspect_whisper_model(&model));
     }
+    {
+        let active_pid = state.model_prepare_pid.lock().await;
+        if active_pid.is_some() {
+            persist_setup_error(
+                &model,
+                "preparing",
+                classify_local_model_error(
+                    "preparing",
+                    "LOCAL_MODEL_PREPARATION_ACTIVE: Ya hay una preparación de modelo en curso",
+                ),
+            );
+            return Err(
+                "LOCAL_MODEL_PREPARATION_ACTIVE: Ya hay una preparación de modelo en curso".into(),
+            );
+        }
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let initial_phase = if repair { "downloading" } else { start_phase };
+    let _ = persist_local_model_checkpoint(&LocalModelSetupCheckpoint {
+        schema_version: 1,
+        model: model.clone(),
+        revision: model_revision(&model).map(str::to_string),
+        phase: initial_phase.into(),
+        model_path: whisper_cache_root()
+            .join(&model)
+            .to_string_lossy()
+            .to_string(),
+        download_complete: false,
+        verified: false,
+        prepared: false,
+        validated: false,
+        downloaded_bytes: None,
+        total_bytes: None,
+        last_error: None,
+        failed_phase: None,
+        started_at: now.clone(),
+        updated_at: now,
+    });
     let mut command = tokio::process::Command::new(resolve_python_runtime());
     command
         .arg(resolve_model_preparer())
@@ -1681,10 +2697,12 @@ pub async fn prepare_whisper_model(
         .arg(&model)
         .arg("--cache-root")
         .arg(whisper_cache_root())
+        .args(if repair { vec!["--repair"] } else { Vec::new() })
+        .arg("--start-phase")
+        .arg(initial_phase)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
+    crate::process_control::hide_tokio_command(&mut command);
     let child = command
         .spawn()
         .map_err(|error| format!("No se pudo iniciar la preparaci├│n: {}", error))?;
@@ -1692,13 +2710,86 @@ pub async fn prepare_whisper_model(
         let mut pid = state.model_prepare_pid.lock().await;
         *pid = child.id();
     }
-    let output = child.wait_with_output().await;
+    let mut child = child;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "No se pudo observar la salida de preparación".to_string())?;
+    let mut stdout = BufReader::new(stdout).lines();
+    let mut stderr = child.stderr.take();
+    let mut progress_lines = Vec::new();
+    let mut last_phase = initial_phase.to_string();
+    while let Some(line) = stdout
+        .next_line()
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&line) {
+            let status = payload
+                .get("status")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            if !matches!(
+                status,
+                "downloading" | "verifying" | "preparing" | "validating" | "ready" | "error"
+            ) {
+                continue;
+            }
+            let phase = match status {
+                "downloading" => "downloading",
+                "verifying" => "verifying",
+                "preparing" => "preparing",
+                "validating" => "validating",
+                "ready" => "ready",
+                "error" => "error",
+                _ => unreachable!("unknown worker status filtered above"),
+            };
+            last_phase = phase.to_string();
+            if matches!(
+                status,
+                "downloading" | "verifying" | "preparing" | "validating"
+            ) {
+                let checkpoint = apply_checkpoint_transition(&model, phase);
+                let _ = persist_local_model_checkpoint(&checkpoint);
+            }
+            let event = serde_json::json!({
+                "phase": phase,
+                "model": model,
+                "progress": payload.get("downloaded_bytes").and_then(|value| {
+                    let downloaded = value.as_u64()? as f64;
+                    let total = payload.get("total_bytes")?.as_u64()? as f64;
+                    (total > 0.0).then_some(downloaded / total)
+                }),
+                "downloadedBytes": payload.get("downloaded_bytes"),
+                "totalBytes": payload.get("total_bytes"),
+                "etaSeconds": payload.get("eta_seconds"),
+                "message": payload.get("message"),
+            });
+            let _ = app_handle.emit("local-model-state", event);
+            progress_lines.push(line);
+        }
+    }
+    let status = child.wait().await;
+    let mut stderr_text = String::new();
+    if let Some(mut stderr) = stderr.take() {
+        let _ = stderr.read_to_string(&mut stderr_text).await;
+    }
+    let output = status.map(|status| std::process::Output {
+        status,
+        stdout: progress_lines.join("\n").into_bytes(),
+        stderr: stderr_text.into_bytes(),
+    });
     *state.model_prepare_pid.lock().await = None;
     let output = output.map_err(|error| error.to_string())?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let message = stdout.lines().last().unwrap_or(stderr.trim()).to_string();
+        persist_setup_error(
+            &model,
+            &last_phase,
+            classify_local_model_error(&last_phase, &message),
+        );
         if let Ok(connection) = state.db.lock() {
             let _ = db::insert_health_event(
                 &connection,
@@ -1718,6 +2809,33 @@ pub async fn prepare_whisper_model(
             .clone()
             .unwrap_or_else(|| "El modelo no super├│ la validaci├│n".into()));
     }
+    let _ = app_handle.emit(
+        "local-model-state",
+        serde_json::json!({
+            "phase": "ready",
+            "model": model,
+            "progress": 1.0,
+            "message": "Modelo descargado, verificado y preparado",
+        }),
+    );
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = persist_local_model_checkpoint(&LocalModelSetupCheckpoint {
+        schema_version: 1,
+        model: model.clone(),
+        revision: status.revision.clone(),
+        phase: "ready".into(),
+        model_path: status.path.clone(),
+        download_complete: true,
+        verified: true,
+        prepared: true,
+        validated: true,
+        downloaded_bytes: None,
+        total_bytes: None,
+        last_error: None,
+        failed_phase: None,
+        started_at: now.clone(),
+        updated_at: now,
+    });
     std::env::set_var("PULSAR_WHISPER_MODEL_DIR", &status.path);
     if let Ok(connection) = state.db.lock() {
         let _ = db::insert_health_event(
@@ -1733,12 +2851,71 @@ pub async fn prepare_whisper_model(
 }
 
 #[tauri::command]
+pub async fn retry_local_model_setup(
+    model: String,
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<WhisperModelStatus, String> {
+    let snapshot = reconcile_local_model_state(&model)?;
+    if snapshot.get("phase").and_then(|value| value.as_str()) == Some("ready") {
+        return Ok(inspect_whisper_model(&model));
+    }
+    let phase = snapshot
+        .get("phase")
+        .and_then(|value| value.as_str())
+        .filter(|phase| {
+            matches!(
+                *phase,
+                "downloading" | "verifying" | "preparing" | "validating"
+            )
+        })
+        .unwrap_or("downloading");
+    run_prepare_whisper_model(model, app_handle, state, false, phase).await
+}
+
+#[tauri::command]
+pub async fn repair_local_model(
+    model: String,
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<WhisperModelStatus, String> {
+    let inspection = inspect_model_files(&model);
+    let invalid_files = inspection
+        .iter()
+        .filter(|file| file.status != ModelFileStatus::Valid)
+        .count();
+    eprintln!("[local-model] repair invalid_files={invalid_files}");
+    for file in inspection
+        .iter()
+        .filter(|file| file.status != ModelFileStatus::Valid)
+    {
+        eprintln!(
+            "[local-model] repair file={} status={:?} expected_size={:?} actual_size={:?} expected_hash_present={} actual_hash_present={}",
+            file.relative_path.display(), file.status, file.expected_size, file.actual_size,
+            file.expected_sha256.is_some(), file.actual_sha256.is_some()
+        );
+    }
+    let checkpoint = checkpoint_phase(
+        &model,
+        "downloading",
+        false,
+        false,
+        false,
+        false,
+        None,
+        None,
+    );
+    let _ = persist_local_model_checkpoint(&checkpoint);
+    run_prepare_whisper_model(model, app_handle, state, true, "downloading").await
+}
+
+#[tauri::command]
 pub async fn cancel_whisper_model_preparation(state: State<'_, AppState>) -> Result<(), String> {
     let pid = *state.model_prepare_pid.lock().await;
     if let Some(pid) = pid {
         #[cfg(windows)]
         {
-            let status = Command::new("taskkill")
+            let status = hidden_std_command("taskkill")
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
                 .status()
                 .map_err(|error| error.to_string())?;
@@ -1748,6 +2925,35 @@ pub async fn cancel_whisper_model_preparation(state: State<'_, AppState>) -> Res
         }
         *state.model_prepare_pid.lock().await = None;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn quit_onboarding(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    exit_signal: State<'_, crate::ExitSignal>,
+) -> Result<(), String> {
+    let mut prepare_pid = state.model_prepare_pid.lock().await;
+    if let Some(pid) = *prepare_pid {
+        #[cfg(windows)]
+        {
+            // Best effort: always allow the onboarding close button to exit,
+            // even if the child already ended or Windows cannot signal it.
+            if let Err(error) = hidden_std_command("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status()
+            {
+                eprintln!("Could not stop model preparation process {pid}: {error}");
+            }
+        }
+        *prepare_pid = None;
+    }
+    drop(prepare_pid);
+    exit_signal
+        .0
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    app_handle.exit(0);
     Ok(())
 }
 
@@ -2134,6 +3340,20 @@ impl crate::domain::ports::EmbeddingEngine for SharedEmbeddingEngine {
     }
 }
 
+impl crate::domain::ports::EmbeddingProvider for SharedEmbeddingEngine {
+    fn provider_id(&self) -> &str {
+        "onnx"
+    }
+
+    fn model_version(&self) -> &str {
+        crate::db::EMBEDDING_MODEL_ID
+    }
+
+    fn dimensions(&self) -> usize {
+        crate::domain::models::EMBEDDING_DIMS
+    }
+}
+
 #[tauri::command]
 pub async fn add_job(
     url: String,
@@ -2352,6 +3572,132 @@ pub async fn get_jobs(state: State<'_, AppState>) -> Result<Vec<db::JobRecord>, 
 }
 
 #[tauri::command]
+pub async fn get_job_activity(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::JobActivityEvent>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_job_activity(&db, job_id).map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectTikTokSourceInput {
+    pub profile_url: String,
+    pub initial_import_mode: String,
+    pub history_limit: Option<i64>,
+    pub history_from: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterProfileSourceInput {
+    pub profile_url: String,
+    pub selected_sources: ProfileSourceSelection,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProfileSourceSettingsInput {
+    pub selected_sources: ProfileSourceSelection,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCollectionSourceConfigInput {
+    pub watch_config: SourceWatchConfig,
+    pub initial_import_mode: String,
+    pub history_limit: Option<i64>,
+    pub history_from: Option<String>,
+    pub rules: SourceRules,
+}
+
+#[tauri::command]
+pub async fn connect_tiktok_source(
+    input: ConnectTikTokSourceInput,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<ConnectTikTokSourceResult, String> {
+    let browser = state.worker_config.read().await.cookies_browser.clone();
+    connect_tiktok_source_service(
+        state.db.clone(),
+        state.queue.clone(),
+        &input.profile_url,
+        (!browser.is_empty()).then_some(browser.as_str()),
+        &input.initial_import_mode,
+        input.history_limit,
+        input.history_from.as_deref(),
+        app_handle,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn register_profile_source(
+    input: RegisterProfileSourceInput,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<RegisterProfileSourceResult, String> {
+    let result = {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        crate::application::collection_service::register_profile_source(
+            &connection,
+            &input.profile_url,
+            &input.selected_sources,
+        )?
+    };
+
+    // Ensure channels exist in database
+    {
+        if let Ok(connection) = state.db.lock() {
+            let _ = db::ensure_profile_channels(
+                &connection,
+                result.source.id,
+                &result.source.watch_config_json,
+            );
+        }
+    }
+
+    // Trigger initial discovery in background
+    let discovery_service =
+        crate::application::profile_discovery_service::ProfileDiscoveryService::new(
+            state.db.clone(),
+            state.queue.clone(),
+            app_handle,
+        );
+    let source_id = result.source.id;
+    tokio::spawn(async move {
+        if let Err(err) = discovery_service.discover_profile(source_id, false).await {
+            tracing::warn!("Initial profile discovery error for source {source_id}: {err}");
+        }
+    });
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn update_profile_source_settings(
+    source_id: i64,
+    input: UpdateProfileSourceSettingsInput,
+    state: State<'_, AppState>,
+) -> Result<db::CollectionSourceRecord, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    let source =
+        update_profile_source_settings_service(&connection, source_id, &input.selected_sources)?;
+    let _ = db::ensure_profile_channels(&connection, source_id, &source.watch_config_json);
+    Ok(source)
+}
+
+#[tauri::command]
 pub async fn get_collection_sources(
     state: State<'_, AppState>,
 ) -> Result<Vec<db::CollectionSourceRecord>, String> {
@@ -2377,6 +3723,66 @@ pub async fn set_collection_source_active(
 }
 
 #[tauri::command]
+pub async fn update_collection_source_config(
+    source_id: i64,
+    input: UpdateCollectionSourceConfigInput,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if !matches!(input.initial_import_mode.as_str(), "new_only" | "history") {
+        return Err("Modo de importación no válido".into());
+    }
+    if let Some(limit) = input.history_limit {
+        if !matches!(limit, 25 | 50 | 100 | 200) {
+            return Err("El límite histórico debe ser 25, 50, 100 o 200".into());
+        }
+    }
+    let watch_json = serde_json::to_string(&input.watch_config)
+        .map_err(|error| format!("Configuración de observación inválida: {error}"))?;
+    let rules_json = serde_json::to_string(&input.rules)
+        .map_err(|error| format!("Reglas de fuente inválidas: {error}"))?;
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    let source =
+        db::get_collection_source(&connection, source_id).map_err(|error| error.to_string())?;
+    let capabilities: serde_json::Value =
+        serde_json::from_str(&source.capabilities_json).unwrap_or_default();
+    let requested = [
+        ("posts", input.watch_config.posts),
+        ("likes", input.watch_config.likes),
+        ("saved", input.watch_config.saved),
+        ("reposts", input.watch_config.reposts),
+    ];
+    for (category, enabled) in requested {
+        if enabled
+            && capabilities
+                .get(category)
+                .and_then(|value| value.get("available"))
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+        {
+            let reason = capabilities
+                .get(category)
+                .and_then(|value| value.get("reason"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("La categoría no ha sido confirmada por el scanner");
+            return Err(format!("{category}: {reason}"));
+        }
+    }
+    db::update_collection_source_config(
+        &connection,
+        source_id,
+        &watch_json,
+        &input.initial_import_mode,
+        input.history_limit,
+        input.history_from.as_deref(),
+        &rules_json,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn delete_collection_source(
     source_id: i64,
     state: State<'_, AppState>,
@@ -2393,17 +3799,124 @@ pub async fn sync_collection_source_now(
     source_id: i64,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
-) -> Result<(), String> {
-    {
+) -> Result<crate::application::collection_service::SourceSyncSummary, String> {
+    let source_type = {
         let connection = state
             .db
             .lock()
             .map_err(|_| "Database mutex poisoned".to_string())?;
         db::force_collection_source_due(&connection, source_id)
             .map_err(|error| error.to_string())?;
+        let src = db::get_collection_source(&connection, source_id).map_err(|e| e.to_string())?;
+        src.source_type
+    };
+
+    if source_type == "profile" {
+        let discovery_service =
+            crate::application::profile_discovery_service::ProfileDiscoveryService::new(
+                state.db.clone(),
+                state.queue.clone(),
+                app_handle,
+            );
+        let report = discovery_service.discover_profile(source_id, true).await?;
+        let mut summary = crate::application::collection_service::SourceSyncSummary {
+            source_id,
+            found_count: report.total_discovered,
+            queued_count: report.total_queued,
+            duplicate_count: report.total_duplicates,
+            ignored_count: 0,
+            error_count: 0,
+            unavailable_categories: Vec::new(),
+            partial: false,
+            message: "Sincronización de perfil completada".into(),
+            categories: std::collections::HashMap::new(),
+        };
+        for ch in report.channels {
+            summary.categories.insert(
+                ch.channel_kind.clone(),
+                crate::application::collection_service::SourceCategorySummary {
+                    available: ch.status != "unsupported" && ch.status != "requires_auth",
+                    enabled: true,
+                    discovered: ch.discovered_count,
+                    queued: ch.queued_count,
+                    state: ch.status,
+                },
+            );
+        }
+        return Ok(summary);
     }
-    sync_due_collections(state.db.clone(), state.queue.clone(), app_handle).await;
-    Ok(())
+
+    sync_collection_source_by_id(state.db.clone(), state.queue.clone(), source_id, app_handle).await
+}
+
+#[tauri::command]
+pub async fn refresh_profile_metadata(
+    source_id: i64,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::application::profile_discovery_service::ProfileMetadataSnapshot, String> {
+    let service = crate::application::profile_discovery_service::ProfileDiscoveryService::new(
+        state.db.clone(),
+        state.queue.clone(),
+        app_handle,
+    );
+    service.refresh_profile_metadata(source_id).await
+}
+
+#[tauri::command]
+pub async fn get_profile_channels(
+    source_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ProfileChannelRecord>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_profile_channels(&connection, source_id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_channel_content_items(
+    source_id: i64,
+    channel_kind: String,
+    limit: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ContentItemRecord>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_channel_content_items(&connection, source_id, &channel_kind, limit.unwrap_or(50))
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_source_collection_content_items(
+    source_id: i64,
+    channel_kind: String,
+    limit: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ContentViewRecord>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_channel_content_views(&connection, source_id, &channel_kind, limit.unwrap_or(50))
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn get_collection_source_activity(
+    source_id: i64,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::CollectionSourceActivityRecord>, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_collection_source_activity(&connection, source_id, limit.unwrap_or(50).min(200))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2434,10 +3947,23 @@ pub async fn get_runtime_health(
         backpressure_active,
         worker_capacity,
         idle_workers,
+        processing_paused: state.queue.is_processing_paused(),
+        background_admission_paused: state.queue.is_background_admission_paused(),
         autostart_enabled: app_handle.autolaunch().is_enabled().unwrap_or(false),
         api_ready,
         api_error,
     })
+}
+
+#[tauri::command]
+pub fn get_processing_pause(state: State<'_, AppState>) -> bool {
+    state.queue.is_processing_paused()
+}
+
+#[tauri::command]
+pub fn set_processing_pause(paused: bool, state: State<'_, AppState>) -> bool {
+    state.queue.set_processing_paused(paused);
+    paused
 }
 
 async fn apply_runtime_settings(
@@ -2576,6 +4102,15 @@ pub async fn save_app_settings(
 ) -> Result<AppSettingsSnapshot, String> {
     settings.schema_version = APP_SETTINGS_SCHEMA_VERSION;
     settings.source = "native".into();
+    settings.gpu_enhancement_enabled = false;
+    let persisted_acceleration = state.app_settings.read().await.clone();
+    if settings.last_verified_accelerators.is_none() {
+        settings.last_verified_accelerators = persisted_acceleration.last_verified_accelerators;
+    }
+    if settings.performance_profile_version == 0 {
+        settings.performance_profile_version =
+            persisted_acceleration.performance_profile_version.max(1);
+    }
     if settings.quota_bytes == 0 {
         let root = expand_user_path(&settings.download_dir);
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
@@ -2616,6 +4151,8 @@ pub async fn save_app_settings(
         settings.processing_quality,
         settings.video_fit.clone(),
     )?)?;
+    let processing = apply_performance_mode_to_processing(&settings, processing);
+    settings.playback_profile = settings.performance_mode.clone();
     settings.processing_profile = processing.profile.clone();
     settings.whisper_model = processing.whisper_model.clone();
     settings.device = processing.device.clone();
@@ -2658,6 +4195,7 @@ pub async fn set_autostart(
         .map_err(|error| error.to_string())?;
     let mut settings = state.app_settings.read().await.clone();
     settings.autostart_enabled = actual;
+    settings.start_in_background = actual;
     persist_app_settings(&settings)?;
     *state.app_settings.write().await = settings;
     Ok(actual)
@@ -2740,11 +4278,41 @@ pub async fn search_literal_transcripts(
     limit: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<Vec<db::SearchResult>, String> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::search_literal_transcripts(&db, &query, limit.unwrap_or(10)).map_err(|e| e.to_string())
+    let response = state
+        .search
+        .unified_search(crate::domain::models::UnifiedSearchRequest {
+            query,
+            mode: crate::domain::models::SearchMode::Exact,
+            limit: limit.unwrap_or(10),
+            context: None,
+        })
+        .await?;
+    Ok(flatten_unified_results(response))
+}
+
+fn flatten_unified_results(
+    response: crate::domain::models::UnifiedSearchResponse,
+) -> Vec<db::SearchResult> {
+    response
+        .results
+        .into_iter()
+        .map(|group| db::SearchResult {
+            job_id: group.job_id,
+            title: group.title,
+            thumbnail: group.thumbnail,
+            chunk_text: group.primary_moment.excerpt,
+            chunk_index: group.primary_moment.unit_id,
+            similarity_score: group.score,
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn search_library(
+    request: crate::domain::models::UnifiedSearchRequest,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::models::UnifiedSearchResponse, String> {
+    state.search.unified_search(request).await
 }
 
 #[tauri::command]
@@ -2755,30 +4323,22 @@ pub async fn search_transcripts(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<db::SearchResult>, String> {
-    emit_log(
-        &app_handle,
-        format!("Search requested for query: '{}'", query),
-    );
-
-    let mut onnx_lock = state.onnx.lock().await;
-    let onnx = onnx_lock
-        .as_mut()
-        .ok_or("Embedding model is not loaded. Semantic search is disabled.")?;
-
-    let query_vec = onnx
-        .generate_embedding(&query)
-        .map_err(|e| format!("Failed to generate native embedding: {}", e))?;
+    emit_log(&app_handle, "Search requested".into());
 
     let config = state.config.lock().await;
     let final_limit = limit.unwrap_or(config.max_results);
-    let final_min_score = min_score.unwrap_or(config.min_score);
     drop(config);
-
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::search_embeddings(&db, &query_vec, final_limit, final_min_score).map_err(|e| e.to_string())
+    let response = state
+        .search
+        .unified_search(crate::domain::models::UnifiedSearchRequest {
+            query,
+            mode: crate::domain::models::SearchMode::Conceptual,
+            limit: final_limit,
+            context: None,
+        })
+        .await?;
+    let _ = min_score;
+    Ok(flatten_unified_results(response))
 }
 
 #[tauri::command]
@@ -2899,8 +4459,20 @@ pub async fn update_search_config(
 
 #[tauri::command]
 pub async fn get_system_metrics(state: State<'_, AppState>) -> Result<SystemMetrics, String> {
-    let metrics = state.metrics.lock().await;
-    Ok(metrics.clone())
+    let mut metrics = state.metrics.lock().await.clone();
+    let settings = state.app_settings.read().await.clone();
+    let video_backend =
+        if std::env::var("PULSAR_FFMPEG_VIDEO_ENCODER").ok().as_deref() == Some("nvenc") {
+            "FFmpeg/NVENC verificado"
+        } else {
+            "WebView2/FFmpeg sin NVENC verificado"
+        };
+    metrics.active_backends = vec![
+        format!("whisper:{}", settings.device),
+        "embeddings:cpu".into(),
+        format!("video:{video_backend}"),
+    ];
+    Ok(metrics)
 }
 
 #[tauri::command]
@@ -2941,10 +4513,7 @@ pub async fn debug_search_transcripts(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<DebugSearchResult, String> {
-    emit_log(
-        &app_handle,
-        format!("Debug pipeline running for query: '{}'", query),
-    );
+    emit_log(&app_handle, "Debug search started".into());
 
     let start_total = std::time::Instant::now();
     let start_embed = std::time::Instant::now();
@@ -3265,15 +4834,16 @@ pub async fn get_transcript(
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::get_transcript_segments_with_timestamps(&db, job_id)
+    db::get_transcript_segments_with_words(&db, job_id)
         .map_err(|e| e.to_string())
         .map(|rows| {
             rows.into_iter()
-                .map(|(idx, text, start, end)| TranscriptChunk {
+                .map(|(idx, text, start, end, words_json)| TranscriptChunk {
                     chunk_index: idx,
                     chunk_text: text,
                     start,
                     end,
+                    words: words_json.and_then(|json| serde_json::from_str(&json).ok()),
                 })
                 .collect()
         })
@@ -3286,6 +4856,17 @@ pub async fn get_playlists(state: State<'_, AppState>) -> Result<Vec<db::Playlis
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
     db::get_all_playlists(&db).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_source_collections(
+    state: State<'_, AppState>,
+) -> Result<Vec<db::SourceCollectionRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    db::get_source_collections(&db).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -3306,27 +4887,45 @@ pub async fn create_playlist(
 #[tauri::command]
 pub async fn add_to_playlist(
     playlist_id: i64,
-    job_id: i64,
+    job_id: Option<i64>,
+    content_id: Option<i64>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::add_job_to_playlist(&db, playlist_id, job_id).map_err(|e| e.to_string())
+    match (job_id, content_id) {
+        (Some(job_id), _) => db::add_job_to_playlist(&db, playlist_id, job_id),
+        (None, Some(content_id)) => {
+            db::add_content_to_playlist(&db, playlist_id, content_id, "user")
+        }
+        (None, None) => Err(rusqlite::Error::InvalidParameterName(
+            "playlist item requires job_id or content_id".to_string(),
+        )),
+    }
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn remove_from_playlist(
     playlist_id: i64,
-    job_id: i64,
+    job_id: Option<i64>,
+    content_id: Option<i64>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    db::remove_job_from_playlist(&db, playlist_id, job_id).map_err(|e| e.to_string())
+    match (job_id, content_id) {
+        (Some(job_id), _) => db::remove_job_from_playlist(&db, playlist_id, job_id),
+        (None, Some(content_id)) => db::remove_content_from_playlist(&db, playlist_id, content_id),
+        (None, None) => Err(rusqlite::Error::InvalidParameterName(
+            "playlist item requires job_id or content_id".to_string(),
+        )),
+    }
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -3350,6 +4949,34 @@ pub async fn get_playlist_items(
         }
     }
     Ok(jobs)
+}
+
+#[tauri::command]
+pub async fn get_playlist_content_items(
+    playlist_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ContentViewRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    let mut views =
+        db::get_playlist_content_views(&db, playlist_id).map_err(|error| error.to_string())?;
+    for view in &mut views {
+        if view
+            .job
+            .video_path
+            .as_deref()
+            .map(PathBuf::from)
+            .is_some_and(|path| !path.is_file())
+        {
+            view.job.video_path = None;
+            if view.availability == "available" {
+                view.job.source_state = "online".to_string();
+            }
+        }
+    }
+    Ok(views)
 }
 
 #[tauri::command]
@@ -3680,11 +5307,91 @@ pub async fn export_library_json(state: State<'_, AppState>) -> Result<String, S
 #[cfg(test)]
 mod unib_tests {
     use super::{
-        atomic_write, default_legal_consent, legal_consent_is_current, parse_unib_segments,
-        parse_unib_time, unib_header_value,
+        apply_checkpoint_transition, atomic_write, classify_local_model_error,
+        default_legal_consent, legal_consent_is_current, parse_unib_segments, parse_unib_time,
+        unib_header_value, LocalModelErrorCode,
     };
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn checkpoint_transition_downloading() {
+        assert_eq!(
+            apply_checkpoint_transition("tiny", "downloading").phase,
+            "downloading"
+        );
+    }
+    #[test]
+    fn checkpoint_transition_verifying() {
+        let c = apply_checkpoint_transition("tiny", "verifying");
+        assert!(c.download_complete);
+        assert!(!c.verified);
+    }
+    #[test]
+    fn checkpoint_transition_preparing() {
+        let c = apply_checkpoint_transition("tiny", "preparing");
+        assert!(c.verified);
+        assert!(!c.prepared);
+    }
+    #[test]
+    fn checkpoint_transition_validating() {
+        let c = apply_checkpoint_transition("tiny", "validating");
+        assert!(c.prepared);
+        assert!(!c.validated);
+    }
+    #[test]
+    fn checkpoint_transition_ready() {
+        assert!(apply_checkpoint_transition("tiny", "ready").validated);
+    }
+    #[test]
+    fn checkpoint_error_preserves_failed_phase() {
+        let mut c = apply_checkpoint_transition("tiny", "verifying");
+        c.phase = "error".into();
+        c.failed_phase = Some("verifying".into());
+        assert_eq!(c.failed_phase.as_deref(), Some("verifying"));
+    }
+
+    #[test]
+    fn local_model_error_network_retryable() {
+        let error = classify_local_model_error("downloading", "network connection failed");
+        assert_eq!(error.code, LocalModelErrorCode::DownloadFailed);
+        assert!(error.retryable);
+    }
+
+    #[test]
+    fn local_model_error_permission_not_retryable() {
+        let error = classify_local_model_error("preparing", "permission denied");
+        assert_eq!(error.code, LocalModelErrorCode::PermissionDenied);
+        assert!(!error.retryable);
+    }
+
+    #[test]
+    fn local_model_error_timeout_retryable() {
+        let error = classify_local_model_error("downloading", "request timeout");
+        assert_eq!(error.code, LocalModelErrorCode::Timeout);
+        assert!(error.retryable);
+    }
+
+    #[test]
+    fn local_model_error_verification_retryable() {
+        let error = classify_local_model_error("verifying", "hash mismatch");
+        assert_eq!(error.code, LocalModelErrorCode::VerificationFailed);
+        assert!(error.retryable);
+    }
+
+    #[test]
+    fn local_model_error_validation_retryable() {
+        let error = classify_local_model_error("validating", "model load failed");
+        assert_eq!(error.code, LocalModelErrorCode::ValidationFailed);
+        assert!(error.retryable);
+    }
+
+    #[test]
+    fn local_model_error_already_preparing_not_retryable() {
+        let error = classify_local_model_error("preparing", "LOCAL_MODEL_PREPARATION_ACTIVE");
+        assert_eq!(error.code, LocalModelErrorCode::ModelAlreadyPreparing);
+        assert!(!error.retryable);
+    }
 
     #[test]
     fn parses_unib_headers_and_timestamped_segments() {

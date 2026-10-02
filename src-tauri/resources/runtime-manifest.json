@@ -2,7 +2,7 @@
     "schemaVersion":  1,
     "manifestKind":  "pulsaria-runtime-resources",
     "productName":  "Pulsaria",
-    "version":  "0.1.0",
+    "version":  "0.1.0-beta.3",
     "platform":  "windows-x86_64",
     "resourceRoot":  "resources",
     "generatedBy":  "scripts/generate-runtime-manifest.ps1",
@@ -236,8 +236,8 @@
                                              "sourcePath":  "python-workers/audio_extractor.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  5781,
-                                             "sha256":  "7B8AFAD996BD2F08E0D65C08999D27C82D3BAF7B4F19B55300FC68848F9271D5"
+                                             "sizeBytes":  5868,
+                                             "sha256":  "8D3F4E865F93811B365C1D4F670055E7B7C6EA885176D26B30BDE7385AA9B22E"
                                          },
                                          {
                                              "path":  "python-workers/daemon.py",
@@ -252,16 +252,16 @@
                                              "sourcePath":  "python-workers/downloader.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  14645,
-                                             "sha256":  "87406612D0740F263A803BC984528D21C646B9D2816683632811D21F0A768555"
+                                             "sizeBytes":  15641,
+                                             "sha256":  "01A0DEC5ADDF8BDA076A2932AB4234902E0D5744EBAB21B301525EBFE575E9C7"
                                          },
                                          {
                                              "path":  "python-workers/embed_query.py",
                                              "sourcePath":  "python-workers/embed_query.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  1219,
-                                             "sha256":  "8A80B63091786C9627FCEFBD9586F55C96226E5AB77A078B8FFCE06C3ED6BF10"
+                                             "sizeBytes":  1202,
+                                             "sha256":  "E06F292D4164426FD57D542F9DCB6A19EDFB0400BA59D7B13994220E1F23F202"
                                          },
                                          {
                                              "path":  "python-workers/events.py",
@@ -292,8 +292,8 @@
                                              "sourcePath":  "python-workers/main.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  13157,
-                                             "sha256":  "751BBC7CFCEB2D23154CC8CBC65A5BDCF2ED8F2871241DF0A75880C54170F2C9"
+                                             "sizeBytes":  15267,
+                                             "sha256":  "1E5C15E7FF1627468DDD9FE1672C5A271A588D8754FB6D6D954CB3D5D0C8ACB2"
                                          },
                                          {
                                              "path":  "python-workers/models.py",
@@ -308,16 +308,40 @@
                                              "sourcePath":  "python-workers/output_generator.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  8087,
-                                             "sha256":  "F30C1548042FC0271A68D47C48687D1225E3F3B4A0193074C3FA38CC95264049"
+                                             "sizeBytes":  8575,
+                                             "sha256":  "5D96825E3AAF296865FEEF34FB4768AADA5995D15893024BB644F79A2B786FD2"
                                          },
                                          {
                                              "path":  "python-workers/prepare_whisper_model.py",
                                              "sourcePath":  "python-workers/prepare_whisper_model.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  4477,
-                                             "sha256":  "9A7B109DA7AD629723A562D7D92AA66E1040584155449252754958D8695AA18E"
+                                             "sizeBytes":  9766,
+                                             "sha256":  "A3953478E960F7833E5B15DD52A6B9261C46E3B3D0FCB2393EB1D5FD35B8111A"
+                                         },
+                                         {
+                                             "path":  "python-workers/process_utils.py",
+                                             "sourcePath":  "python-workers/process_utils.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  413,
+                                             "sha256":  "964E1F7A592FC24C7D76BC7A714F32C46936F84D2B1216222C542FB5D4DB965F"
+                                         },
+                                         {
+                                             "path":  "python-workers/profile_metadata.py",
+                                             "sourcePath":  "python-workers/profile_metadata.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  8040,
+                                             "sha256":  "465EFC30E5DDA598D9FBD754DC40DD8CE3B02CCD9CCD1E2EBA26EDA0CE19960A"
+                                         },
+                                         {
+                                             "path":  "python-workers/source_scanner.py",
+                                             "sourcePath":  "python-workers/source_scanner.py",
+                                             "required":  true,
+                                             "status":  "present",
+                                             "sizeBytes":  7668,
+                                             "sha256":  "D1D573206C64E17EDD3A6E2F9A75B976EDE0EE8BE04D1C8E2ECE02AFAAF321F9"
                                          },
                                          {
                                              "path":  "python-workers/transcriber.py",
@@ -332,8 +356,8 @@
                                              "sourcePath":  "python-workers/visual_analyzer.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  20942,
-                                             "sha256":  "8EF43240951C078D5DFD900457B7C1C8B3B94B1064CC2773FC4BCA81C2EB7232"
+                                             "sizeBytes":  22783,
+                                             "sha256":  "56C729699B59AE45EDD20EEE48D7992201841856E749B1882BF6DEEAEE39930A"
                                          }
                                      ]
                        },

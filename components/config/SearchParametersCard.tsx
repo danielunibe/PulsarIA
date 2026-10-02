@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { SearchConfig } from '../../types/semanticConfig';
-import { FaSliders } from 'react-icons/fa6';
+import { FaSliders } from '@/components/icon-library';
 
 interface Props {
   config: SearchConfig | null;

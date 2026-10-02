@@ -9,7 +9,7 @@ def embed_query(query: str):
     from sentence_transformers import SentenceTransformer
     
     # Log inference start
-    print(f"[Python] Generating embedding for query: '{query}'", file=sys.stderr, flush=True)
+    print("[Python] Generating query embedding", file=sys.stderr, flush=True)
     
     model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     emb = model.encode([query])[0]

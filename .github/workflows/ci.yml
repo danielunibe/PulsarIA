@@ -17,16 +17,23 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout canonical source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Verify release tooling regressions
+        run: |
+          node --test scripts/tests/release-version.test.mjs scripts/tests/tauri-frontend.test.mjs scripts/tests/spdx-license-expression.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Release tooling regression tests failed.' }
+          & ./scripts/tests/direct-release-artifacts.tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Release artifact regression tests failed.' }
 
       - name: Verify canonical structure
         run: npm run verify:canonical
@@ -39,6 +46,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'TypeScript failed.' }
           npm run build
           if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+          npm run verify:frontend-a11y
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend accessibility contract failed.' }
+          npm run verify:icons
+          if ($LASTEXITCODE -ne 0) { throw 'Web and native icon asset contract failed.' }
 
       - name: Verify Rust contracts
         run: |

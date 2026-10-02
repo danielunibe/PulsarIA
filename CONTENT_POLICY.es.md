@@ -46,4 +46,4 @@ perfil de navegador ni habilites cookies en equipos que no controles.
 Para solicitar revisión o retirada de material relacionado con Pulsaria,
 consulta COPYRIGHT_AND_TAKEDOWN.es.md.
 
-Contacto de contenido: COMPLETAR ANTES DEL RELEASE.
+Contacto de contenido: danielunibe10@gmail.com.

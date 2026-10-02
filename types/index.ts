@@ -11,6 +11,7 @@ export type QueueStep = 'MP4' | 'MP3' | 'TXT';
 
 export type SetupIntent = 'knowledge' | 'balanced' | 'archive';
 export type SourceState = 'local' | 'online' | 'unavailable';
+export type MediaKind = 'image' | 'video';
 
 export interface StorageRecommendation {
     intent: SetupIntent;
@@ -64,6 +65,11 @@ export interface VideoData {
     tags: string[];
     thumb: string;
     videoSrc: string;
+    /** La capa DEMO puede ocupar el mismo slot con una imagen estática. */
+    mediaKind?: MediaKind;
+    /** Identidad estable del slot DEMO, fuera de SQLite. */
+    slotId?: string;
+    demoLabel?: string;
     originalUrl?: string;
     visualAnalysis?: string;
     instructionalGuide?: string;
@@ -77,6 +83,20 @@ export type CinemaSourceState = 'local' | 'online' | 'unavailable';
 
 export interface CinemaVideo extends VideoData {
     sourceState?: CinemaSourceState;
+}
+
+export interface TranscriptWord {
+    word: string;
+    start: number;
+    end: number;
+}
+
+export interface TranscriptChunk {
+    chunk_index: number;
+    chunk_text: string;
+    start: number;
+    end: number;
+    words?: TranscriptWord[];
 }
 
 // --- Props de Componentes ---
@@ -93,6 +113,12 @@ export interface VideoCardProps {
     isFullPlaying?: boolean;
     onPlayStart?: () => void;
     onPlayStop?: () => void;
+    mediaKind?: MediaKind;
+    isDemo?: boolean;
+    demoLabel?: string;
+    hoverAutoplay?: boolean;
+    onPreviewClick?: (trigger: HTMLElement) => void;
+    onContextMenu?: (event: React.MouseEvent<HTMLElement>) => void;
 }
 
 // --- Tipos de TikTokProcessor ---

@@ -1,12 +1,12 @@
 'use client';
 import { motion } from 'motion/react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { FaListUl, FaWandMagicSparkles, FaTrash } from 'react-icons/fa6';
+import { FaFolder, FaWandMagicSparkles, FaTrash } from '@/components/icon-library';
 import type { PlaylistRecord } from '@/hooks/usePlaylists';
 
 /**
  * Props de la tarjeta individual de playlist.
- * 
+ *
  * Muestra el nombre, descripción, keywords temáticas, badge "Auto"
  * y thumbnail de portada de una playlist.
  */
@@ -25,17 +25,17 @@ interface PlaylistCardProps {
 
 /**
  * PlaylistCard — Tarjeta individual de una playlist.
- * 
+ *
  * Renderiza una card con: thumbnail de portada (o bloque de color),
  * nombre, descripción corta, keywords temáticas, badge "Auto" si
  * fue generada automáticamente, y botón de eliminar.
  */
 export function PlaylistCard({ playlist, isSelected, onSelect, onDelete, coverThumb }: PlaylistCardProps) {
   const keywords = (() => {
-    try { 
-      return (JSON.parse(playlist.topic_keywords || '[]') as string[]) || []; 
-    } catch { 
-      return []; 
+    try {
+      return (JSON.parse(playlist.topic_keywords || '[]') as string[]) || [];
+    } catch {
+      return [];
     }
   })();
 
@@ -60,9 +60,7 @@ export function PlaylistCard({ playlist, isSelected, onSelect, onDelete, coverTh
         background: isSelected
           ? `${color}18`
           : 'rgba(255,255,255,0.02)',
-        border: isSelected
-          ? `1px solid ${color}50`
-          : '1px solid rgba(255,255,255,0.06)',
+        border: 'none',
         boxShadow: isSelected
           ? `0 0 20px ${color}25`
           : 'none',
@@ -71,9 +69,9 @@ export function PlaylistCard({ playlist, isSelected, onSelect, onDelete, coverTh
       {/* Cover thumbnail or color block */}
       <div
         className="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center overflow-hidden shadow-md"
-        style={{ 
-          background: coverThumb ? 'transparent' : `${color}25`, 
-          border: `1px solid ${color}40` 
+        style={{
+          background: coverThumb ? 'transparent' : `${color}25`,
+          border: 'none'
         }}
       >
         {coverThumb ? (
@@ -81,7 +79,7 @@ export function PlaylistCard({ playlist, isSelected, onSelect, onDelete, coverTh
           // eslint-disable-next-line @next/next/no-img-element
           <img src={coverThumb} alt="" className="w-full h-full object-cover" />
         ) : (
-          <FaListUl size={14} style={{ color }} />
+          <FaFolder size={14} style={{ color }} />
         )}
       </div>
 
@@ -96,8 +94,8 @@ export function PlaylistCard({ playlist, isSelected, onSelect, onDelete, coverTh
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[10px] text-white/40">{playlist.item_count} video{playlist.item_count !== 1 ? 's' : ''}</span>
           {keywords.slice(0, 2).map(k => (
-            <span 
-              key={k} 
+            <span
+              key={k}
               className="text-[9px] px-1.5 py-0.5 rounded-md font-medium"
               style={{ background: `${color}20`, color }}
             >

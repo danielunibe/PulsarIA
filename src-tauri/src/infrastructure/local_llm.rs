@@ -3,6 +3,7 @@ use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +13,18 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+
+fn hidden_tokio_command<S: AsRef<OsStr>>(program: S) -> Command {
+    let mut command = Command::new(program);
+    crate::process_control::hide_tokio_command(&mut command);
+    command
+}
+
+fn hidden_std_command<S: AsRef<OsStr>>(program: S) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    crate::process_control::hide_std_command(&mut command);
+    command
+}
 
 const MANIFEST_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -56,6 +69,8 @@ pub struct LocalLlmRequest {
     pub task: LocalLlmTask,
     pub context: String,
     pub max_output_tokens: u32,
+    #[serde(default)]
+    pub analysis_depth: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -122,6 +137,42 @@ impl LocalLlmManager {
             cancel_requested: Arc::new(AtomicBool::new(false)),
             server: Arc::new(Mutex::new(None)),
         })
+    }
+
+    pub fn new_noop() -> Self {
+        let manifest =
+            serde_json::from_str::<LocalLlmManifest>(MANIFEST_JSON).unwrap_or_else(|_| {
+                LocalLlmManifest {
+                    schema_version: 1,
+                    model_id: "disabled".to_string(),
+                    model_revision: "0".repeat(40),
+                    filename: "disabled.gguf".to_string(),
+                    download_url: String::new(),
+                    expected_size: 0,
+                    sha256: "0".repeat(64),
+                    license_spdx: "None".to_string(),
+                    license_url: String::new(),
+                    sidecar_version: "0.0.0".to_string(),
+                    sidecar_executable: "llama-server.exe".to_string(),
+                    download_hosts: Vec::new(),
+                }
+            });
+        let status = LocalLlmStatus {
+            state: LocalLlmState::Failed,
+            model_id: manifest.model_id.clone(),
+            model_revision: manifest.model_revision.clone(),
+            bytes_downloaded: 0,
+            total_bytes: 0,
+            sha256: None,
+            error_code: Some("local_llm_disabled".to_string()),
+        };
+        Self {
+            manifest,
+            status: Arc::new(Mutex::new(status)),
+            active_download: Arc::new(Mutex::new(false)),
+            cancel_requested: Arc::new(AtomicBool::new(false)),
+            server: Arc::new(Mutex::new(None)),
+        }
     }
 
     pub async fn status(&self) -> LocalLlmStatus {
@@ -200,11 +251,19 @@ impl LocalLlmManager {
             .timeout(Duration::from_secs(180))
             .build()
             .map_err(|_| "local_llm_client_unavailable".to_string())?;
+        let prompt = if request.analysis_depth.as_deref() == Some("deep") {
+            format!(
+                "Modo Análisis profundo: recupera y contrasta las evidencias disponibles, indica qué está respaldado por el contexto y termina con pasos resumidos. No muestres razonamiento privado ni inventes datos.\n\n{}",
+                request.context.trim()
+            )
+        } else {
+            request.context.trim().to_string()
+        };
         let payload = json!({
             "model": self.manifest.model_id,
             "messages": [{
                 "role": "user",
-                "content": request.context.trim()
+                "content": prompt
             }],
             "max_tokens": request.max_output_tokens,
             "temperature": 0.2,
@@ -470,10 +529,30 @@ impl LocalLlmManager {
         }
         let executable = resolve_sidecar(&self.manifest.sidecar_executable)
             .ok_or_else(|| "local_llm_sidecar_missing".to_string())?;
+        let use_gpu = sidecar_reports_cuda(&executable);
+        match self.start_server_once(&executable, use_gpu).await {
+            Ok(server) => Ok(server),
+            Err(error) if use_gpu => {
+                tracing::warn!(
+                    "CUDA sidecar start failed; retrying local LLM on CPU: {}",
+                    error
+                );
+                self.start_server_once(&executable, false).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn start_server_once(
+        &self,
+        executable: &Path,
+        use_gpu: bool,
+    ) -> Result<ServerInfo, String> {
         let port = reserve_local_port()?;
         let api_key = random_api_key();
         let model_path = self.model_path();
-        let mut child = Command::new(&executable)
+        let mut command = hidden_tokio_command(&executable);
+        command
             .arg("--model")
             .arg(model_path)
             .arg("--host")
@@ -486,7 +565,15 @@ impl LocalLlmManager {
             .arg("--ctx-size")
             .arg("4096")
             .arg("--n-predict")
-            .arg(MAX_OUTPUT_TOKENS.to_string())
+            .arg(MAX_OUTPUT_TOKENS.to_string());
+        if use_gpu {
+            command
+                .arg("--device")
+                .arg("CUDA0")
+                .arg("--n-gpu-layers")
+                .arg("99");
+        }
+        let mut child = command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -618,7 +705,30 @@ fn validate_request(request: &LocalLlmRequest) -> Result<(), String> {
     if request.max_output_tokens == 0 || request.max_output_tokens > MAX_OUTPUT_TOKENS {
         return Err("local_llm_output_limit_invalid".to_string());
     }
+    if let Some(depth) = request.analysis_depth.as_deref() {
+        if !matches!(depth, "standard" | "deep") {
+            return Err("local_llm_analysis_depth_invalid".to_string());
+        }
+    }
     Ok(())
+}
+
+fn sidecar_reports_cuda(executable: &Path) -> bool {
+    // This probe is synchronous and intentionally runs before the async
+    // sidecar lifecycle starts; do not call tokio::process::Command here.
+    let output = hidden_std_command(executable)
+        .arg("--list-devices")
+        .output();
+    let Ok(output) = output else {
+        return false;
+    };
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let lower = combined.to_ascii_lowercase();
+    (lower.contains("cuda") || lower.contains("nvidia")) && !lower.contains("(none)")
 }
 
 async fn sha256_file(path: &Path, cancel: &AtomicBool) -> Result<String, &'static str> {
@@ -684,6 +794,7 @@ mod tests {
             task: LocalLlmTask::Chat,
             context: " ".into(),
             max_output_tokens: 32,
+            analysis_depth: None,
         };
         assert_eq!(
             validate_request(&empty).unwrap_err(),
@@ -693,6 +804,7 @@ mod tests {
             task: LocalLlmTask::Chat,
             context: "x".repeat(120_001),
             max_output_tokens: 32,
+            analysis_depth: None,
         };
         assert_eq!(
             validate_request(&oversized).unwrap_err(),

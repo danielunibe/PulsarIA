@@ -4,10 +4,11 @@ Versión: 1.0 · 12 de septiembre de 2026
 
 ## 1. Quién concede la licencia
 
-Pulsaria es un beta gratuito distribuido por el titular que se indique
-expresamente en la versión oficial, como persona física o entidad.
-El domicilio y correo para notificaciones legales deben completarse antes de
-publicar el primer release.
+Responsable público del software: Daniel Unibe (cuenta del proyecto:
+https://github.com/danielunibe). Esta denominación pública no acredita por sí
+sola una razón social ni sustituye la revisión de la identidad legal.
+Correo de contacto y notificaciones legales: danielunibe10@gmail.com (canal
+electrónico oficial de notificaciones y atención para la versión beta).
 
 Pulsaria no está afiliada, patrocinada ni respaldada por TikTok, ByteDance,
 YouTube, Google ni ninguna otra plataforma mencionada por la aplicación.
@@ -107,7 +108,7 @@ La versión española es la referencia para usuarios en México. Este EULA se
 interpretará conforme a la legislación aplicable, sin limitar derechos
 irrenunciables del consumidor o de protección de datos.
 
-Contacto legal: COMPLETAR ANTES DEL RELEASE.
+Contacto legal: danielunibe10@gmail.com.
 
 La licencia de código fuente se encuentra en LICENSE. La política de
 contenido, privacidad, copyright y seguridad se encuentra en los documentos

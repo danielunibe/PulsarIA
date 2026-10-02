@@ -5,8 +5,9 @@ param(
     [ValidateSet('debug', 'release')]
     [string]$Configuration = 'debug',
     [switch]$RunLive,
+    [string]$ApiToken,
     [string]$TikTokUrl = 'https://www.tiktok.com/@scout2015/video/6718335390845095173',
-    [int]$ApiPort = 18874,
+    [int]$ApiPort = 8080,
     [int]$StartupTimeoutSeconds = 90,
     [int]$JobTimeoutSeconds = 360
 )
@@ -100,13 +101,49 @@ function Assert-OwnedTempPath {
 $tag = [guid]::NewGuid().ToString('N')
 $installDir = Join-Path $env:TEMP "pulsaria-current-bundle-install-$tag"
 $appDataRoot = Join-Path $env:TEMP "pulsaria-current-bundle-appdata-$tag"
+$webViewDataDir = Join-Path $appDataRoot 'WebView2UserData'
 $dataDir = Join-Path $appDataRoot 'Pulsar Eventide'
 $preservationMarker = Join-Path $dataDir 'settings\mvp-uninstall-preservation.txt'
 $downloadsDir = Join-Path $env:TEMP "pulsaria-current-bundle-downloads-$tag"
 $msiLog = Join-Path $installDir 'msiexec.log'
 $baseUrl = "http://127.0.0.1:$ApiPort"
+
+function Assert-TestWebViewIsolation {
+    $expectedPath = [System.IO.Path]::GetFullPath($script:webViewDataDir)
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        $webViewProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -like "*$expectedPath*"
+        })
+        if ($webViewProcesses.Count -gt 0) {
+            $script:result.webView2UserDataFolderIsolated = $true
+            return
+        }
+        Start-Sleep -Seconds 1
+    }
+    throw 'WebView2 did not use the test-owned WEBVIEW2_USER_DATA_FOLDER; refusing to continue with a non-isolated installed smoke.'
+}
+
+function Stop-TestInstalledApp {
+    if ($null -ne $script:appProcess) {
+        Stop-Process -Id $script:appProcess.Id -Force -ErrorAction SilentlyContinue
+        try { [void]$script:appProcess.WaitForExit(15000) } catch { }
+        $script:appProcess = $null
+    }
+    $expectedPath = [System.IO.Path]::GetFullPath($script:webViewDataDir)
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $webViewProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -like "*$expectedPath*"
+        })
+        if ($webViewProcesses.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    foreach ($webViewProcess in $webViewProcesses) {
+        Stop-Process -Id $webViewProcess.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $envNames = @(
-    'PULSAR_DATA_DIR', 'PULSAR_DOWNLOAD_DIR', 'PULSAR_API_PORT', 'PULSAR_API_HOST', 'APPDATA',
+    'PULSAR_DATA_DIR', 'PULSAR_DOWNLOAD_DIR', 'PULSAR_API_PORT', 'PULSAR_API_HOST', 'APPDATA', 'WEBVIEW2_USER_DATA_FOLDER',
     'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
     'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
     'ONNX_MODEL_DIR', 'TESSERACT_PATH', 'PATH'
@@ -144,6 +181,7 @@ $result = [ordered]@{
         expected = $dataDir
         usesAppDataFallback = $false
     }
+    webView2UserDataFolderIsolated = $false
     userDataPreservedAfterUninstall = $false
     runtimeIsolation = [ordered]@{
         pathCleared = $false
@@ -155,7 +193,10 @@ $result = [ordered]@{
 }
 
 try {
-    New-Item -ItemType Directory -Path $installDir, $appDataRoot, $downloadsDir -Force | Out-Null
+    if ($RunLive) {
+        throw 'RunLive is not a validated acceptance path: the legacy script does not send or refresh process-scoped IPC credentials. Use the installed native UI and docs/BETA3_ACCEPTANCE.md. Offline installation smoke remains available without RunLive.'
+    }
+    New-Item -ItemType Directory -Path $installDir, $appDataRoot, $downloadsDir, $webViewDataDir -Force | Out-Null
     if ($Bundle -eq 'msi') {
         $msiInstallArguments = @(
             '/i', ('"{0}"' -f $bundlePath),
@@ -164,9 +205,9 @@ try {
             ('INSTALLDIR="{0}"' -f $installDir),
             '/L*v', ('"{0}"' -f $msiLog)
         )
-        $installResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiInstallArguments -Wait -PassThru
+        $installResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiInstallArguments -WindowStyle Hidden -Wait -PassThru
     } else {
-        $installResult = Start-Process -FilePath $bundlePath -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+        $installResult = Start-Process -FilePath $bundlePath -ArgumentList @('/S', "/D=$installDir") -WindowStyle Hidden -Wait -PassThru
     }
     $result.installExit = $installResult.ExitCode
     if ($Bundle -eq 'msi' -and $installResult.ExitCode -eq 1603) {
@@ -199,6 +240,35 @@ try {
     $result.resourceChecks.ffmpeg = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'bin/ffmpeg.exe')
     $result.resourceChecks.ffprobe = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'bin/ffprobe.exe')
     $result.resourceChecks.ffmpegLicense = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'bin/FFMPEG-LICENSE.txt')
+    $result.resourceChecks.thirdPartyNotices = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/THIRD_PARTY_NOTICES.md')
+    $result.resourceChecks.modelNotice = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/MODEL_NOTICE.md')
+    $result.resourceChecks.sourceLicense = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/LICENSE')
+    $result.resourceChecks.eulaEs = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/EULA.es.md')
+    $result.resourceChecks.privacyEs = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'legal/PRIVACY.es.md')
+    $coloramaLicenseRelative = 'python/Lib/site-packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt'
+    $coloramaLicenseSource = Join-Path (Join-Path $projectRoot 'src-tauri/resources') $coloramaLicenseRelative
+    $coloramaLicenseInstalled = Join-Path $installedResourceRoot $coloramaLicenseRelative
+    $result.resourceChecks.coloramaLicense = (Test-Path -LiteralPath $coloramaLicenseSource -PathType Leaf) -and
+        (Test-Path -LiteralPath $coloramaLicenseInstalled -PathType Leaf)
+    if ($result.resourceChecks.coloramaLicense) {
+        $result.resourceChecks.coloramaLicense = (Get-Sha256Hex -Path $coloramaLicenseSource) -eq (Get-Sha256Hex -Path $coloramaLicenseInstalled)
+    }
+    $legalMappings = @($tauriConfig.bundle.resources.PSObject.Properties | Where-Object { [string]$_.Value -like 'resources/legal/*' })
+    $legalDocumentsValid = $legalMappings.Count -ge 13
+    foreach ($mapping in $legalMappings) {
+        $destination = [string]$mapping.Value
+        $sourcePath = Join-Path (Join-Path $projectRoot 'src-tauri') ([string]$mapping.Name)
+        $installedPath = Join-Path $installDir $destination
+        $matchesSource = (Test-Path -LiteralPath $sourcePath -PathType Leaf) -and (Test-Path -LiteralPath $installedPath -PathType Leaf)
+        if ($matchesSource) {
+            $matchesSource = (Get-Sha256Hex -Path $sourcePath) -eq (Get-Sha256Hex -Path $installedPath)
+        }
+        $result.resourceChecks["legal_$([IO.Path]::GetFileName($destination))"] = $matchesSource
+        if (-not $matchesSource) { $legalDocumentsValid = $false }
+    }
+    if (-not $result.resourceChecks.coloramaLicense) { $legalDocumentsValid = $false }
+    $result.resourceChecks.legalDocumentCount = $legalMappings.Count
+    $result.resourceChecks.legalDocuments = $legalDocumentsValid
     $onnxModelDir = Join-Path $installDir 'resources/assets/models/all-MiniLM-L6-v2'
     $whisperModelDir = Join-Path $installDir 'resources/assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356'
     $result.resourceChecks.onnx = (Test-ModelFile (Join-Path $onnxModelDir 'model.onnx') 1000000) -and
@@ -217,8 +287,8 @@ try {
     } else {
         $result.runtimeManifestGate = @('BLOCKED: resources/runtime-manifest.json is missing from the installed bundle')
     }
-    if (-not ($result.resourceChecks.runtimeManifest -and $result.resourceChecks.python -and $result.resourceChecks.worker -and $result.resourceChecks.ffmpeg -and $result.resourceChecks.ffprobe -and $result.resourceChecks.ffmpegLicense -and $result.resourceChecks.onnx -and $result.resourceChecks.whisper)) {
-        throw 'One or more packaged runtime resources are missing; ffmpeg.exe, ffprobe.exe and local license evidence are required'
+    if (-not ($result.resourceChecks.runtimeManifest -and $result.resourceChecks.python -and $result.resourceChecks.worker -and $result.resourceChecks.ffmpeg -and $result.resourceChecks.ffprobe -and $result.resourceChecks.ffmpegLicense -and $result.resourceChecks.thirdPartyNotices -and $result.resourceChecks.modelNotice -and $result.resourceChecks.sourceLicense -and $result.resourceChecks.eulaEs -and $result.resourceChecks.privacyEs -and $result.resourceChecks.legalDocuments -and $result.resourceChecks.onnx -and $result.resourceChecks.whisper)) {
+        throw 'One or more packaged runtime or legal resources are missing; the NSIS installation must include ffmpeg/ffprobe evidence, third-party notices, model notice, source license, EULA and privacy document.'
     }
 
     # Do not provide PULSAR_DATA_DIR here. This deliberately exercises the
@@ -229,6 +299,7 @@ try {
     [Environment]::SetEnvironmentVariable('PULSAR_DOWNLOAD_DIR', $downloadsDir, 'Process')
     [Environment]::SetEnvironmentVariable('PULSAR_API_PORT', "$ApiPort", 'Process')
     [Environment]::SetEnvironmentVariable('PULSAR_API_HOST', '127.0.0.1', 'Process')
+    [Environment]::SetEnvironmentVariable('WEBVIEW2_USER_DATA_FOLDER', $webViewDataDir, 'Process')
     foreach ($name in @(
         'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
         'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
@@ -243,6 +314,7 @@ try {
     $result.runtimeIsolation.pathCleared = $true
     $result.runtimeIsolation.externalRuntimeOverridesCleared = $true
     $appProcess = Start-Process -FilePath $appPath -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
+    Assert-TestWebViewIsolation
 
     $health = $null
     for ($i = 0; $i -lt $StartupTimeoutSeconds; $i++) {
@@ -263,10 +335,13 @@ try {
     if ([string]$health.version -ne $expectedVersion) {
         throw "Installed health version $($health.version) does not match expected $expectedVersion"
     }
-    $initialJobs = Get-JobList (Invoke-RestMethod -Method Get -Uri "$baseUrl/api/v1/jobs" -TimeoutSec 10)
-    $result.initialJobCount = $initialJobs.Count
-
     if ($RunLive) {
+        # Protected API routes require the process-scoped JWT delivered to the
+        # native frontend through IPC. The offline smoke intentionally does
+        # not invent credentials; live mode is reserved for a native harness.
+        $initialJobs = Get-JobList (Invoke-RestMethod -Method Get -Uri "$baseUrl/api/v1/jobs" -TimeoutSec 10)
+        $result.initialJobCount = $initialJobs.Count
+
         $payload = @{ url = $TikTokUrl } | ConvertTo-Json -Compress
         $result.ingest = Invoke-RestMethod -Method Post -Uri "$baseUrl/api/v1/ingest" -ContentType 'application/json' -Body $payload -TimeoutSec 30
         $jobId = [int64]$result.ingest.job_id
@@ -351,11 +426,10 @@ try {
         }
     }
 
-    Stop-Process -Id $appProcess.Id -Force -ErrorAction SilentlyContinue
-    try { [void]$appProcess.WaitForExit(15000) } catch { }
-    $appProcess = $null
+    Stop-TestInstalledApp
     Start-Sleep -Seconds 2
     $appProcess = Start-Process -FilePath $appPath -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
+    Assert-TestWebViewIsolation
     $healthAfterRestart = $null
     for ($i = 0; $i -lt $StartupTimeoutSeconds; $i++) {
         try {
@@ -397,10 +471,7 @@ try {
 } catch {
     $result.error = $_.Exception.Message
 } finally {
-    if ($null -ne $appProcess) {
-        Stop-Process -Id $appProcess.Id -Force -ErrorAction SilentlyContinue
-        try { [void]$appProcess.WaitForExit(15000) } catch { }
-    }
+    Stop-TestInstalledApp
     foreach ($name in $envNames) {
         if ($null -eq $oldEnvironment[$name]) {
             [Environment]::SetEnvironmentVariable($name, $null, 'Process')
@@ -417,7 +488,7 @@ try {
                 '/norestart',
                 '/L*v', ('"{0}"' -f (Join-Path $installDir 'msiexec-uninstall.log'))
             )
-            $uninstallResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiUninstallArguments -Wait -PassThru
+            $uninstallResult = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiUninstallArguments -WindowStyle Hidden -Wait -PassThru
             $result.uninstallExit = $uninstallResult.ExitCode
             $result.userDataPreservedAfterUninstall =
                 $uninstallResult.ExitCode -in @(0, 3010) -and
@@ -432,7 +503,7 @@ try {
         $uninstallerPath = (Get-ChildItem -LiteralPath $installDir -Filter '*uninstall*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
         if ($uninstallerPath -and (Test-Path -LiteralPath $uninstallerPath -PathType Leaf)) {
         try {
-            $uninstallResult = Start-Process -FilePath $uninstallerPath -ArgumentList '/S' -Wait -PassThru
+            $uninstallResult = Start-Process -FilePath $uninstallerPath -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru
             $result.uninstallExit = $uninstallResult.ExitCode
             $result.userDataPreservedAfterUninstall =
                 $uninstallResult.ExitCode -eq 0 -and

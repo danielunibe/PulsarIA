@@ -4,13 +4,12 @@ Versión: 1.0 · 12 de septiembre de 2026
 
 ## Responsable
 
-Responsable: el titular identificado en el release correspondiente.
+Responsable: Daniel Unibe (titular del proyecto Pulsaria).
 
-Domicilio y contacto para privacidad: COMPLETAR ANTES DEL RELEASE.
+Canal oficial para privacidad, notificaciones y derechos ARCO: danielunibe10@gmail.com.
+Atención y notificaciones vía canal electrónico oficial del proyecto para la versión beta.
 
-Este aviso está preparado para un beta de escritorio distribuido desde
-GitHub. Debe revisarse y completarse con los datos reales del responsable
-antes de su publicación.
+Este aviso rige para la versión beta de escritorio distribuida desde el repositorio oficial en GitHub.
 
 ## Principio de privacidad local
 
@@ -27,6 +26,7 @@ el beta.
 La aplicación puede crear o leer, según las funciones que inicies:
 
 - URLs e identificadores de contenido;
+- nombres de perfil, metadatos y métricas públicas de las fuentes que conectes;
 - archivos de vídeo y audio;
 - transcripciones, embeddings y resultados de búsqueda;
 - nombres de archivos, rutas locales y preferencias;
@@ -48,6 +48,12 @@ El beta puede conectarse a Internet únicamente para:
 - consultar o descargar un release o actualización de GitHub cuando tú lo
   solicitas;
 - acceder a la URL de contenido que tú importas.
+- explorar inicialmente los perfiles TikTok que registres y revisar sus
+  canales habilitados mientras la fuente siga activa. Con Pulsaria abierta,
+  las fuentes activas se revisan cada 15 minutos por defecto. El contenido
+  nuevo que cumpla las reglas de la fuente se añade a tu cola local para
+  procesarlo. Puedes pausar o reactivar cada perfil en Ajustes; las fuentes
+  pausadas se excluyen de las revisiones periódicas.
 - enviar a Google los fragmentos que incluyas explícitamente en una solicitud
   manual de síntesis Gemini, únicamente si has configurado una clave en el
   proceso nativo.
@@ -99,7 +105,7 @@ Si posteriormente Pulsaria recibe datos personales directamente como parte de
 un canal de soporte, responderá las solicitudes de acceso, rectificación,
 cancelación u oposición conforme a la legislación aplicable.
 
-Solicitud de privacidad y derechos ARCO: COMPLETAR ANTES DEL RELEASE.
+Solicitudes de privacidad y derechos ARCO: danielunibe10@gmail.com.
 
 No envíes vídeos, transcripciones, cookies ni información confidencial por
 issues públicos de GitHub.

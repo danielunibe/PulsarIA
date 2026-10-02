@@ -60,6 +60,19 @@ impl QueryCoordinator {
             .insert(internal_id, job_id, chunk_index, embedding)
     }
 
+    pub fn persist_embeddings(
+        &self,
+        job_id: i64,
+        chunks: &[(i64, String, Vec<f32>)],
+    ) -> Result<(), String> {
+        let mut conn = self
+            .metadata_db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        crate::db::replace_transcript_embeddings(&mut conn, job_id, chunks)
+            .map_err(|e| format!("Failed to persist transcript embeddings: {e}"))
+    }
+
     fn materialize_local_results(
         &self,
         query_vec: &[f32],

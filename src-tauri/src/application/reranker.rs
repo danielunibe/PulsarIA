@@ -11,6 +11,12 @@ use tracing::{info, instrument, warn};
 
 pub trait Reranker: Send + Sync {
     fn rerank(&self, query: &str, candidates: Vec<SearchResult>) -> Vec<SearchResult>;
+
+    /// True only when a real local reranker is connected. The current
+    /// cross-encoder adapter is intentionally a score-preserving passthrough.
+    fn is_configured(&self) -> bool {
+        false
+    }
 }
 
 pub struct CrossEncoderReranker {

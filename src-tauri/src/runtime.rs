@@ -25,6 +25,11 @@ pub fn root() -> PathBuf {
         return configured;
     }
 
+    let source_resources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+    if cfg!(debug_assertions) && source_resources.is_dir() {
+        return source_resources;
+    }
+
     if let Ok(executable) = env::current_exe() {
         if let Some(parent) = executable.parent() {
             let installed = parent.join("resources");
@@ -34,7 +39,7 @@ pub fn root() -> PathBuf {
         }
     }
 
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources")
+    source_resources
 }
 
 pub fn path(relative: impl AsRef<Path>) -> PathBuf {

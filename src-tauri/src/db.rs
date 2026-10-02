@@ -1,6 +1,7 @@
 use crate::domain::models::EMBEDDING_DIMS;
 pub use crate::domain::models::{JobRecord, SearchResult};
-use rusqlite::{params, Connection, OptionalExtension, Result, Row};
+use crate::domain::models::{ParsedFilters, SearchRepresentation};
+use rusqlite::{params, Connection, OptionalExtension, Result, Row, Transaction};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -139,14 +140,25 @@ pub fn get_embedding_index_status(
 
 pub fn record_embedding_model(connection: &Connection, model_hash: &str) -> Result<()> {
     connection.execute(
-        "INSERT INTO embedding_metadata (id, model_id, model_hash, dimensions)
-         VALUES (1, ?1, ?2, ?3)
+        "INSERT INTO embedding_metadata
+            (id, provider_id, model_id, model_version, model_hash, tokenizer_hash, dimensions, generated_at)
+         VALUES (1, ?1, ?2, ?3, ?4, NULL, ?5, CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET
+             provider_id = excluded.provider_id,
              model_id = excluded.model_id,
+             model_version = excluded.model_version,
              model_hash = excluded.model_hash,
+             tokenizer_hash = excluded.tokenizer_hash,
              dimensions = excluded.dimensions,
+             generated_at = excluded.generated_at,
              updated_at = CURRENT_TIMESTAMP",
-        params![EMBEDDING_MODEL_ID, model_hash, EMBEDDING_DIMS as i64],
+        params![
+            "onnx",
+            EMBEDDING_MODEL_ID,
+            EMBEDDING_MODEL_ID,
+            model_hash,
+            EMBEDDING_DIMS as i64
+        ],
     )?;
     Ok(())
 }
@@ -171,25 +183,163 @@ pub struct PlaylistRecord {
     pub topic_keywords: String,
     pub color: String,
     pub created_at: String,
+    pub kind: String,
+    pub sort_mode: String,
+    pub smart_query: Option<String>,
+    pub smart_filters_json: Option<String>,
     pub item_count: i64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SourceCollectionRecord {
+    pub id: i64,
+    pub profile_source_id: i64,
+    pub channel_kind: String,
+    pub name: String,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub enabled: bool,
+    pub status: String,
+    pub item_count: Option<i64>,
+    pub last_sync_at: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct CollectionSourceRecord {
     pub id: i64,
     pub url: String,
+    pub profile_url: String,
     pub source_type: String,
+    pub platform: String,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
     pub browser: Option<String>,
     pub active: bool,
+    pub status: String,
+    pub capabilities_json: String,
+    pub watch_config_json: String,
+    pub initial_import_mode: String,
+    pub history_limit: Option<i64>,
+    pub history_from: Option<String>,
+    pub rules_json: String,
     pub interval_minutes: i64,
     pub last_attempt_at: Option<String>,
+    pub last_sync_at: Option<String>,
     pub last_success_at: Option<String>,
     pub next_sync_at: Option<String>,
     pub discovered_count: i64,
     pub consecutive_failures: i64,
     pub last_error: Option<String>,
+    pub last_sync_summary_json: Option<String>,
     pub created_at: String,
+    pub cover_url: Option<String>,
+    pub verified: Option<bool>,
+    pub following_count: Option<i64>,
+    pub followers_count: Option<i64>,
+    pub likes_count: Option<i64>,
+    pub posts_count: Option<i64>,
+    pub updated_at: Option<String>,
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ProfileChannelRecord {
+    pub id: i64,
+    pub profile_source_id: i64,
+    pub kind: String,
+    pub enabled: bool,
+    pub status: String,
+    pub discovered_count: i64,
+    pub last_discovery_at: Option<String>,
+    pub last_successful_discovery_at: Option<String>,
+    pub cursor: Option<String>,
+    pub newest_known_content_id: Option<String>,
+    pub oldest_known_content_id: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ContentItemRecord {
+    pub id: i64,
+    pub platform: String,
+    pub platform_content_id: String,
+    pub canonical_url: String,
+    pub author_id: Option<String>,
+    pub author_handle: Option<String>,
+    pub title: Option<String>,
+    pub published_at: Option<String>,
+    pub discovered_at: String,
+    pub updated_at: String,
+    pub availability: String,
+    pub job_id: Option<i64>,
+}
+
+/// Shared content projection used when a playlist membership points to an
+/// item that has no processing job yet. The flattened job fields preserve the
+/// existing library card contract while `content_id`, `job_id` and
+/// `availability` keep the canonical identity visible to newer clients.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ContentViewRecord {
+    pub content_id: i64,
+    pub job_id: Option<i64>,
+    pub availability: String,
+    #[serde(flatten)]
+    pub job: JobRecord,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[allow(dead_code)]
+pub struct ContentRelationshipRecord {
+    pub id: i64,
+    pub content_id: i64,
+    pub profile_source_id: i64,
+    pub channel_kind: String,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+    pub active: bool,
+    pub provenance_json: Option<String>,
+    pub sync_run_id: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct CollectionSourceItemRecord {
+    pub id: i64,
+    pub source_id: i64,
+    pub canonical_url: String,
+    pub platform_video_id: Option<String>,
+    pub activity_types_json: String,
+    pub state: String,
+    pub job_id: Option<i64>,
+    pub reason: Option<String>,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct CollectionSourceActivityRecord {
+    pub id: i64,
+    pub source_id: i64,
+    pub created_at: String,
+    pub event_type: String,
+    pub activity_type: Option<String>,
+    pub message: String,
+    pub canonical_url: Option<String>,
+    pub job_id: Option<i64>,
+    pub state: Option<String>,
+    pub found_count: i64,
+    pub queued_count: i64,
+    pub duplicate_count: i64,
+    pub ignored_count: i64,
+    pub error_count: i64,
+}
+
+const DEFAULT_SOURCE_CAPABILITIES: &str = "{}";
+const DEFAULT_SOURCE_WATCH_CONFIG: &str =
+    r#"{"posts":false,"likes":true,"saved":true,"reposts":false}"#;
+const DEFAULT_SOURCE_RULES: &str = r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct HealthEvent {
@@ -200,6 +350,20 @@ pub struct HealthEvent {
     pub diagnosis: String,
     pub action: Option<String>,
     pub result: Option<String>,
+}
+
+/// Persisted checkpoints for the Activity surface. This is deliberately a
+/// low-volume transition log, not a raw progress-metrics stream.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct JobActivityEvent {
+    pub id: i64,
+    pub job_id: i64,
+    pub status: String,
+    pub progress: i32,
+    pub user_message: Option<String>,
+    pub technical_error: Option<String>,
+    pub error_code: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
@@ -230,7 +394,7 @@ pub struct StorageReconciliationReport {
     pub removed_stale_outputs: usize,
 }
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 11;
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn migration_error(message: impl Into<String>) -> rusqlite::Error {
@@ -286,6 +450,26 @@ fn ensure_column(
     Ok(())
 }
 
+fn ensure_timestamp_column(
+    transaction: &rusqlite::Transaction<'_>,
+    table: &str,
+    column: &str,
+    fallback_expression: &str,
+) -> Result<()> {
+    // SQLite rejects ALTER TABLE ... ADD COLUMN when the new column has a
+    // non-constant default such as CURRENT_TIMESTAMP. Add it as nullable,
+    // then backfill existing rows inside the migration transaction. Callers
+    // that create new rows already provide the timestamp explicitly.
+    ensure_column(transaction, table, column, "DATETIME")?;
+    transaction.execute(
+        &format!(
+            "UPDATE \"{table}\" SET \"{column}\" = coalesce(\"{column}\", {fallback_expression}) WHERE \"{column}\" IS NULL"
+        ),
+        [],
+    )?;
+    Ok(())
+}
+
 fn table_has_column(
     transaction: &rusqlite::Transaction<'_>,
     table: &str,
@@ -299,6 +483,289 @@ fn table_has_column(
         }
     }
     Ok(false)
+}
+
+fn content_platform_for_url(url: &str) -> &'static str {
+    if url.to_ascii_lowercase().contains("tiktok.com") {
+        "tiktok"
+    } else {
+        "unknown"
+    }
+}
+
+fn content_identity_for_url(url: &str, fallback_id: i64) -> String {
+    let lower = url.to_ascii_lowercase();
+    if let Some(marker_start) = lower.find("/video/") {
+        let suffix = &url[marker_start + "/video/".len()..];
+        let candidate = suffix
+            .split(|character: char| character == '/' || character == '?' || character == '#')
+            .next()
+            .unwrap_or_default()
+            .trim();
+        if !candidate.is_empty() {
+            return candidate.to_string();
+        }
+    }
+
+    let mut digest = Sha256::new();
+    digest.update(if url.trim().is_empty() {
+        format!("legacy-job:{fallback_id}")
+    } else {
+        url.to_string()
+    });
+    format!("legacy-{:x}", digest.finalize())
+}
+
+fn ensure_content_items_for_jobs(transaction: &Transaction<'_>) -> Result<()> {
+    let jobs = {
+        let mut statement =
+            transaction.prepare("SELECT id, url, canonical_url FROM jobs ORDER BY id ASC")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+
+    for (job_id, url, stored_canonical_url) in jobs {
+        let canonical_url = stored_canonical_url
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| crate::url_utils::canonicalize_tiktok_url(&url));
+        let canonical_url = if canonical_url.trim().is_empty() {
+            url.clone()
+        } else {
+            canonical_url
+        };
+        let platform = content_platform_for_url(&canonical_url);
+        let platform_content_id = content_identity_for_url(&canonical_url, job_id);
+
+        let existing_id: Option<i64> = transaction
+            .query_row(
+                "SELECT id FROM content_items
+                 WHERE platform = ?1 AND platform_content_id = ?2",
+                params![platform, platform_content_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        if let Some(content_id) = existing_id {
+            transaction.execute(
+                "UPDATE content_items SET
+                    canonical_url = coalesce(nullif(?1, ''), canonical_url),
+                    job_id = coalesce(job_id, ?2),
+                    updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?3",
+                params![canonical_url, job_id, content_id],
+            )?;
+        } else {
+            transaction.execute(
+                "INSERT INTO content_items
+                    (platform, platform_content_id, canonical_url, availability, job_id)
+                 VALUES (?1, ?2, ?3, 'available', ?4)",
+                params![platform, platform_content_id, canonical_url, job_id],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn migrate_legacy_source_items(transaction: &Transaction<'_>) -> Result<()> {
+    let items = {
+        let mut statement = transaction.prepare(
+            "SELECT source_id, canonical_url, platform_video_id, job_id,
+                    activity_types_json, state
+             FROM collection_source_items
+             ORDER BY id ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+
+    for (source_id, canonical_url, platform_video_id, job_id, activity_types_json, state) in items {
+        let resolved_job_id = if job_id.is_some() {
+            job_id
+        } else {
+            transaction
+                .query_row(
+                    "SELECT id FROM jobs WHERE canonical_url = ?1 ORDER BY id ASC LIMIT 1",
+                    params![canonical_url],
+                    |row| row.get(0),
+                )
+                .optional()?
+        };
+        let platform = content_platform_for_url(&canonical_url);
+        let platform_content_id = platform_video_id
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| {
+                content_identity_for_url(&canonical_url, resolved_job_id.unwrap_or_default())
+            });
+        let availability = match state.trim().to_ascii_lowercase().as_str() {
+            "unavailable" | "private" | "deleted" | "blocked" | "removed" => "unavailable",
+            "pending" | "queued" | "processing" => "pending",
+            _ => "available",
+        };
+        let content_id: i64 = if let Some(content_id) = transaction
+            .query_row(
+                "SELECT id FROM content_items
+                 WHERE platform = ?1 AND platform_content_id = ?2",
+                params![platform, platform_content_id],
+                |row| row.get(0),
+            )
+            .optional()?
+        {
+            transaction.execute(
+                "UPDATE content_items SET
+                    canonical_url = coalesce(nullif(?1, ''), canonical_url),
+                    availability = CASE WHEN availability = 'available' THEN ?2 ELSE availability END,
+                    job_id = coalesce(job_id, ?3),
+                    updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?4",
+                params![canonical_url, availability, resolved_job_id, content_id],
+            )?;
+            content_id
+        } else {
+            transaction.execute(
+                "INSERT INTO content_items
+                    (platform, platform_content_id, canonical_url, availability, job_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    platform,
+                    platform_content_id,
+                    canonical_url,
+                    availability,
+                    resolved_job_id
+                ],
+            )?;
+            transaction.last_insert_rowid()
+        };
+
+        let activities =
+            serde_json::from_str::<Vec<String>>(&activity_types_json).unwrap_or_default();
+        for activity in activities {
+            if activity.trim().is_empty() {
+                continue;
+            }
+            let activity = match activity.as_str() {
+                "likes" | "liked" | "favorite" | "favorites" => "favorites",
+                "reposted" | "reposts" => "reposts",
+                "posted" | "posts" => "posts",
+                "saved" => "saved",
+                other => other,
+            };
+            transaction.execute(
+                "INSERT INTO content_relationships
+                    (content_id, profile_source_id, channel_kind, active)
+                 VALUES (?1, ?2, ?3, 1)
+                 ON CONFLICT(profile_source_id, channel_kind, content_id)
+                 DO UPDATE SET active = 1, last_seen_at = CURRENT_TIMESTAMP",
+                params![content_id, source_id, activity],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn migrate_playlist_memberships(transaction: &Transaction<'_>) -> Result<()> {
+    if table_has_column(transaction, "playlist_items", "content_id")? {
+        ensure_column(
+            transaction,
+            "playlist_items",
+            "position",
+            "REAL NOT NULL DEFAULT 0",
+        )?;
+        ensure_timestamp_column(
+            transaction,
+            "playlist_items",
+            "added_at",
+            "CURRENT_TIMESTAMP",
+        )?;
+        ensure_column(
+            transaction,
+            "playlist_items",
+            "added_by",
+            "TEXT NOT NULL DEFAULT 'user'",
+        )?;
+        return Ok(());
+    }
+
+    transaction.execute(
+        "CREATE TABLE playlist_items_v2 (
+            playlist_id INTEGER NOT NULL,
+            content_id INTEGER NOT NULL,
+            position REAL NOT NULL DEFAULT 0,
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            added_by TEXT NOT NULL DEFAULT 'user',
+            PRIMARY KEY (playlist_id, content_id),
+            FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+            FOREIGN KEY(content_id) REFERENCES content_items(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
+    let legacy_items = {
+        let mut statement = transaction.prepare(
+            "SELECT pi.playlist_id, pi.job_id, pi.added_at, p.auto_generated
+             FROM playlist_items pi
+             JOIN playlists p ON p.id = pi.playlist_id
+             ORDER BY pi.playlist_id ASC, pi.added_at ASC, pi.rowid ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, bool>(3)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+
+    let mut positions = std::collections::HashMap::<i64, f64>::new();
+    for (playlist_id, job_id, added_at, auto_generated) in legacy_items {
+        let Some(content_id) = transaction
+            .query_row(
+                "SELECT id FROM content_items WHERE job_id = ?1 ORDER BY id ASC LIMIT 1",
+                params![job_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+        else {
+            continue;
+        };
+
+        let position = positions.entry(playlist_id).or_insert(0.0);
+        *position += 1000.0;
+        let added_by = if auto_generated {
+            "legacy_auto"
+        } else {
+            "user"
+        };
+        let inserted = transaction.execute(
+            "INSERT OR IGNORE INTO playlist_items_v2
+                (playlist_id, content_id, position, added_at, added_by)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![playlist_id, content_id, *position, added_at, added_by],
+        )?;
+        if inserted == 0 {
+            *position -= 1000.0;
+        }
+    }
+
+    transaction.execute("DROP TABLE playlist_items", [])?;
+    transaction.execute("ALTER TABLE playlist_items_v2 RENAME TO playlist_items", [])?;
+    Ok(())
 }
 
 fn rename_legacy_column(
@@ -353,6 +820,145 @@ fn configure_connection(connection: &Connection) -> Result<()> {
 }
 
 pub fn init_db() -> Result<Connection> {
+    match init_db_core() {
+        Ok(connection) => Ok(connection),
+        Err(initial_error) => {
+            let data_dir = data_dir_path();
+            let database_path = data_dir.join("library.db");
+
+            if !database_path.is_file() {
+                return Err(initial_error);
+            }
+
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
+            tracing::warn!(
+                "library.db failed to initialize at {}: {}. Initiating quarantine and self-healing...",
+                database_path.display(),
+                initial_error
+            );
+
+            let quarantine_path =
+                match quarantine_corrupt_database(&data_dir, &database_path, &stamp) {
+                    Ok(path) => Some(path),
+                    Err(e) => {
+                        tracing::error!("Failed to quarantine database: {e}");
+                        None
+                    }
+                };
+
+            let restored_from_backup = try_restore_newest_backup(&data_dir, &database_path);
+
+            match init_db_core() {
+                Ok(recovered_conn) => {
+                    let (summary, detail) = if restored_from_backup {
+                        (
+                            "Base de datos recuperada desde copia de seguridad previa tras detectar daño",
+                            "restored_from_backup",
+                        )
+                    } else {
+                        (
+                            "Base de datos dañada fue aislada en cuarentena y se inició una base de datos limpia",
+                            "fresh_database_after_quarantine",
+                        )
+                    };
+                    let quarantine_info = quarantine_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "quarantine_failed".to_string());
+
+                    let _ = insert_health_event(
+                        &recovered_conn,
+                        "database_quarantine_recovery",
+                        "warning",
+                        summary,
+                        Some(detail),
+                        Some(&quarantine_info),
+                    );
+                    Ok(recovered_conn)
+                }
+                Err(recovery_error) => {
+                    tracing::error!("Database recovery failed after quarantine: {recovery_error}");
+                    Err(recovery_error)
+                }
+            }
+        }
+    }
+}
+
+fn quarantine_corrupt_database(
+    data_dir: &Path,
+    database_path: &Path,
+    stamp: &str,
+) -> std::io::Result<PathBuf> {
+    let backups_dir = data_dir.join("backups");
+    fs::create_dir_all(&backups_dir)?;
+    let quarantine_path = backups_dir.join(format!("library-corrupt-{}.db", stamp));
+
+    if database_path.is_file() {
+        if let Err(rename_err) = fs::rename(database_path, &quarantine_path) {
+            tracing::warn!(
+                "Could not rename corrupt database, attempting copy: {}",
+                rename_err
+            );
+            fs::copy(database_path, &quarantine_path)?;
+            let _ = fs::remove_file(database_path);
+        }
+    }
+
+    let wal_path = data_dir.join("library.db-wal");
+    if wal_path.is_file() {
+        let wal_dest = backups_dir.join(format!("library-corrupt-{}.db-wal", stamp));
+        if let Err(_) = fs::rename(&wal_path, &wal_dest) {
+            if fs::copy(&wal_path, &wal_dest).is_ok() {
+                let _ = fs::remove_file(&wal_path);
+            }
+        }
+    }
+
+    let shm_path = data_dir.join("library.db-shm");
+    if shm_path.is_file() {
+        let _ = fs::remove_file(&shm_path);
+    }
+
+    Ok(quarantine_path)
+}
+
+fn try_restore_newest_backup(data_dir: &Path, database_path: &Path) -> bool {
+    let backups_dir = data_dir.join("backups");
+    let Ok(entries) = fs::read_dir(&backups_dir) else {
+        return false;
+    };
+
+    let mut candidates: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            name.starts_with("library-pre-v") && name.ends_with(".db")
+        })
+        .collect();
+
+    candidates.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+
+    for candidate in candidates {
+        if let Ok(conn) = Connection::open(&candidate) {
+            let integrity: rusqlite::Result<String> =
+                conn.query_row("PRAGMA integrity_check;", [], |r| r.get(0));
+            if let Ok(result) = integrity {
+                if result.eq_ignore_ascii_case("ok") {
+                    drop(conn);
+                    if let Ok(_) = fs::copy(&candidate, database_path) {
+                        tracing::info!("Restored database from healthy backup {:?}", candidate);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn init_db_core() -> Result<Connection> {
     // Keep all writable application data in one configurable location. In
     // development this resolves to the repository's data/ directory; in an
     // installed build it falls back to the user's application data folder.
@@ -439,6 +1045,21 @@ pub fn init_db() -> Result<Connection> {
             purged_reason TEXT,
             poster_path TEXT,
             FOREIGN KEY(job_id) REFERENCES jobs(id)
+        )",
+        [],
+    )?;
+
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS job_activity_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            progress INTEGER NOT NULL DEFAULT 0,
+            user_message TEXT,
+            technical_error TEXT,
+            error_code TEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
         )",
         [],
     )?;
@@ -610,21 +1231,121 @@ pub fn init_db() -> Result<Connection> {
             start_time REAL NOT NULL,
             end_time REAL NOT NULL,
             text TEXT NOT NULL,
+            words_json TEXT,
             FOREIGN KEY(job_id) REFERENCES jobs(id)
         )",
         [],
     )?;
+    ensure_column(&transaction, "transcript_segments", "words_json", "TEXT")?;
+
+    // Unified search storage. Transcript segments remain the source of truth;
+    // these tables contain only derived, replaceable search representations.
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS search_units (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            content_id INTEGER,
+            representation TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            start_time REAL,
+            end_time REAL,
+            language TEXT,
+            artifact_id INTEGER,
+            provenance_json TEXT,
+            confidence REAL,
+            source_hash TEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(job_id, representation, ordinal),
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+            FOREIGN KEY(content_id) REFERENCES content_items(id) ON DELETE SET NULL,
+            FOREIGN KEY(artifact_id) REFERENCES media_artifacts(id) ON DELETE SET NULL
+        )",
+        [],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS search_embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            search_unit_id INTEGER NOT NULL,
+            provider_id TEXT NOT NULL,
+            model_version TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            vector_blob BLOB NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(search_unit_id, provider_id, model_version),
+            FOREIGN KEY(search_unit_id) REFERENCES search_units(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS content_annotations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            content_id INTEGER,
+            annotation_type TEXT NOT NULL,
+            normalized_value TEXT NOT NULL,
+            display_value TEXT NOT NULL,
+            confidence REAL,
+            source TEXT NOT NULL,
+            evidence_unit_id INTEGER,
+            start_time REAL,
+            end_time REAL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(job_id, annotation_type, normalized_value, source),
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+            FOREIGN KEY(content_id) REFERENCES content_items(id) ON DELETE SET NULL,
+            FOREIGN KEY(evidence_unit_id) REFERENCES search_units(id) ON DELETE SET NULL
+        )",
+        [],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS search_enrichment_status (
+            job_id INTEGER NOT NULL,
+            stage TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            version TEXT,
+            error_message TEXT,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(job_id, stage),
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    // FTS5 is part of the bundled SQLite build in release/runtime builds. A
+    // graceful fallback is kept for stripped-down test environments.
+    let _ = transaction.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS search_units_fts USING fts5(
+             text,
+             representation UNINDEXED,
+             job_id UNINDEXED,
+             tokenize = 'unicode61 remove_diacritics 2'
+         )",
+        [],
+    );
 
     transaction.execute(
         "CREATE TABLE IF NOT EXISTS embedding_metadata (
             id INTEGER PRIMARY KEY CHECK(id = 1),
+            provider_id TEXT NOT NULL DEFAULT 'onnx',
             model_id TEXT NOT NULL,
+            model_version TEXT NOT NULL DEFAULT '',
             model_hash TEXT NOT NULL,
+            tokenizer_hash TEXT,
             dimensions INTEGER NOT NULL,
+            generated_at DATETIME,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         )",
         [],
     )?;
+    for (column, definition) in [
+        ("provider_id", "TEXT NOT NULL DEFAULT 'onnx'"),
+        ("model_version", "TEXT NOT NULL DEFAULT ''"),
+        ("tokenizer_hash", "TEXT"),
+        ("generated_at", "DATETIME"),
+    ] {
+        ensure_column(&transaction, "embedding_metadata", column, definition)?;
+    }
 
     transaction.execute(
         "CREATE TABLE IF NOT EXISTS playlists (
@@ -636,7 +1357,12 @@ pub fn init_db() -> Result<Connection> {
             auto_generated BOOLEAN NOT NULL DEFAULT 0,
             cover_job_id INTEGER,
             topic_keywords TEXT DEFAULT '[]',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            kind TEXT NOT NULL DEFAULT 'manual',
+            sort_mode TEXT NOT NULL DEFAULT 'manual',
+            smart_query TEXT,
+            smart_filters_json TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
         [],
     )?;
@@ -646,9 +1372,19 @@ pub fn init_db() -> Result<Connection> {
         ("auto_generated", "BOOLEAN NOT NULL DEFAULT 0"),
         ("cover_job_id", "INTEGER"),
         ("topic_keywords", "TEXT DEFAULT '[]'"),
+        ("kind", "TEXT NOT NULL DEFAULT 'manual'"),
+        ("sort_mode", "TEXT NOT NULL DEFAULT 'manual'"),
+        ("smart_query", "TEXT"),
+        ("smart_filters_json", "TEXT"),
     ] {
         ensure_column(&transaction, "playlists", column, definition)?;
     }
+    ensure_timestamp_column(
+        &transaction,
+        "playlists",
+        "updated_at",
+        "created_at, CURRENT_TIMESTAMP",
+    )?;
 
     transaction.execute(
         "CREATE TABLE IF NOT EXISTS playlist_items (
@@ -716,16 +1452,118 @@ pub fn init_db() -> Result<Connection> {
         ("active", "BOOLEAN NOT NULL DEFAULT 1"),
         ("source_type", "TEXT NOT NULL DEFAULT 'collection'"),
         ("browser", "TEXT"),
+        ("profile_url", "TEXT"),
+        ("platform", "TEXT NOT NULL DEFAULT 'tiktok'"),
+        ("username", "TEXT"),
+        ("display_name", "TEXT"),
+        ("avatar_url", "TEXT"),
+        ("status", "TEXT NOT NULL DEFAULT 'active'"),
+        ("capabilities_json", "TEXT NOT NULL DEFAULT '{}'"),
+        (
+            "watch_config_json",
+            "TEXT NOT NULL DEFAULT '{\"posts\":false,\"likes\":true,\"saved\":true,\"reposts\":false}'",
+        ),
+        ("initial_import_mode", "TEXT NOT NULL DEFAULT 'new_only'"),
+        ("history_limit", "INTEGER"),
+        ("history_from", "TEXT"),
+        (
+            "rules_json",
+            "TEXT NOT NULL DEFAULT '{\"ignoreDuplicates\":true,\"autoEnqueue\":true}'",
+        ),
         ("interval_minutes", "INTEGER NOT NULL DEFAULT 15"),
         ("last_attempt_at", "DATETIME"),
+        ("last_sync_at", "DATETIME"),
         ("last_success_at", "DATETIME"),
         ("next_sync_at", "DATETIME"),
         ("discovered_count", "INTEGER NOT NULL DEFAULT 0"),
         ("consecutive_failures", "INTEGER NOT NULL DEFAULT 0"),
         ("last_error", "TEXT"),
+        ("last_sync_summary_json", "TEXT"),
+        ("cover_url", "TEXT"),
+        ("verified", "BOOLEAN"),
+        ("following_count", "INTEGER"),
+        ("followers_count", "INTEGER"),
+        ("likes_count", "INTEGER"),
+        ("posts_count", "INTEGER"),
+        ("updated_at", "DATETIME"),
     ] {
         ensure_column(&transaction, "collection_sources", column, definition)?;
     }
+    transaction.execute(
+        "UPDATE collection_sources
+         SET profile_url = CASE
+             WHEN profile_url IS NULL OR trim(profile_url) = '' THEN
+                 CASE
+                     WHEN lower(url) LIKE '%/liked' THEN substr(url, 1, length(url) - length('/liked'))
+                     WHEN lower(url) LIKE '%/saved' THEN substr(url, 1, length(url) - length('/saved'))
+                     WHEN lower(url) LIKE '%/reposts' THEN substr(url, 1, length(url) - length('/reposts'))
+                     WHEN lower(url) LIKE '%/favorite' THEN substr(url, 1, length(url) - length('/favorite'))
+                     ELSE url
+                 END
+             ELSE profile_url
+         END,
+         platform = coalesce(nullif(platform, ''), 'tiktok'),
+         capabilities_json = coalesce(nullif(capabilities_json, ''), '{}'),
+         watch_config_json = coalesce(nullif(watch_config_json, ''), ?1),
+         initial_import_mode = coalesce(nullif(initial_import_mode, ''), 'new_only'),
+         rules_json = coalesce(nullif(rules_json, ''), ?2),
+         status = CASE
+             WHEN active = 0 THEN 'paused'
+             WHEN status IS NULL OR trim(status) = '' THEN 'active'
+             ELSE status
+         END,
+         last_sync_at = coalesce(last_sync_at, last_success_at, last_synced_at),
+         updated_at = coalesce(updated_at, last_sync_at, last_success_at, last_synced_at, created_at, CURRENT_TIMESTAMP)
+         WHERE profile_url IS NULL OR trim(profile_url) = ''
+            OR platform IS NULL OR trim(platform) = ''
+            OR capabilities_json IS NULL OR trim(capabilities_json) = ''
+            OR watch_config_json IS NULL OR trim(watch_config_json) = ''
+            OR initial_import_mode IS NULL OR trim(initial_import_mode) = ''
+            OR rules_json IS NULL OR trim(rules_json) = ''
+            OR status IS NULL OR trim(status) = ''
+            OR last_sync_at IS NULL
+            OR updated_at IS NULL",
+        rusqlite::params![DEFAULT_SOURCE_WATCH_CONFIG, DEFAULT_SOURCE_RULES],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS collection_source_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            canonical_url TEXT NOT NULL,
+            platform_video_id TEXT,
+            activity_types_json TEXT NOT NULL DEFAULT '[]',
+            state TEXT NOT NULL,
+            job_id INTEGER,
+            reason TEXT,
+            first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(source_id, canonical_url),
+            FOREIGN KEY(source_id) REFERENCES collection_sources(id) ON DELETE CASCADE,
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
+        )",
+        [],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS collection_source_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            event_type TEXT NOT NULL,
+            activity_type TEXT,
+            message TEXT NOT NULL,
+            canonical_url TEXT,
+            job_id INTEGER,
+            state TEXT,
+            found_count INTEGER NOT NULL DEFAULT 0,
+            queued_count INTEGER NOT NULL DEFAULT 0,
+            duplicate_count INTEGER NOT NULL DEFAULT 0,
+            ignored_count INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(source_id) REFERENCES collection_sources(id) ON DELETE CASCADE,
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
+        )",
+        [],
+    )?;
     transaction.execute(
         "UPDATE collection_sources
          SET source_type = CASE
@@ -749,6 +1587,87 @@ pub fn init_db() -> Result<Connection> {
         )",
         [],
     )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS profile_channels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_source_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'idle',
+            discovered_count INTEGER NOT NULL DEFAULT 0,
+            last_discovery_at DATETIME,
+            last_successful_discovery_at DATETIME,
+            cursor TEXT,
+            newest_known_content_id TEXT,
+            oldest_known_content_id TEXT,
+            error_code TEXT,
+            error_message TEXT,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(profile_source_id, kind),
+            FOREIGN KEY(profile_source_id) REFERENCES collection_sources(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS content_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL DEFAULT 'tiktok',
+            platform_content_id TEXT NOT NULL,
+            canonical_url TEXT NOT NULL,
+            author_id TEXT,
+            author_handle TEXT,
+            title TEXT,
+            published_at DATETIME,
+            discovered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            availability TEXT NOT NULL DEFAULT 'available',
+            job_id INTEGER,
+            UNIQUE(platform, platform_content_id),
+            FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE SET NULL
+        )",
+        [],
+    )?;
+    transaction.execute(
+        "CREATE TABLE IF NOT EXISTS content_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content_id INTEGER NOT NULL,
+            profile_source_id INTEGER NOT NULL,
+            channel_kind TEXT NOT NULL,
+            first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            active BOOLEAN NOT NULL DEFAULT 1,
+            provenance_json TEXT,
+            sync_run_id TEXT,
+            UNIQUE(profile_source_id, channel_kind, content_id),
+            FOREIGN KEY(content_id) REFERENCES content_items(id) ON DELETE CASCADE,
+            FOREIGN KEY(profile_source_id) REFERENCES collection_sources(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
+    // v10 makes playlist memberships point to canonical content identities.
+    // Source-channel relationships are backfilled into the same content graph;
+    // collection_source_items remains the discovery/audit ledger.
+    ensure_content_items_for_jobs(&transaction)?;
+    backfill_transcript_search_units(&transaction)?;
+    migrate_legacy_search_embeddings(&transaction)?;
+    migrate_legacy_source_items(&transaction)?;
+    migrate_playlist_memberships(&transaction)?;
+    transaction.execute(
+        "UPDATE playlists
+         SET kind = CASE
+             WHEN auto_generated = 1 THEN 'legacy_auto'
+             WHEN kind IS NULL OR trim(kind) = '' THEN 'manual'
+             ELSE kind
+         END,
+         sort_mode = CASE
+             WHEN sort_mode IS NULL OR trim(sort_mode) = '' THEN 'manual'
+             ELSE sort_mode
+         END,
+         updated_at = coalesce(updated_at, created_at, CURRENT_TIMESTAMP)",
+        [],
+    )?;
     for index in [
         "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC)",
@@ -756,14 +1675,28 @@ pub fn init_db() -> Result<Connection> {
         "CREATE INDEX IF NOT EXISTS idx_jobs_canonical_url ON jobs(canonical_url)",
         "CREATE INDEX IF NOT EXISTS idx_segments_job_id ON transcript_segments(job_id, segment_index)",
         "CREATE INDEX IF NOT EXISTS idx_embeddings_job_id ON transcript_embeddings(job_id, chunk_index)",
+        "CREATE INDEX IF NOT EXISTS idx_search_units_job ON search_units(job_id, representation, ordinal)",
+        "CREATE INDEX IF NOT EXISTS idx_search_embeddings_provider ON search_embeddings(provider_id, model_version, search_unit_id)",
+        "CREATE INDEX IF NOT EXISTS idx_annotations_job ON content_annotations(job_id, annotation_type, normalized_value)",
+        "CREATE INDEX IF NOT EXISTS idx_enrichment_status ON search_enrichment_status(stage, status, updated_at)",
         "CREATE INDEX IF NOT EXISTS idx_media_job_id ON media(job_id)",
         "CREATE INDEX IF NOT EXISTS idx_media_source_state ON media(source_state, keep_status)",
         "CREATE INDEX IF NOT EXISTS idx_media_access ON media(last_accessed_at, downloaded_at)",
         "CREATE INDEX IF NOT EXISTS idx_media_artifacts_job_id ON media_artifacts(job_id, kind)",
         "CREATE INDEX IF NOT EXISTS idx_purge_history_job_id ON purge_history(job_id, created_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_playlist_items_job_id ON playlist_items(job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_playlist_items_content_id ON playlist_items(content_id)",
         "CREATE INDEX IF NOT EXISTS idx_collection_sources_due ON collection_sources(active, next_sync_at)",
+        "CREATE INDEX IF NOT EXISTS idx_collection_sources_profile_url ON collection_sources(profile_url)",
+        "CREATE INDEX IF NOT EXISTS idx_collection_source_items_source ON collection_source_items(source_id, last_seen_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_collection_source_items_url ON collection_source_items(canonical_url)",
+        "CREATE INDEX IF NOT EXISTS idx_collection_source_activity_source ON collection_source_activity(source_id, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_health_events_created_at ON health_events(created_at DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_job_activity_job_id ON job_activity_events(job_id, id ASC)",
+        "CREATE INDEX IF NOT EXISTS idx_content_platform_id ON content_items(platform, platform_content_id)",
+        "CREATE INDEX IF NOT EXISTS idx_content_canonical_url ON content_items(canonical_url)",
+        "CREATE INDEX IF NOT EXISTS idx_content_rel_profile_channel ON content_relationships(profile_source_id, channel_kind)",
+        "CREATE INDEX IF NOT EXISTS idx_content_rel_content ON content_relationships(content_id)",
+        "CREATE INDEX IF NOT EXISTS idx_profile_channels ON profile_channels(profile_source_id, kind)",
     ] {
         transaction.execute(index, [])?;
     }
@@ -897,6 +1830,7 @@ pub fn insert_job(conn: &Connection, url: &str) -> Result<i64> {
         )
         .optional()?
     {
+        let _ = ensure_content_item_for_job(conn, existing_id, url, &canonical_url)?;
         return Ok(existing_id);
     }
 
@@ -905,7 +1839,12 @@ pub fn insert_job(conn: &Connection, url: &str) -> Result<i64> {
          VALUES (?1, ?2, 'queued', 0, 0)",
         params![url, canonical_url],
     ) {
-        Ok(_) => Ok(conn.last_insert_rowid()),
+        Ok(_) => {
+            let job_id = conn.last_insert_rowid();
+            let _ = ensure_content_item_for_job(conn, job_id, url, &canonical_url)?;
+            append_job_activity_event(conn, job_id, "queued", 0, None, None, None)?;
+            Ok(job_id)
+        }
         Err(error) => {
             // The unique partial index is the final race-safety boundary for
             // callers in different processes. If another writer won between
@@ -919,6 +1858,7 @@ pub fn insert_job(conn: &Connection, url: &str) -> Result<i64> {
                 )
                 .optional()?
             {
+                let _ = ensure_content_item_for_job(conn, existing_id, url, &canonical_url)?;
                 Ok(existing_id)
             } else {
                 Err(error)
@@ -945,13 +1885,24 @@ pub fn get_all_jobs(conn: &Connection) -> Result<Vec<JobRecord>> {
 }
 
 pub fn update_job_status(conn: &Connection, id: i64, status: &str, progress: i32) -> Result<()> {
+    let previous_status = conn
+        .query_row(
+            "SELECT status FROM jobs WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
     let rows = conn.execute(
         "UPDATE jobs SET status = ?1, progress = ?2,
             error_message = CASE WHEN ?1 IN ('error', 'error_dlq') THEN error_message ELSE NULL END
          WHERE id = ?3",
         params![status, progress, id],
     )?;
-    require_rows_changed(rows)
+    require_rows_changed(rows)?;
+    if previous_status.as_deref() != Some(status) {
+        append_job_activity_event(conn, id, status, progress, None, None, None)?;
+    }
+    Ok(())
 }
 
 pub fn update_job_retrying(conn: &Connection, id: i64, attempt: u32) -> Result<()> {
@@ -959,7 +1910,8 @@ pub fn update_job_retrying(conn: &Connection, id: i64, attempt: u32) -> Result<(
         "UPDATE jobs SET status = 'retrying', progress = 0, retry_count = ?1, error_message = NULL WHERE id = ?2",
         params![attempt, id],
     )?;
-    require_rows_changed(rows)
+    require_rows_changed(rows)?;
+    append_job_activity_event(conn, id, "retrying", 0, None, None, None)
 }
 
 pub fn reset_job_for_retry(conn: &Connection, id: i64) -> Result<()> {
@@ -967,7 +1919,8 @@ pub fn reset_job_for_retry(conn: &Connection, id: i64) -> Result<()> {
         "UPDATE jobs SET status = 'queued', progress = 0, retry_count = 0, error_message = NULL WHERE id = ?1",
         params![id],
     )?;
-    require_rows_changed(rows)
+    require_rows_changed(rows)?;
+    append_job_activity_event(conn, id, "queued", 0, None, None, None)
 }
 
 pub fn set_media_keep_status(conn: &Connection, job_id: i64, status: &str) -> Result<()> {
@@ -1103,6 +2056,979 @@ pub fn replace_transcript_embeddings(
     }
 
     transaction.commit()
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchUnitInput {
+    pub ordinal: i64,
+    pub text: String,
+    pub start_time: Option<f64>,
+    pub end_time: Option<f64>,
+    pub representation: SearchRepresentation,
+    pub language: Option<String>,
+    pub artifact_id: Option<i64>,
+    pub provenance_json: Option<String>,
+    pub confidence: Option<f32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchUnitRecord {
+    pub id: i64,
+    pub job_id: i64,
+    pub content_id: Option<i64>,
+    pub ordinal: i64,
+    pub text: String,
+    pub start_time: Option<f64>,
+    pub end_time: Option<f64>,
+    pub representation: SearchRepresentation,
+    pub confidence: Option<f32>,
+    pub match_thumbnail: Option<String>,
+    pub title: Option<String>,
+    pub author: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchUnitHit {
+    pub unit: SearchUnitRecord,
+    pub score: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct MetadataSearchHit {
+    pub job_id: i64,
+    pub content_id: Option<i64>,
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub thumbnail: Option<String>,
+    pub score: f32,
+}
+
+fn insert_search_unit_tx(
+    transaction: &Transaction<'_>,
+    job_id: i64,
+    content_id: Option<i64>,
+    representation: SearchRepresentation,
+    ordinal: i64,
+    text: &str,
+    start_time: Option<f64>,
+    end_time: Option<f64>,
+    artifact_id: Option<i64>,
+    provenance_json: Option<&str>,
+    confidence: Option<f32>,
+) -> Result<i64> {
+    let source_hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+    transaction.execute(
+        "INSERT OR IGNORE INTO search_units
+            (job_id, content_id, representation, ordinal, text, start_time, end_time,
+             language, artifact_id, provenance_json, confidence, source_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9, ?10, ?11)",
+        params![
+            job_id,
+            content_id,
+            representation.as_str(),
+            ordinal,
+            text,
+            start_time,
+            end_time,
+            artifact_id,
+            provenance_json,
+            confidence,
+            source_hash,
+        ],
+    )?;
+    let unit_id: i64 = transaction.query_row(
+        "SELECT id FROM search_units
+         WHERE job_id = ?1 AND representation = ?2 AND ordinal = ?3",
+        params![job_id, representation.as_str(), ordinal],
+        |row| row.get(0),
+    )?;
+    let _ = transaction.execute(
+        "INSERT OR IGNORE INTO search_units_fts(rowid, text, representation, job_id)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![unit_id, text, representation.as_str(), job_id],
+    );
+    Ok(unit_id)
+}
+
+fn mark_search_stage_tx(
+    transaction: &Transaction<'_>,
+    job_id: i64,
+    stage: &str,
+    status: &str,
+    version: &str,
+    error_message: Option<&str>,
+) -> Result<()> {
+    transaction.execute(
+        "INSERT INTO search_enrichment_status(job_id, stage, status, version, error_message, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+         ON CONFLICT(job_id, stage) DO UPDATE SET
+             status = excluded.status,
+             version = excluded.version,
+             error_message = excluded.error_message,
+             updated_at = CURRENT_TIMESTAMP",
+        params![job_id, stage, status, version, error_message],
+    )?;
+    Ok(())
+}
+
+/// Backfill transcript-derived units for databases created before the unified
+/// search layer. It never touches transcript_segments or media and is safe to
+/// run again after an interrupted migration.
+fn backfill_transcript_search_units(transaction: &Transaction<'_>) -> Result<()> {
+    let job_ids = {
+        let mut statement = transaction.prepare(
+            "SELECT DISTINCT ts.job_id
+             FROM transcript_segments ts
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM search_units su
+                 WHERE su.job_id = ts.job_id AND su.representation = 'transcript'
+             )
+             ORDER BY ts.job_id",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, i64>(0))?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+
+    for job_id in job_ids {
+        let segments = {
+            let mut statement = transaction.prepare(
+                "SELECT segment_index, text, start_time, end_time
+                 FROM transcript_segments
+                 WHERE job_id = ?1
+                 ORDER BY segment_index",
+            )?;
+            let rows = statement.query_map(params![job_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, f64>(2)?,
+                    row.get::<_, f64>(3)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>>>()?
+        };
+        let content_id: Option<i64> = transaction
+            .query_row(
+                "SELECT id FROM content_items WHERE job_id = ?1 ORDER BY id DESC LIMIT 1",
+                params![job_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let words = segments
+            .iter()
+            .flat_map(|(_, text, start, end)| {
+                text.split_whitespace()
+                    .map(move |word| (word.to_string(), *start, *end))
+            })
+            .collect::<Vec<_>>();
+        let max_tokens = 180usize;
+        let overlap = 27usize;
+        let step = max_tokens - overlap;
+        let mut offset = 0usize;
+        let mut ordinal = 0i64;
+        while offset < words.len() {
+            let end = (offset + max_tokens).min(words.len());
+            let slice = &words[offset..end];
+            let text = slice
+                .iter()
+                .map(|(word, _, _)| word.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let start_time = slice.first().map(|(_, start, _)| *start);
+            let end_time = slice.last().map(|(_, _, end)| *end);
+            insert_search_unit_tx(
+                transaction,
+                job_id,
+                content_id,
+                SearchRepresentation::Transcript,
+                ordinal,
+                &text,
+                start_time,
+                end_time,
+                None,
+                Some(r#"{"source":"whisper","backfill":true}"#),
+                None,
+            )?;
+            ordinal += 1;
+            if end == words.len() {
+                break;
+            }
+            offset = (offset + step).min(end);
+        }
+        insert_metadata_search_units_tx(transaction, job_id)?;
+        derive_content_annotations_tx(transaction, job_id)?;
+        mark_search_stage_tx(
+            transaction,
+            job_id,
+            "transcript",
+            "ready",
+            "search-units-v1",
+            None,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn insert_metadata_search_units_tx(transaction: &Transaction<'_>, job_id: i64) -> Result<()> {
+    let values = transaction
+        .query_row(
+            "SELECT m.title, m.author, j.url
+             FROM jobs j LEFT JOIN media m ON m.job_id = j.id
+             WHERE j.id = ?1",
+            params![job_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((title, author, url)) = values else {
+        return Ok(());
+    };
+    for (ordinal, value) in [
+        (1_000_000_i64, title),
+        (1_000_001_i64, author),
+        (1_000_002_i64, url),
+    ] {
+        let Some(value) = value.filter(|value| !value.trim().is_empty()) else {
+            continue;
+        };
+        let content_id: Option<i64> = transaction
+            .query_row(
+                "SELECT id FROM content_items WHERE job_id = ?1 ORDER BY id DESC LIMIT 1",
+                params![job_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        insert_search_unit_tx(
+            transaction,
+            job_id,
+            content_id,
+            SearchRepresentation::Metadata,
+            ordinal,
+            &value,
+            None,
+            None,
+            None,
+            Some(r#"{"source":"media"}"#),
+            None,
+        )?;
+    }
+    Ok(())
+}
+
+fn derive_content_annotations_tx(transaction: &Transaction<'_>, job_id: i64) -> Result<()> {
+    transaction.execute(
+        "DELETE FROM content_annotations
+         WHERE job_id = ?1 AND source = 'deterministic-search-v1'",
+        params![job_id],
+    )?;
+    let corpus = {
+        let mut statement = transaction.prepare(
+            "SELECT id, text FROM search_units
+             WHERE job_id = ?1
+             ORDER BY id",
+        )?;
+        let rows = statement.query_map(params![job_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+    let content_id: Option<i64> = transaction
+        .query_row(
+            "SELECT id FROM content_items WHERE job_id = ?1 ORDER BY id DESC LIMIT 1",
+            params![job_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let categories = [
+        (
+            "recipe",
+            "Recipe",
+            ["receta", "recetas", "recipe", "recipes"].as_slice(),
+        ),
+        (
+            "tutorial",
+            "Tutorial",
+            ["tutorial", "tutoriales", "how to"].as_slice(),
+        ),
+        (
+            "review",
+            "Review",
+            ["review", "reseña", "reseñas"].as_slice(),
+        ),
+        ("travel", "Travel", ["viaje", "viajes", "travel"].as_slice()),
+        (
+            "educational",
+            "Educational",
+            ["educativo", "educativa", "educational"].as_slice(),
+        ),
+    ];
+    for (normalized, display, needles) in categories {
+        let Some((evidence_unit_id, _)) = corpus.iter().find(|(_, text)| {
+            let lower = text.to_lowercase();
+            needles.iter().any(|needle| lower.contains(needle))
+        }) else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT OR IGNORE INTO content_annotations
+                (job_id, content_id, annotation_type, normalized_value, display_value,
+                 confidence, source, evidence_unit_id)
+             VALUES (?1, ?2, 'category', ?3, ?4, 0.70, 'deterministic-search-v1', ?5)",
+            params![job_id, content_id, normalized, display, evidence_unit_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// Normalize OCR emitted by the optional visual analyzer into the same
+/// replaceable search-unit layer. Keyframes remain durable artifacts and are
+/// linked by artifact_id whenever the worker supplied their path.
+pub fn index_visual_search_units(
+    conn: &mut Connection,
+    job_id: i64,
+    visual_analysis: Option<&str>,
+) -> Result<usize> {
+    let transaction = conn.transaction()?;
+    let old_ids = {
+        let mut statement = transaction
+            .prepare("SELECT id FROM search_units WHERE job_id = ?1 AND representation = 'ocr'")?;
+        let rows = statement.query_map(params![job_id], |row| row.get::<_, i64>(0))?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+    for unit_id in old_ids {
+        let _ = transaction.execute(
+            "DELETE FROM search_units_fts WHERE rowid = ?1",
+            params![unit_id],
+        );
+    }
+    transaction.execute(
+        "DELETE FROM search_units WHERE job_id = ?1 AND representation = 'ocr'",
+        params![job_id],
+    )?;
+
+    let Some(raw) = visual_analysis else {
+        mark_search_stage_tx(
+            &transaction,
+            job_id,
+            "ocr",
+            "unsupported",
+            "visual-analysis-v2",
+            None,
+        )?;
+        transaction.commit()?;
+        return Ok(0);
+    };
+    let parsed = match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(value) => value,
+        Err(error) => {
+            mark_search_stage_tx(
+                &transaction,
+                job_id,
+                "ocr",
+                "failed",
+                "visual-analysis-v2",
+                Some("visual_analysis JSON inválido"),
+            )?;
+            transaction.commit()?;
+            return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(error)));
+        }
+    };
+    let ocr_available = parsed
+        .get("ocr_available")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let content_id: Option<i64> = transaction
+        .query_row(
+            "SELECT id FROM content_items WHERE job_id = ?1 ORDER BY id DESC LIMIT 1",
+            params![job_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let mut indexed = 0usize;
+    if let Some(frames) = parsed.get("frames").and_then(serde_json::Value::as_array) {
+        for (index, frame) in frames.iter().enumerate() {
+            let Some(text) = frame
+                .get("ocr_text")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let Some(timestamp) = frame.get("timestamp").and_then(serde_json::Value::as_f64) else {
+                continue;
+            };
+            let artifact_id = frame
+                .get("artifact_path")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|path| {
+                    transaction
+                        .query_row(
+                            "SELECT id FROM media_artifacts WHERE job_id = ?1 AND path = ?2 LIMIT 1",
+                            params![job_id, path],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .ok()
+                        .flatten()
+                })
+                .or_else(|| {
+                    transaction
+                        .query_row(
+                            "SELECT id FROM media_artifacts
+                             WHERE job_id = ?1 AND kind = 'keyframe'
+                             ORDER BY ABS(COALESCE(timestamp, 0) - ?2), id
+                             LIMIT 1",
+                            params![job_id, timestamp],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .ok()
+                        .flatten()
+                });
+            let provenance = serde_json::json!({
+                "source": "visual_analyzer",
+                "timestamp": timestamp,
+                "artifact_path": frame.get("artifact_path").and_then(serde_json::Value::as_str),
+            })
+            .to_string();
+            insert_search_unit_tx(
+                &transaction,
+                job_id,
+                content_id,
+                SearchRepresentation::Ocr,
+                2_000_000 + index as i64,
+                text,
+                Some(timestamp),
+                Some(timestamp),
+                artifact_id,
+                Some(&provenance),
+                Some(0.85),
+            )?;
+            indexed += 1;
+        }
+    }
+    derive_content_annotations_tx(&transaction, job_id)?;
+    mark_search_stage_tx(
+        &transaction,
+        job_id,
+        "ocr",
+        if ocr_available {
+            "ready"
+        } else {
+            "unsupported"
+        },
+        "visual-analysis-v2",
+        None,
+    )?;
+    transaction.commit()?;
+    Ok(indexed)
+}
+
+fn migrate_legacy_search_embeddings(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute(
+        "INSERT OR IGNORE INTO search_embeddings
+            (search_unit_id, provider_id, model_version, dimensions, vector_blob)
+         SELECT su.id, 'onnx', ?1, ?2, te.embedding_vector
+         FROM transcript_embeddings te
+         JOIN search_units su
+           ON su.job_id = te.job_id
+          AND su.ordinal = te.chunk_index
+          AND su.representation = 'transcript'
+         WHERE length(te.embedding_vector) = ?3",
+        params![
+            EMBEDDING_MODEL_ID,
+            EMBEDDING_DIMS as i64,
+            EMBEDDING_BYTES as i64
+        ],
+    )?;
+    Ok(())
+}
+
+fn serialize_search_vector(vector: &[f32]) -> Result<Vec<u8>> {
+    if vector.is_empty() || vector.iter().any(|value| !value.is_finite()) {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "search vector must contain finite values".to_string(),
+        ));
+    }
+    let mut blob = Vec::with_capacity(vector.len() * std::mem::size_of::<f32>());
+    for &value in vector {
+        blob.extend_from_slice(&value.to_ne_bytes());
+    }
+    Ok(blob)
+}
+
+/// Replace the derived search units for one job atomically. The source
+/// transcript and media remain untouched, so changing an embedding provider
+/// never requires re-downloading or re-transcribing the video.
+pub fn replace_search_units_with_embeddings(
+    conn: &mut Connection,
+    job_id: i64,
+    units: &[SearchUnitInput],
+    embeddings: &[Vec<f32>],
+    provider_id: &str,
+    model_version: &str,
+) -> Result<usize> {
+    if units.len() != embeddings.len() {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "search units and embeddings must have the same length".to_string(),
+        ));
+    }
+
+    let transaction = conn.transaction()?;
+    let old_ids = {
+        let mut statement = transaction.prepare("SELECT id FROM search_units WHERE job_id = ?1")?;
+        let rows = statement.query_map(params![job_id], |row| row.get::<_, i64>(0))?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+    for unit_id in old_ids {
+        let _ = transaction.execute(
+            "DELETE FROM search_units_fts WHERE rowid = ?1",
+            params![unit_id],
+        );
+    }
+    transaction.execute(
+        "DELETE FROM search_embeddings WHERE search_unit_id IN (SELECT id FROM search_units WHERE job_id = ?1)",
+        params![job_id],
+    )?;
+    transaction.execute(
+        "DELETE FROM search_units WHERE job_id = ?1",
+        params![job_id],
+    )?;
+
+    for (input, embedding) in units.iter().zip(embeddings) {
+        let content_id: Option<i64> = transaction
+            .query_row(
+                "SELECT id FROM content_items WHERE job_id = ?1 ORDER BY id DESC LIMIT 1",
+                params![job_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let source_hash = format!("{:x}", Sha256::digest(input.text.as_bytes()));
+        transaction.execute(
+            "INSERT INTO search_units
+                (job_id, content_id, representation, ordinal, text, start_time, end_time,
+                 language, artifact_id, provenance_json, confidence, source_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                job_id,
+                content_id,
+                input.representation.as_str(),
+                input.ordinal,
+                input.text,
+                input.start_time,
+                input.end_time,
+                input.language,
+                input.artifact_id,
+                input.provenance_json,
+                input.confidence,
+                source_hash,
+            ],
+        )?;
+        let unit_id = transaction.last_insert_rowid();
+        let vector_blob = serialize_search_vector(embedding)?;
+        transaction.execute(
+            "INSERT INTO search_embeddings
+                (search_unit_id, provider_id, model_version, dimensions, vector_blob)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                unit_id,
+                provider_id,
+                model_version,
+                embedding.len() as i64,
+                vector_blob
+            ],
+        )?;
+        let _ = transaction.execute(
+            "INSERT INTO search_units_fts(rowid, text, representation, job_id)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![unit_id, input.text, input.representation.as_str(), job_id],
+        );
+    }
+
+    insert_metadata_search_units_tx(&transaction, job_id)?;
+    derive_content_annotations_tx(&transaction, job_id)?;
+    mark_search_stage_tx(
+        &transaction,
+        job_id,
+        "transcript",
+        "ready",
+        "search-units-v1",
+        None,
+    )?;
+
+    transaction.commit()?;
+    Ok(units.len())
+}
+
+fn search_unit_from_row(row: &Row<'_>) -> Result<SearchUnitRecord> {
+    let representation_value: String = row.get(7)?;
+    let representation = representation_value
+        .parse::<SearchRepresentation>()
+        .unwrap_or(SearchRepresentation::Transcript);
+    Ok(SearchUnitRecord {
+        id: row.get(0)?,
+        job_id: row.get(1)?,
+        content_id: row.get(2)?,
+        ordinal: row.get(3)?,
+        text: row.get(4)?,
+        start_time: row.get(5)?,
+        end_time: row.get(6)?,
+        representation,
+        confidence: row.get(8)?,
+        match_thumbnail: row.get(9)?,
+        title: row.get(10)?,
+        author: row.get(11)?,
+    })
+}
+
+pub fn get_search_unit(conn: &Connection, job_id: i64, ordinal: i64) -> Option<SearchUnitRecord> {
+    let mut statement = conn
+        .prepare(
+            "SELECT su.id, su.job_id, su.content_id, su.ordinal, su.text,
+                    su.start_time, su.end_time, su.representation, su.confidence,
+                    COALESCE(artifact.path, m.poster_path, m.thumbnail),
+                    m.title, m.author
+             FROM search_units su
+             LEFT JOIN media m ON m.job_id = su.job_id
+             LEFT JOIN media_artifacts artifact ON artifact.id = su.artifact_id
+             WHERE su.job_id = ?1 AND su.ordinal = ?2
+             ORDER BY su.id DESC
+             LIMIT 1",
+        )
+        .ok()?;
+    statement
+        .query_row(params![job_id, ordinal], search_unit_from_row)
+        .ok()
+}
+
+pub fn search_search_units(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    exact: bool,
+) -> Result<Vec<SearchUnitHit>> {
+    let normalized = query.trim();
+    if normalized.is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let fts_query = if exact {
+        format!("\"{}\"", normalized.replace('"', " "))
+    } else {
+        normalized
+            .split_whitespace()
+            .map(|term| format!("\"{}\"", term.replace('"', " ")))
+            .collect::<Vec<_>>()
+            .join(" AND ")
+    };
+
+    let fts_result = (|| -> Result<Vec<SearchUnitHit>> {
+        let mut statement = conn.prepare(
+            "SELECT su.id, su.job_id, su.content_id, su.ordinal, su.text,
+                    su.start_time, su.end_time, su.representation, su.confidence,
+                    COALESCE(artifact.path, m.poster_path, m.thumbnail),
+                    m.title, m.author, bm25(search_units_fts) AS rank_score
+             FROM search_units_fts
+             JOIN search_units su ON su.id = search_units_fts.rowid
+             LEFT JOIN media m ON m.job_id = su.job_id
+             LEFT JOIN media_artifacts artifact ON artifact.id = su.artifact_id
+             WHERE search_units_fts MATCH ?1
+             ORDER BY rank_score ASC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![fts_query, limit as i64], |row| {
+            let unit = search_unit_from_row(row)?;
+            let raw_score: f64 = row.get(12)?;
+            Ok(SearchUnitHit {
+                unit,
+                score: (1.0 / (1.0 + raw_score.abs())) as f32,
+            })
+        })?;
+        rows.collect()
+    })();
+    match fts_result {
+        Ok(results) if !results.is_empty() => Ok(results),
+        Ok(_) | Err(_) => {
+            let pattern = format!("%{}%", normalized.replace('%', "\\%").replace('_', "\\_"));
+            let mut statement = conn.prepare(
+                "SELECT su.id, su.job_id, su.content_id, su.ordinal, su.text,
+                        su.start_time, su.end_time, su.representation, su.confidence,
+                        COALESCE(artifact.path, m.poster_path, m.thumbnail),
+                        m.title, m.author
+                 FROM search_units su
+                 LEFT JOIN media m ON m.job_id = su.job_id
+                 LEFT JOIN media_artifacts artifact ON artifact.id = su.artifact_id
+                 WHERE su.text LIKE ?1 ESCAPE '\\'
+                 ORDER BY su.job_id ASC, su.ordinal ASC
+                 LIMIT ?2",
+            )?;
+            let rows = statement.query_map(params![pattern, limit as i64], |row| {
+                Ok(SearchUnitHit {
+                    unit: search_unit_from_row(row)?,
+                    score: 1.0,
+                })
+            })?;
+            rows.collect()
+        }
+    }
+}
+
+fn ensure_content_item_for_job(
+    conn: &Connection,
+    job_id: i64,
+    url: &str,
+    canonical_url: &str,
+) -> Result<i64> {
+    let effective_url = if canonical_url.trim().is_empty() {
+        crate::url_utils::canonicalize_tiktok_url(url)
+    } else {
+        canonical_url.to_string()
+    };
+    let effective_url = if effective_url.trim().is_empty() {
+        url.to_string()
+    } else {
+        effective_url
+    };
+    let platform = content_platform_for_url(&effective_url);
+    let platform_content_id = content_identity_for_url(&effective_url, job_id);
+    let (content_id, _) = upsert_content_item(
+        conn,
+        platform,
+        &platform_content_id,
+        &effective_url,
+        None,
+        None,
+        None,
+        None,
+        Some(job_id),
+    )?;
+    Ok(content_id)
+}
+
+pub fn search_metadata(
+    conn: &Connection,
+    query: &str,
+    filters: &ParsedFilters,
+    limit: usize,
+) -> Result<Vec<MetadataSearchHit>> {
+    let pattern = if query.trim().is_empty() {
+        "%".to_string()
+    } else {
+        format!("%{}%", query.trim().replace('%', "\\%").replace('_', "\\_"))
+    };
+    let relationship = filters.relationship.as_deref().map(|value| match value {
+        "liked" => "likes",
+        "reposted" => "reposts",
+        "saved" => "saved",
+        "posted" => "posts",
+        other => other,
+    });
+    let local = filters
+        .media_local
+        .map(|value| if value { 1_i64 } else { 0_i64 });
+    let entity = filters
+        .entities
+        .first()
+        .map(|value| value.to_ascii_lowercase());
+    let mut statement = conn.prepare(
+        "SELECT DISTINCT j.id, c.id, m.title, m.author,
+                COALESCE(m.poster_path, m.thumbnail)
+         FROM jobs j
+         LEFT JOIN media m ON m.job_id = j.id
+         LEFT JOIN content_items c ON c.job_id = j.id
+         WHERE LOWER(j.status) IN ('complete', 'completed', 'done')
+           AND (
+                 m.title LIKE :pattern ESCAPE '\\' COLLATE NOCASE OR
+                 m.author LIKE :pattern ESCAPE '\\' COLLATE NOCASE OR
+                 c.author_handle LIKE :pattern ESCAPE '\\' COLLATE NOCASE OR
+                 j.url LIKE :pattern ESCAPE '\\' COLLATE NOCASE OR
+                 EXISTS (
+                     SELECT 1 FROM content_annotations ca_query
+                     WHERE ca_query.job_id = j.id
+                       AND (ca_query.normalized_value LIKE :pattern ESCAPE '\\' COLLATE NOCASE
+                            OR ca_query.display_value LIKE :pattern ESCAPE '\\' COLLATE NOCASE)
+                 )
+           )
+           AND (:relationship IS NULL OR EXISTS (
+                SELECT 1 FROM content_relationships cr
+                WHERE cr.content_id = c.id AND cr.active = 1
+                  AND cr.channel_kind = :relationship
+           ))
+           AND (:date_from IS NULL OR COALESCE(c.published_at, m.upload_date) >= :date_from)
+           AND (:date_to IS NULL OR COALESCE(c.published_at, m.upload_date) <= :date_to)
+           AND (:profile IS NULL OR m.author LIKE '%' || :profile || '%' COLLATE NOCASE
+                OR c.author_handle LIKE '%' || :profile || '%' COLLATE NOCASE)
+           AND (:content_type IS NULL OR EXISTS (
+                SELECT 1 FROM content_annotations ca
+                WHERE ca.job_id = j.id AND ca.annotation_type = 'category'
+                  AND ca.normalized_value = :content_type
+           ))
+           AND (:entity IS NULL OR EXISTS (
+                SELECT 1 FROM content_annotations ca
+                WHERE ca.job_id = j.id AND ca.normalized_value = :entity
+           ))
+           AND (:local IS NULL OR
+                (:local = 1 AND m.video_path IS NOT NULL AND m.video_path <> '') OR
+                (:local = 0 AND (m.video_path IS NULL OR m.video_path = '')))
+         ORDER BY j.created_at DESC
+         LIMIT :limit",
+    )?;
+    let rows = statement.query_map(
+        rusqlite::named_params! {
+            ":pattern": pattern,
+            ":relationship": relationship,
+            ":date_from": filters.date_from.as_deref(),
+            ":date_to": filters.date_to.as_deref(),
+            ":profile": filters.profile.as_deref(),
+            ":content_type": filters.content_type.as_deref(),
+            ":entity": entity.as_deref(),
+            ":local": local,
+            ":limit": limit as i64,
+        },
+        |row| {
+            Ok(MetadataSearchHit {
+                job_id: row.get(0)?,
+                content_id: row.get(1)?,
+                title: row.get(2)?,
+                author: row.get(3)?,
+                thumbnail: row.get(4)?,
+                score: 0.9,
+            })
+        },
+    )?;
+    rows.collect()
+}
+
+/// Hard-filter a candidate from any retrieval channel. This keeps lexical and
+/// vector channels from reintroducing a result that violates an explicit
+/// relationship/date/category/local-media constraint.
+pub fn job_matches_filters(
+    conn: &Connection,
+    job_id: i64,
+    filters: &ParsedFilters,
+) -> Result<bool> {
+    if filters.relationship.is_none()
+        && filters.date_from.is_none()
+        && filters.date_to.is_none()
+        && filters.content_type.is_none()
+        && filters.profile.is_none()
+        && filters.entities.is_empty()
+        && filters.media_local.is_none()
+    {
+        return Ok(true);
+    }
+    let relationship = filters.relationship.as_deref().map(|value| match value {
+        "liked" => "likes",
+        "reposted" => "reposts",
+        "posted" => "posts",
+        other => other,
+    });
+    let content_pattern = filters
+        .content_type
+        .as_deref()
+        .map(|value| format!("%{}%", value.replace('%', "\\%").replace('_', "\\_")));
+    let entity_pattern = filters.entities.first().map(|value| {
+        format!(
+            "%{}%",
+            value.to_lowercase().replace('%', "\\%").replace('_', "\\_")
+        )
+    });
+    let local = filters
+        .media_local
+        .map(|value| if value { 1_i64 } else { 0_i64 });
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1
+            FROM jobs j
+            LEFT JOIN media m ON m.job_id = j.id
+            LEFT JOIN content_items c ON c.job_id = j.id
+            WHERE j.id = :job_id
+              AND (:relationship IS NULL OR EXISTS(
+                  SELECT 1 FROM content_relationships cr
+                  WHERE cr.content_id = c.id AND cr.active = 1
+                    AND cr.channel_kind = :relationship
+              ))
+              AND (:date_from IS NULL OR COALESCE(c.published_at, m.upload_date) >= :date_from)
+              AND (:date_to IS NULL OR COALESCE(c.published_at, m.upload_date) <= :date_to)
+              AND (:profile IS NULL OR m.author LIKE '%' || :profile || '%' COLLATE NOCASE
+                   OR c.author_handle LIKE '%' || :profile || '%' COLLATE NOCASE)
+              AND (:content_type IS NULL OR EXISTS(
+                  SELECT 1 FROM content_annotations ca
+                  WHERE ca.job_id = j.id
+                    AND ca.annotation_type = 'category'
+                    AND ca.normalized_value = :content_type
+              ) OR EXISTS(
+                  SELECT 1 FROM search_units su
+                  WHERE su.job_id = j.id
+                    AND lower(su.text) LIKE :content_pattern ESCAPE '\\'
+              ))
+              AND (:entity_pattern IS NULL OR EXISTS(
+                  SELECT 1 FROM content_annotations ca
+                  WHERE ca.job_id = j.id
+                    AND (lower(ca.normalized_value) LIKE :entity_pattern ESCAPE '\\'
+                         OR lower(ca.display_value) LIKE :entity_pattern ESCAPE '\\')
+              ) OR EXISTS(
+                  SELECT 1 FROM search_units su
+                  WHERE su.job_id = j.id
+                    AND lower(su.text) LIKE :entity_pattern ESCAPE '\\'
+              ))
+              AND (:local IS NULL OR
+                   (:local = 1 AND m.video_path IS NOT NULL AND m.video_path <> '') OR
+                   (:local = 0 AND (m.video_path IS NULL OR m.video_path = '')))
+        )",
+        rusqlite::named_params! {
+            ":job_id": job_id,
+            ":relationship": relationship,
+            ":date_from": filters.date_from.as_deref(),
+            ":date_to": filters.date_to.as_deref(),
+            ":profile": filters.profile.as_deref(),
+            ":content_type": filters.content_type.as_deref(),
+            ":content_pattern": content_pattern.as_deref(),
+            ":entity_pattern": entity_pattern.as_deref(),
+            ":local": local,
+        },
+        |row| row.get(0),
+    )
+}
+
+pub fn has_search_representation(
+    conn: &Connection,
+    representation: SearchRepresentation,
+) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM search_units WHERE representation = ?1 LIMIT 1
+        )",
+        params![representation.as_str()],
+        |row| row.get(0),
+    )
+}
+
+pub fn get_relationship_badges(conn: &Connection, job_id: i64) -> Result<Vec<String>> {
+    let mut statement = conn.prepare(
+        "SELECT DISTINCT cr.channel_kind
+         FROM content_relationships cr
+         JOIN content_items c ON c.id = cr.content_id
+         WHERE c.job_id = ?1 AND cr.active = 1
+         ORDER BY cr.channel_kind ASC",
+    )?;
+    let rows = statement.query_map(params![job_id], |row| row.get::<_, String>(0))?;
+    Ok(rows
+        .filter_map(|row| row.ok())
+        .map(|kind| match kind.as_str() {
+            "likes" | "liked" => "Favorito".to_string(),
+            "saved" => "Guardado".to_string(),
+            "reposts" | "reposted" => "Repost".to_string(),
+            "posts" | "posted" => "Publicado".to_string(),
+            other => other.to_string(),
+        })
+        .collect())
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -1297,15 +3223,49 @@ pub fn get_transcript_segments_with_timestamps(
     Ok(segments)
 }
 
+pub fn get_transcript_segments_with_words(
+    conn: &Connection,
+    job_id: i64,
+) -> Result<Vec<(i64, String, f64, f64, Option<String>)>> {
+    let mut stmt = conn.prepare(
+        "SELECT segment_index, text, start_time, end_time, words_json FROM transcript_segments WHERE job_id = ?1 ORDER BY segment_index ASC"
+    )?;
+    let rows = stmt.query_map(params![job_id], |row| {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+        ))
+    })?;
+    rows.collect::<Result<Vec<_>>>()
+}
+
+pub fn update_transcript_words(
+    conn: &Connection,
+    job_id: i64,
+    entries: &[(i64, String)],
+) -> Result<()> {
+    for (segment_index, words_json) in entries {
+        conn.execute(
+            "UPDATE transcript_segments SET words_json = ?1 WHERE job_id = ?2 AND segment_index = ?3",
+            params![words_json, job_id, segment_index],
+        )?;
+    }
+    Ok(())
+}
+
 // ========================================================================
 // PLAYLIST OPERATIONS
 // ========================================================================
 
 pub fn get_all_playlists(conn: &Connection) -> Result<Vec<PlaylistRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT p.id, p.name, p.description, p.cover_job_id, p.auto_generated, 
-                p.topic_keywords, p.color, p.created_at,
-                COUNT(pi.job_id) as item_count
+        "SELECT p.id, p.name, p.description, p.cover_job_id, p.auto_generated,
+                p.topic_keywords, p.color, p.created_at, p.kind, p.sort_mode,
+                p.smart_query, p.smart_filters_json,
+                COUNT(pi.content_id) as item_count
          FROM playlists p
          LEFT JOIN playlist_items pi ON p.id = pi.playlist_id
          GROUP BY p.id
@@ -1321,7 +3281,11 @@ pub fn get_all_playlists(conn: &Connection) -> Result<Vec<PlaylistRecord>> {
             topic_keywords: row.get(5)?,
             color: row.get(6)?,
             created_at: row.get(7)?,
-            item_count: row.get(8)?,
+            kind: row.get(8)?,
+            sort_mode: row.get(9)?,
+            smart_query: row.get(10)?,
+            smart_filters_json: row.get(11)?,
+            item_count: row.get(12)?,
         })
     })?;
     let playlists = rows.collect::<Result<Vec<_>>>()?;
@@ -1335,25 +3299,108 @@ pub fn create_playlist(
     color: &str,
     auto_generated: bool,
 ) -> Result<i64> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 200 {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "playlist name must contain between 1 and 200 characters".to_string(),
+        ));
+    }
     conn.execute(
-        "INSERT INTO playlists (name, description, color, auto_generated) VALUES (?1, ?2, ?3, ?4)",
-        params![name, description, color, auto_generated],
+        "INSERT INTO playlists
+            (name, description, color, auto_generated, kind, sort_mode, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'manual', CURRENT_TIMESTAMP)",
+        params![
+            name,
+            description,
+            color,
+            auto_generated,
+            if auto_generated {
+                "legacy_auto"
+            } else {
+                "manual"
+            }
+        ],
     )?;
     Ok(conn.last_insert_rowid())
 }
 
 pub fn add_job_to_playlist(conn: &Connection, playlist_id: i64, job_id: i64) -> Result<()> {
+    let content_id: i64 = conn
+        .query_row(
+            "SELECT id FROM content_items WHERE job_id = ?1 ORDER BY id ASC LIMIT 1",
+            params![job_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+    add_content_to_playlist(conn, playlist_id, content_id, "user")
+}
+
+pub fn add_content_to_playlist(
+    conn: &Connection,
+    playlist_id: i64,
+    content_id: i64,
+    added_by: &str,
+) -> Result<()> {
+    let playlist_exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM playlists WHERE id = ?1)",
+        params![playlist_id],
+        |row| row.get(0),
+    )?;
+    let content_exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM content_items WHERE id = ?1)",
+        params![content_id],
+        |row| row.get(0),
+    )?;
+    if !playlist_exists || !content_exists {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    let next_position: f64 = conn.query_row(
+        "SELECT coalesce(max(position), 0) + 1000
+         FROM playlist_items WHERE playlist_id = ?1",
+        params![playlist_id],
+        |row| row.get(0),
+    )?;
     conn.execute(
-        "INSERT OR IGNORE INTO playlist_items (playlist_id, job_id) VALUES (?1, ?2)",
-        params![playlist_id, job_id],
+        "INSERT OR IGNORE INTO playlist_items
+            (playlist_id, content_id, position, added_at, added_by)
+         VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP, ?4)",
+        params![
+            playlist_id,
+            content_id,
+            next_position,
+            if added_by.trim().is_empty() {
+                "user"
+            } else {
+                added_by
+            }
+        ],
     )?;
     Ok(())
 }
 
 pub fn remove_job_from_playlist(conn: &Connection, playlist_id: i64, job_id: i64) -> Result<()> {
+    let content_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM content_items WHERE job_id = ?1 ORDER BY id ASC LIMIT 1",
+            params![job_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(content_id) = content_id {
+        remove_content_from_playlist(conn, playlist_id, content_id)?;
+    }
+    Ok(())
+}
+
+pub fn remove_content_from_playlist(
+    conn: &Connection,
+    playlist_id: i64,
+    content_id: i64,
+) -> Result<()> {
     conn.execute(
-        "DELETE FROM playlist_items WHERE playlist_id = ?1 AND job_id = ?2",
-        params![playlist_id, job_id],
+        "DELETE FROM playlist_items WHERE playlist_id = ?1 AND content_id = ?2",
+        params![playlist_id, content_id],
     )?;
     Ok(())
 }
@@ -1362,10 +3409,11 @@ pub fn get_playlist_jobs(conn: &Connection, playlist_id: i64) -> Result<Vec<JobR
     let mut stmt = conn.prepare(&format!(
         "SELECT {}
          FROM playlist_items pi
-         JOIN jobs j ON pi.job_id = j.id
+         JOIN content_items c ON pi.content_id = c.id
+         JOIN jobs j ON c.job_id = j.id
          LEFT JOIN media m ON j.id = m.job_id
          WHERE pi.playlist_id = ?1
-         ORDER BY pi.added_at DESC",
+         ORDER BY pi.position ASC, pi.added_at ASC",
         JOB_SELECT_COLUMNS
     ))?;
 
@@ -1376,6 +3424,201 @@ pub fn get_playlist_jobs(conn: &Connection, playlist_id: i64) -> Result<Vec<JobR
         jobs.push(job?);
     }
     Ok(jobs)
+}
+
+pub fn get_playlist_content_views(
+    conn: &Connection,
+    playlist_id: i64,
+) -> Result<Vec<ContentViewRecord>> {
+    let mut statement = conn.prepare(
+        "SELECT c.id, c.platform, c.platform_content_id, c.canonical_url,
+                c.author_id, c.author_handle, c.title, c.published_at,
+                c.discovered_at, c.updated_at, c.availability, c.job_id
+         FROM playlist_items pi
+         JOIN content_items c ON c.id = pi.content_id
+         WHERE pi.playlist_id = ?1
+         ORDER BY pi.position ASC, pi.added_at ASC",
+    )?;
+    let rows = statement.query_map(params![playlist_id], |row| {
+        Ok(ContentItemRecord {
+            id: row.get(0)?,
+            platform: row.get(1)?,
+            platform_content_id: row.get(2)?,
+            canonical_url: row.get(3)?,
+            author_id: row.get(4)?,
+            author_handle: row.get(5)?,
+            title: row.get(6)?,
+            published_at: row.get(7)?,
+            discovered_at: row.get(8)?,
+            updated_at: row.get(9)?,
+            availability: row.get(10)?,
+            job_id: row.get(11)?,
+        })
+    })?;
+
+    let mut views = Vec::new();
+    for item in rows {
+        views.push(content_view_for_item(conn, item?)?);
+    }
+    Ok(views)
+}
+
+/// Return the same content projection for a confirmed profile/channel that a
+/// manual playlist uses. The job is optional: remote content remains visible
+/// before QueueService creates a processing projection.
+pub fn get_channel_content_views(
+    conn: &Connection,
+    profile_source_id: i64,
+    channel_kind: &str,
+    limit: i64,
+) -> Result<Vec<ContentViewRecord>> {
+    let mut statement = conn.prepare(
+        "SELECT c.id, c.platform, c.platform_content_id, c.canonical_url,
+                c.author_id, c.author_handle, c.title, c.published_at,
+                c.discovered_at, c.updated_at, c.availability, c.job_id
+         FROM content_items c
+         INNER JOIN content_relationships r ON c.id = r.content_id
+         WHERE r.profile_source_id = ?1 AND r.channel_kind = ?2 AND r.active = 1
+         ORDER BY c.published_at DESC, c.discovered_at DESC
+         LIMIT ?3",
+    )?;
+    let rows = statement.query_map(params![profile_source_id, channel_kind, limit], |row| {
+        Ok(ContentItemRecord {
+            id: row.get(0)?,
+            platform: row.get(1)?,
+            platform_content_id: row.get(2)?,
+            canonical_url: row.get(3)?,
+            author_id: row.get(4)?,
+            author_handle: row.get(5)?,
+            title: row.get(6)?,
+            published_at: row.get(7)?,
+            discovered_at: row.get(8)?,
+            updated_at: row.get(9)?,
+            availability: row.get(10)?,
+            job_id: row.get(11)?,
+        })
+    })?;
+
+    rows.map(|row| content_view_for_item(conn, row?)).collect()
+}
+
+fn content_view_for_item(conn: &Connection, item: ContentItemRecord) -> Result<ContentViewRecord> {
+    let (mut job, resolved_job_id) = if let Some(job_id) = item.job_id {
+        if let Some(job) = get_job_by_id(conn, job_id)? {
+            (job, Some(job_id))
+        } else {
+            (content_only_job(&item), None)
+        }
+    } else {
+        (content_only_job(&item), None)
+    };
+
+    // Content metadata is the canonical fallback when a media row has not
+    // been created yet or its metadata is incomplete.
+    job.url = item.canonical_url.clone();
+    job.title = job.title.or_else(|| item.title.clone());
+    job.author = job.author.or_else(|| item.author_handle.clone());
+    job.platform = job.platform.or_else(|| Some(item.platform.clone()));
+    let availability = item.availability.trim().to_ascii_lowercase();
+    let source_state = if job.video_path.is_some() {
+        "local"
+    } else if matches!(
+        availability.as_str(),
+        "unavailable" | "private" | "deleted" | "blocked" | "removed"
+    ) {
+        "unavailable"
+    } else {
+        "online"
+    };
+    job.source_state = source_state.to_string();
+
+    Ok(ContentViewRecord {
+        content_id: item.id,
+        job_id: resolved_job_id,
+        availability: if availability.is_empty() {
+            "available".to_string()
+        } else {
+            availability
+        },
+        job,
+    })
+}
+
+fn content_only_job(item: &ContentItemRecord) -> JobRecord {
+    JobRecord {
+        id: -item.id.abs().max(1),
+        url: item.canonical_url.clone(),
+        status: "complete".to_string(),
+        progress: 100,
+        retry_count: 0,
+        created_at: item
+            .published_at
+            .clone()
+            .unwrap_or_else(|| item.discovered_at.clone()),
+        title: item.title.clone(),
+        author: item.author_handle.clone(),
+        thumbnail: None,
+        duration: None,
+        video_path: None,
+        audio_path: None,
+        transcript_path: None,
+        keep_status: None,
+        platform: Some(item.platform.clone()),
+        error_message: None,
+        visual_analysis: None,
+        instructional_guide: None,
+        video_bytes: None,
+        audio_bytes: None,
+        downloaded_at: None,
+        last_accessed_at: None,
+        play_count: 0,
+        open_count: 0,
+        search_hit_count: 0,
+        favorite: false,
+        pinned: false,
+        source_state: "online".to_string(),
+        purged_at: None,
+        purged_reason: None,
+        poster_path: None,
+    }
+}
+
+pub fn get_source_collections(conn: &Connection) -> Result<Vec<SourceCollectionRecord>> {
+    let mut statement = conn.prepare(
+        "SELECT pc.id, pc.profile_source_id, pc.kind,
+                coalesce(nullif(s.display_name, ''), nullif(s.username, ''), s.profile_url),
+                s.username, s.display_name, pc.enabled, pc.status,
+                CASE
+                    WHEN pc.last_successful_discovery_at IS NULL THEN NULL
+                    ELSE (
+                        SELECT count(*)
+                        FROM content_relationships r
+                        WHERE r.profile_source_id = pc.profile_source_id
+                          AND r.channel_kind = pc.kind
+                          AND r.active = 1
+                    )
+                END AS item_count,
+                coalesce(pc.last_successful_discovery_at, s.last_sync_at)
+         FROM profile_channels pc
+         JOIN collection_sources s ON s.id = pc.profile_source_id
+         WHERE s.active = 1 AND pc.enabled = 1
+         ORDER BY s.id ASC, pc.id ASC",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(SourceCollectionRecord {
+            id: row.get(0)?,
+            profile_source_id: row.get(1)?,
+            channel_kind: row.get(2)?,
+            name: row.get(3)?,
+            username: row.get(4)?,
+            display_name: row.get(5)?,
+            enabled: row.get(6)?,
+            status: row.get(7)?,
+            item_count: row.get(8)?,
+            last_sync_at: row.get(9)?,
+        })
+    })?;
+    rows.collect()
 }
 
 pub fn delete_playlist(conn: &Connection, playlist_id: i64) -> Result<()> {
@@ -1423,8 +3666,25 @@ pub fn data_dir_path() -> std::path::PathBuf {
         return std::path::PathBuf::from(configured);
     }
 
-    // Keep the repository layout convenient during development without
-    // writing beside an installed executable in a protected directory.
+    // Tauri can launch the Rust process with `src-tauri` (or another build
+    // directory) as its current directory. Use the compile-time workspace
+    // root in debug builds so a development instance never races the
+    // installed release instance over the same AppData SQLite database.
+    #[cfg(debug_assertions)]
+    {
+        let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(std::path::Path::to_path_buf);
+        if let Some(workspace_root) = workspace_root {
+            if workspace_root.join("package.json").exists() {
+                return workspace_root.join("data");
+            }
+        }
+    }
+
+    // Keep the repository layout convenient during development when the
+    // compile-time root is unavailable, without writing beside an installed
+    // executable in a protected directory.
     if let Ok(current_dir) = std::env::current_dir() {
         if current_dir.join("package.json").exists() && current_dir.join("src-tauri").is_dir() {
             return current_dir.join("data");
@@ -1541,7 +3801,77 @@ pub fn update_job_error(conn: &Connection, id: i64, status: &str, message: &str)
         "UPDATE jobs SET status = ?1, error_message = ?2 WHERE id = ?3",
         params![status, message, id],
     )?;
-    require_rows_changed(rows)
+    require_rows_changed(rows)?;
+    append_job_activity_event(
+        conn,
+        id,
+        status,
+        0,
+        Some("No pudimos completar este trabajo."),
+        Some(message),
+        Some(activity_error_code(message)),
+    )
+}
+
+fn activity_error_code(message: &str) -> String {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("spawn") || normalized.contains("python worker") {
+        "LOCAL_WORKER_START_FAILED".to_string()
+    } else if normalized.contains("timed out") || normalized.contains("timeout") {
+        "PIPELINE_TIMEOUT".to_string()
+    } else if normalized.contains("network") || normalized.contains("http") {
+        "SOURCE_UNAVAILABLE".to_string()
+    } else {
+        "PIPELINE_FAILED".to_string()
+    }
+}
+
+fn append_job_activity_event(
+    conn: &Connection,
+    job_id: i64,
+    status: &str,
+    progress: i32,
+    user_message: Option<&str>,
+    technical_error: Option<&str>,
+    error_code: Option<String>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO job_activity_events
+            (job_id, status, progress, user_message, technical_error, error_code)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            job_id,
+            status,
+            progress.clamp(0, 100),
+            user_message,
+            technical_error,
+            error_code
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_job_activity(conn: &Connection, job_id: i64) -> Result<Vec<JobActivityEvent>> {
+    let mut statement = conn.prepare(
+        "SELECT id, job_id, status, progress, user_message, technical_error,
+                error_code, created_at
+         FROM job_activity_events
+         WHERE job_id = ?1
+         ORDER BY id ASC",
+    )?;
+    let rows = statement.query_map(params![job_id], |row| {
+        Ok(JobActivityEvent {
+            id: row.get(0)?,
+            job_id: row.get(1)?,
+            status: row.get(2)?,
+            progress: row.get(3)?,
+            user_message: row.get(4)?,
+            technical_error: row.get(5)?,
+            error_code: row.get(6)?,
+            created_at: row.get(7)?,
+        })
+    })?;
+    rows.collect()
 }
 
 /// Marks jobs that have exceeded the stale threshold, excluding jobs that
@@ -1560,14 +3890,37 @@ pub fn mark_stale_jobs(conn: &Connection, active_job_ids: &[i64]) -> Result<usiz
           AND datetime(created_at) < datetime('now', '-2 hours')";
 
     if active_job_ids.is_empty() {
-        return conn.execute(base_query, []);
+        let updated = conn.execute(base_query, [])?;
+        append_stale_activity_events(conn)?;
+        return Ok(updated);
     }
 
     let placeholders = std::iter::repeat_n("?", active_job_ids.len())
         .collect::<Vec<_>>()
         .join(", ");
     let query = format!("{base_query} AND id NOT IN ({placeholders})");
-    conn.execute(&query, rusqlite::params_from_iter(active_job_ids.iter()))
+    let updated = conn.execute(&query, rusqlite::params_from_iter(active_job_ids.iter()))?;
+    append_stale_activity_events(conn)?;
+    Ok(updated)
+}
+
+fn append_stale_activity_events(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "INSERT INTO job_activity_events
+            (job_id, status, progress, user_message, technical_error, error_code)
+         SELECT j.id, 'error', 0, 'No pudimos completar este trabajo.',
+                j.error_message, 'PIPELINE_STALE'
+         FROM jobs j
+         WHERE j.status = 'error'
+           AND j.error_message = 'Job abandoned after exceeding the processing timeout'
+           AND NOT EXISTS (
+               SELECT 1 FROM job_activity_events e
+               WHERE e.job_id = j.id AND e.status = 'error'
+                 AND e.error_code = 'PIPELINE_STALE'
+           )",
+        [],
+    )?;
+    Ok(())
 }
 
 pub fn clear_transcript_data(conn: &Connection, job_id: i64) -> Result<()> {
@@ -1751,16 +4104,21 @@ pub fn replace_auto_playlists(
     let mut ids = Vec::with_capacity(groups.len());
     for group in groups {
         conn.execute(
-            "INSERT INTO playlists (name, description, color, auto_generated, cover_job_id, topic_keywords)
-             VALUES (?1, ?2, ?3, 1, ?4, ?5)",
-            params![group.name, group.description, group.color, group.cover_job_id, group.topic_keywords],
+            "INSERT INTO playlists
+                (name, description, color, auto_generated, cover_job_id, topic_keywords,
+                 kind, sort_mode, updated_at)
+             VALUES (?1, ?2, ?3, 1, ?4, ?5, 'legacy_auto', 'manual', CURRENT_TIMESTAMP)",
+            params![
+                group.name,
+                group.description,
+                group.color,
+                group.cover_job_id,
+                group.topic_keywords
+            ],
         )?;
         let playlist_id = conn.last_insert_rowid();
         for job_id in group.job_ids {
-            conn.execute(
-                "INSERT OR IGNORE INTO playlist_items (playlist_id, job_id) VALUES (?1, ?2)",
-                params![playlist_id, job_id],
-            )?;
+            add_job_to_playlist(conn, playlist_id, *job_id)?;
         }
         ids.push(playlist_id);
     }
@@ -1954,15 +4312,172 @@ pub fn register_collection_source_with_browser(
     } else {
         "profile"
     };
+    let canonical_url = crate::url_utils::canonicalize_tiktok_url(url);
+    let profile_url = crate::url_utils::tiktok_profile_url(&canonical_url)
+        .unwrap_or_else(|| canonical_url.clone());
+    let username = crate::url_utils::tiktok_username(&profile_url);
     conn.execute(
-        "INSERT INTO collection_sources (url, source_type, browser, active, last_synced_at)
-         VALUES (?1, ?2, ?3, 1, CURRENT_TIMESTAMP)
+        "INSERT INTO collection_sources
+            (url, profile_url, source_type, platform, username, browser, active, status,
+             last_synced_at, last_sync_at, capabilities_json, watch_config_json, rules_json)
+         VALUES (?1, ?2, ?3, 'tiktok', ?4, ?5, 1, 'active', CURRENT_TIMESTAMP,
+                 CURRENT_TIMESTAMP, ?6, ?7, ?8)
          ON CONFLICT(url) DO UPDATE SET
-            browser = coalesce(?3, collection_sources.browser),
-            active = 1",
-        params![url, source_type, browser],
+            profile_url = coalesce(collection_sources.profile_url, excluded.profile_url),
+            platform = 'tiktok',
+            username = coalesce(collection_sources.username, excluded.username),
+            browser = coalesce(?5, collection_sources.browser),
+            active = 1,
+            status = 'active'",
+        params![
+            canonical_url,
+            profile_url,
+            source_type,
+            username,
+            browser,
+            DEFAULT_SOURCE_CAPABILITIES,
+            DEFAULT_SOURCE_WATCH_CONFIG,
+            DEFAULT_SOURCE_RULES,
+        ],
     )?;
     Ok(())
+}
+
+pub fn upsert_tiktok_source(
+    conn: &Connection,
+    profile_url: &str,
+    browser: Option<&str>,
+    initial_import_mode: &str,
+    history_limit: Option<i64>,
+    history_from: Option<&str>,
+) -> Result<i64> {
+    let canonical_url = crate::url_utils::tiktok_profile_url(profile_url).ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("invalid TikTok profile URL".into())
+    })?;
+    let username = crate::url_utils::tiktok_username(&canonical_url);
+    let existing_id = conn
+        .query_row(
+            "SELECT id FROM collection_sources WHERE profile_url = ?1 OR url = ?1 ORDER BY id ASC LIMIT 1",
+            params![canonical_url],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(source_id) = existing_id {
+        conn.execute(
+            "UPDATE collection_sources SET
+                profile_url = ?1,
+                source_type = 'profile',
+                platform = 'tiktok',
+                username = coalesce(?2, username),
+                browser = coalesce(?3, browser),
+                active = 1,
+                status = 'checking',
+                initial_import_mode = ?4,
+                history_limit = ?5,
+                history_from = ?6,
+                last_error = NULL
+             WHERE id = ?7",
+            params![
+                canonical_url,
+                username,
+                browser,
+                initial_import_mode,
+                history_limit,
+                history_from,
+                source_id,
+            ],
+        )?;
+        return Ok(source_id);
+    }
+
+    conn.execute(
+        "INSERT INTO collection_sources
+            (url, profile_url, source_type, platform, username, browser, active, status,
+             capabilities_json, watch_config_json, initial_import_mode, history_limit,
+             history_from, rules_json)
+         VALUES (?1, ?1, 'profile', 'tiktok', ?2, ?3, 1, 'checking', ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            canonical_url,
+            username,
+            browser,
+            DEFAULT_SOURCE_CAPABILITIES,
+            DEFAULT_SOURCE_WATCH_CONFIG,
+            initial_import_mode,
+            history_limit,
+            history_from,
+            DEFAULT_SOURCE_RULES,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Registers a profile identity without scanning it or enqueueing content.
+/// The collection_sources table remains the single persistence authority used
+/// by the later scanner, so this path only establishes the durable profile
+/// contract.
+pub fn register_profile_source(
+    conn: &Connection,
+    profile_url: &str,
+    username: &str,
+    watch_config_json: &str,
+    active: bool,
+) -> Result<(i64, bool)> {
+    let existing_id = conn
+        .query_row(
+            "SELECT id
+             FROM collection_sources
+             WHERE profile_url = ?1
+                OR url = ?1
+                OR (platform = 'tiktok' AND lower(username) = lower(?2))
+             ORDER BY id ASC
+             LIMIT 1",
+            params![profile_url, username],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(source_id) = existing_id {
+        return Ok((source_id, true));
+    }
+
+    conn.execute(
+        "INSERT INTO collection_sources
+            (url, profile_url, source_type, platform, username, active, status,
+             capabilities_json, watch_config_json, initial_import_mode, rules_json,
+             updated_at)
+         VALUES (?1, ?1, 'profile', 'tiktok', ?2, ?3, ?4, '{}', ?5, 'new_only', ?6,
+                 CURRENT_TIMESTAMP)",
+        params![
+            profile_url,
+            username,
+            active,
+            if active { "ready" } else { "paused" },
+            watch_config_json,
+            DEFAULT_SOURCE_RULES,
+        ],
+    )?;
+    Ok((conn.last_insert_rowid(), false))
+}
+
+pub fn update_profile_source_settings(
+    conn: &Connection,
+    source_id: i64,
+    watch_config_json: &str,
+    active: bool,
+) -> Result<CollectionSourceRecord> {
+    let rows = conn.execute(
+        "UPDATE collection_sources SET
+            watch_config_json = ?1,
+            active = ?2,
+            status = CASE WHEN ?2 = 1 THEN 'ready' ELSE 'paused' END,
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?3 AND platform = 'tiktok' AND source_type = 'profile'",
+        params![watch_config_json, active, source_id],
+    )?;
+    require_rows_changed(rows)?;
+    get_collection_source(conn, source_id)
 }
 
 pub fn register_collection_source(conn: &Connection, url: &str) -> Result<()> {
@@ -1978,32 +4493,75 @@ pub fn find_collection_source_id_by_url(conn: &Connection, url: &str) -> Result<
     .optional()
 }
 
+const COLLECTION_SOURCE_COLUMNS: &str = "id, url, coalesce(profile_url, url),
+    coalesce(source_type, 'collection'), coalesce(platform, 'tiktok'), username,
+    display_name, avatar_url, browser, active, coalesce(status, 'active'),
+    coalesce(capabilities_json, '{}'),
+    coalesce(watch_config_json, '{\"posts\":false,\"likes\":true,\"saved\":true,\"reposts\":false}'),
+    coalesce(initial_import_mode, 'new_only'), history_limit, history_from,
+    coalesce(rules_json, '{\"ignoreDuplicates\":true,\"autoEnqueue\":true}'),
+    coalesce(interval_minutes, 15), last_attempt_at,
+    coalesce(last_sync_at, last_success_at, last_synced_at), last_success_at,
+    next_sync_at, coalesce(discovered_count, 0), coalesce(consecutive_failures, 0),
+    last_error, last_sync_summary_json, created_at, cover_url, verified,
+    following_count, followers_count, likes_count, posts_count, updated_at";
+
+fn collection_source_from_row(row: &Row<'_>) -> rusqlite::Result<CollectionSourceRecord> {
+    Ok(CollectionSourceRecord {
+        id: row.get(0)?,
+        url: row.get(1)?,
+        profile_url: row.get(2)?,
+        source_type: row.get(3)?,
+        platform: row.get(4)?,
+        username: row.get(5)?,
+        display_name: row.get(6)?,
+        avatar_url: row.get(7)?,
+        browser: row.get(8)?,
+        active: row.get(9)?,
+        status: row.get(10)?,
+        capabilities_json: row.get(11)?,
+        watch_config_json: row.get(12)?,
+        initial_import_mode: row.get(13)?,
+        history_limit: row.get(14)?,
+        history_from: row.get(15)?,
+        rules_json: row.get(16)?,
+        interval_minutes: row.get(17)?,
+        last_attempt_at: row.get(18)?,
+        last_sync_at: row.get(19)?,
+        last_success_at: row.get(20)?,
+        next_sync_at: row.get(21)?,
+        discovered_count: row.get(22)?,
+        consecutive_failures: row.get(23)?,
+        last_error: row.get(24)?,
+        last_sync_summary_json: row.get(25)?,
+        created_at: row.get(26)?,
+        cover_url: row.get(27)?,
+        verified: row.get(28)?,
+        following_count: row.get(29)?,
+        followers_count: row.get(30)?,
+        likes_count: row.get(31)?,
+        posts_count: row.get(32)?,
+        updated_at: row.get(33)?,
+    })
+}
+
+pub fn get_collection_source(conn: &Connection, source_id: i64) -> Result<CollectionSourceRecord> {
+    conn.query_row(
+        &format!(
+            "SELECT {} FROM collection_sources WHERE id = ?1",
+            COLLECTION_SOURCE_COLUMNS
+        ),
+        params![source_id],
+        collection_source_from_row,
+    )
+}
+
 pub fn get_collection_sources(conn: &Connection) -> Result<Vec<CollectionSourceRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, url, coalesce(source_type, 'collection'), browser, active,
-                coalesce(interval_minutes, 15), last_attempt_at, last_success_at,
-                next_sync_at, coalesce(discovered_count, 0), coalesce(consecutive_failures, 0),
-                last_error, created_at
-         FROM collection_sources
-         ORDER BY id ASC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(CollectionSourceRecord {
-            id: row.get(0)?,
-            url: row.get(1)?,
-            source_type: row.get(2)?,
-            browser: row.get(3)?,
-            active: row.get(4)?,
-            interval_minutes: row.get(5)?,
-            last_attempt_at: row.get(6)?,
-            last_success_at: row.get(7)?,
-            next_sync_at: row.get(8)?,
-            discovered_count: row.get(9)?,
-            consecutive_failures: row.get(10)?,
-            last_error: row.get(11)?,
-            created_at: row.get(12)?,
-        })
-    })?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM collection_sources ORDER BY id ASC",
+        COLLECTION_SOURCE_COLUMNS
+    ))?;
+    let rows = stmt.query_map([], collection_source_from_row)?;
     let mut sources = Vec::new();
     for row in rows {
         sources.push(row?);
@@ -2012,33 +4570,14 @@ pub fn get_collection_sources(conn: &Connection) -> Result<Vec<CollectionSourceR
 }
 
 pub fn get_collection_sources_to_sync(conn: &Connection) -> Result<Vec<CollectionSourceRecord>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, url, coalesce(source_type, 'collection'), browser, active,
-                coalesce(interval_minutes, 15), last_attempt_at, last_success_at,
-                next_sync_at, coalesce(discovered_count, 0), coalesce(consecutive_failures, 0),
-                last_error, created_at
-         FROM collection_sources
-         WHERE active = 1
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM collection_sources
+         WHERE active = 1 AND coalesce(status, 'active') IN ('active', 'checking')
            AND (next_sync_at IS NULL OR next_sync_at <= datetime('now'))
          ORDER BY id ASC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(CollectionSourceRecord {
-            id: row.get(0)?,
-            url: row.get(1)?,
-            source_type: row.get(2)?,
-            browser: row.get(3)?,
-            active: row.get(4)?,
-            interval_minutes: row.get(5)?,
-            last_attempt_at: row.get(6)?,
-            last_success_at: row.get(7)?,
-            next_sync_at: row.get(8)?,
-            discovered_count: row.get(9)?,
-            consecutive_failures: row.get(10)?,
-            last_error: row.get(11)?,
-            created_at: row.get(12)?,
-        })
-    })?;
+        COLLECTION_SOURCE_COLUMNS
+    ))?;
+    let rows = stmt.query_map([], collection_source_from_row)?;
     let mut sources = Vec::new();
     for row in rows {
         sources.push(row?);
@@ -2048,8 +4587,77 @@ pub fn get_collection_sources_to_sync(conn: &Connection) -> Result<Vec<Collectio
 
 pub fn set_collection_source_active(conn: &Connection, source_id: i64, active: bool) -> Result<()> {
     let rows = conn.execute(
-        "UPDATE collection_sources SET active = ?1 WHERE id = ?2",
+        "UPDATE collection_sources SET
+            active = ?1,
+            status = CASE
+                WHEN ?1 = 0 THEN 'paused'
+                WHEN status IN ('needs_auth', 'error') THEN 'checking'
+                ELSE 'active'
+            END,
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?2",
         params![active, source_id],
+    )?;
+    require_rows_changed(rows)
+}
+
+pub fn update_collection_source_config(
+    conn: &Connection,
+    source_id: i64,
+    watch_config_json: &str,
+    initial_import_mode: &str,
+    history_limit: Option<i64>,
+    history_from: Option<&str>,
+    rules_json: &str,
+) -> Result<()> {
+    let rows = conn.execute(
+        "UPDATE collection_sources SET
+            watch_config_json = ?1,
+            initial_import_mode = ?2,
+            history_limit = ?3,
+            history_from = ?4,
+            rules_json = ?5,
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?6",
+        params![
+            watch_config_json,
+            initial_import_mode,
+            history_limit,
+            history_from,
+            rules_json,
+            source_id,
+        ],
+    )?;
+    require_rows_changed(rows)
+}
+
+pub fn update_collection_source_scan(
+    conn: &Connection,
+    source_id: i64,
+    capabilities_json: &str,
+    status: &str,
+    display_name: Option<&str>,
+    avatar_url: Option<&str>,
+    summary_json: Option<&str>,
+) -> Result<()> {
+    let rows = conn.execute(
+        "UPDATE collection_sources SET
+            capabilities_json = ?1,
+            status = ?2,
+            display_name = coalesce(?3, display_name),
+            avatar_url = coalesce(?4, avatar_url),
+            last_sync_summary_json = coalesce(?5, last_sync_summary_json),
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?6",
+        params![
+            capabilities_json,
+            status,
+            display_name,
+            avatar_url,
+            summary_json,
+            source_id,
+        ],
     )?;
     require_rows_changed(rows)
 }
@@ -2064,7 +4672,7 @@ pub fn delete_collection_source(conn: &Connection, source_id: i64) -> Result<()>
 
 pub fn force_collection_source_due(conn: &Connection, source_id: i64) -> Result<()> {
     let rows = conn.execute(
-        "UPDATE collection_sources SET next_sync_at = datetime('now', '-1 minute') WHERE id = ?1",
+        "UPDATE collection_sources SET next_sync_at = datetime('now', '-1 minute'), updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![source_id],
     )?;
     require_rows_changed(rows)
@@ -2072,20 +4680,40 @@ pub fn force_collection_source_due(conn: &Connection, source_id: i64) -> Result<
 
 pub fn mark_collection_source_attempt(conn: &Connection, source_id: i64) -> Result<()> {
     let rows = conn.execute(
-        "UPDATE collection_sources SET last_attempt_at = datetime('now') WHERE id = ?1",
+        "UPDATE collection_sources SET last_attempt_at = datetime('now'), updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![source_id],
     )?;
     require_rows_changed(rows)
 }
 
 pub fn mark_collection_source_failed(conn: &Connection, source_id: i64, error: &str) -> Result<()> {
+    let normalized = error.to_ascii_lowercase();
+    let status = if [
+        "cookie",
+        "login",
+        "sign in",
+        "private",
+        "unauthorized",
+        "forbidden",
+        "401",
+        "403",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        "needs_auth"
+    } else {
+        "error"
+    };
     let rows = conn.execute(
         "UPDATE collection_sources SET
+            status = ?2,
             consecutive_failures = consecutive_failures + 1,
-            last_error = ?2,
-            next_sync_at = datetime('now', '+' || min(180, (15 * (consecutive_failures + 1))) || ' minutes')
+            last_error = ?3,
+            next_sync_at = datetime('now', '+' || min(180, (15 * (consecutive_failures + 1))) || ' minutes'),
+            updated_at = CURRENT_TIMESTAMP
          WHERE id = ?1",
-        params![source_id, error],
+        params![source_id, status, error],
     )?;
     require_rows_changed(rows)
 }
@@ -2097,16 +4725,196 @@ pub fn mark_collection_source_synced(
 ) -> Result<()> {
     let rows = conn.execute(
         "UPDATE collection_sources SET
+            status = CASE WHEN active = 1 THEN 'active' ELSE 'paused' END,
+            last_sync_at = datetime('now'),
             last_success_at = datetime('now'),
             last_synced_at = datetime('now'),
             consecutive_failures = 0,
             last_error = NULL,
             discovered_count = discovered_count + ?2,
-            next_sync_at = datetime('now', '+' || interval_minutes || ' minutes')
+            next_sync_at = datetime('now', '+' || interval_minutes || ' minutes'),
+            updated_at = CURRENT_TIMESTAMP
          WHERE id = ?1",
         params![source_id, queued as i64],
     )?;
     require_rows_changed(rows)
+}
+
+pub fn set_collection_source_summary(
+    conn: &Connection,
+    source_id: i64,
+    summary_json: &str,
+) -> Result<()> {
+    let rows = conn.execute(
+        "UPDATE collection_sources SET last_sync_summary_json = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![summary_json, source_id],
+    )?;
+    require_rows_changed(rows)
+}
+
+pub fn get_collection_source_item(
+    conn: &Connection,
+    source_id: i64,
+    canonical_url: &str,
+) -> Result<Option<CollectionSourceItemRecord>> {
+    conn.query_row(
+        "SELECT id, source_id, canonical_url, platform_video_id, activity_types_json,
+                state, job_id, reason, first_seen_at, last_seen_at
+         FROM collection_source_items
+         WHERE source_id = ?1 AND canonical_url = ?2",
+        params![source_id, canonical_url],
+        |row| {
+            Ok(CollectionSourceItemRecord {
+                id: row.get(0)?,
+                source_id: row.get(1)?,
+                canonical_url: row.get(2)?,
+                platform_video_id: row.get(3)?,
+                activity_types_json: row.get(4)?,
+                state: row.get(5)?,
+                job_id: row.get(6)?,
+                reason: row.get(7)?,
+                first_seen_at: row.get(8)?,
+                last_seen_at: row.get(9)?,
+            })
+        },
+    )
+    .optional()
+}
+
+pub fn upsert_collection_source_item(
+    conn: &Connection,
+    source_id: i64,
+    canonical_url: &str,
+    platform_video_id: Option<&str>,
+    activity_type: &str,
+    state: &str,
+    job_id: Option<i64>,
+    reason: Option<&str>,
+) -> Result<CollectionSourceItemRecord> {
+    let existing = get_collection_source_item(conn, source_id, canonical_url)?;
+    let mut activity_types = existing
+        .as_ref()
+        .and_then(|item| serde_json::from_str::<Vec<String>>(&item.activity_types_json).ok())
+        .unwrap_or_default();
+    if !activity_types.iter().any(|item| item == activity_type) {
+        activity_types.push(activity_type.to_string());
+    }
+    let activity_types_json = serde_json::to_string(&activity_types)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+
+    if let Some(existing) = existing {
+        conn.execute(
+            "UPDATE collection_source_items SET
+                platform_video_id = coalesce(?1, platform_video_id),
+                activity_types_json = ?2,
+                state = ?3,
+                job_id = coalesce(?4, job_id),
+                reason = ?5,
+                last_seen_at = CURRENT_TIMESTAMP
+             WHERE id = ?6",
+            params![
+                platform_video_id,
+                activity_types_json,
+                state,
+                job_id,
+                reason,
+                existing.id,
+            ],
+        )?;
+    } else {
+        conn.execute(
+            "INSERT INTO collection_source_items
+                (source_id, canonical_url, platform_video_id, activity_types_json, state,
+                 job_id, reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                source_id,
+                canonical_url,
+                platform_video_id,
+                activity_types_json,
+                state,
+                job_id,
+                reason,
+            ],
+        )?;
+    }
+
+    get_collection_source_item(conn, source_id, canonical_url)?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn insert_collection_source_activity(
+    conn: &Connection,
+    source_id: i64,
+    event_type: &str,
+    activity_type: Option<&str>,
+    message: &str,
+    canonical_url: Option<&str>,
+    job_id: Option<i64>,
+    state: Option<&str>,
+    found_count: i64,
+    queued_count: i64,
+    duplicate_count: i64,
+    ignored_count: i64,
+    error_count: i64,
+) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO collection_source_activity
+            (source_id, event_type, activity_type, message, canonical_url, job_id, state,
+             found_count, queued_count, duplicate_count, ignored_count, error_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            source_id,
+            event_type,
+            activity_type,
+            message,
+            canonical_url,
+            job_id,
+            state,
+            found_count,
+            queued_count,
+            duplicate_count,
+            ignored_count,
+            error_count,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn get_collection_source_activity(
+    conn: &Connection,
+    source_id: i64,
+    limit: usize,
+) -> Result<Vec<CollectionSourceActivityRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, source_id, created_at, event_type, activity_type, message,
+                canonical_url, job_id, state, found_count, queued_count, duplicate_count,
+                ignored_count, error_count
+         FROM collection_source_activity
+         WHERE source_id = ?1
+         ORDER BY id DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![source_id, limit as i64], |row| {
+        Ok(CollectionSourceActivityRecord {
+            id: row.get(0)?,
+            source_id: row.get(1)?,
+            created_at: row.get(2)?,
+            event_type: row.get(3)?,
+            activity_type: row.get(4)?,
+            message: row.get(5)?,
+            canonical_url: row.get(6)?,
+            job_id: row.get(7)?,
+            state: row.get(8)?,
+            found_count: row.get(9)?,
+            queued_count: row.get(10)?,
+            duplicate_count: row.get(11)?,
+            ignored_count: row.get(12)?,
+            error_count: row.get(13)?,
+        })
+    })?;
+    rows.collect()
 }
 
 // ========================================================================
@@ -2440,41 +5248,17 @@ pub fn repair_library(conn: &Connection) -> Result<LibraryRepairReport> {
     })
 }
 
-pub fn search_literal_transcripts(
-    conn: &Connection,
-    query: &str,
-    limit: usize,
-) -> Result<Vec<SearchResult>> {
-    let mut stmt = conn.prepare(
-        "SELECT ts.job_id, m.title, m.thumbnail, ts.text, ts.segment_index
-         FROM transcript_segments ts
-         LEFT JOIN media m ON ts.job_id = m.job_id
-         WHERE ts.text LIKE ?1 ESCAPE '\\'
-         LIMIT ?2",
-    )?;
-    let escaped_query = query
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
-    let pattern = format!("%{}%", escaped_query);
-    let rows = stmt.query_map(params![pattern, limit as i64], |row| {
-        Ok(SearchResult {
-            job_id: row.get(0)?,
-            title: row.get(1)?,
-            thumbnail: row.get(2)?,
-            chunk_text: row.get(3)?,
-            chunk_index: row.get(4)?,
-            similarity_score: 1.0,
-        })
-    })?;
-    let mut results = Vec::new();
-    for r in rows {
-        results.push(r?);
-    }
-    Ok(results)
-}
-
 pub fn get_search_result(conn: &Connection, job_id: i64, chunk_index: i64) -> Option<SearchResult> {
+    if let Some(unit) = get_search_unit(conn, job_id, chunk_index) {
+        return Some(SearchResult {
+            job_id: unit.job_id,
+            title: unit.title,
+            thumbnail: unit.match_thumbnail,
+            chunk_text: unit.text,
+            chunk_index: unit.ordinal,
+            similarity_score: 0.0,
+        });
+    }
     let mut stmt = conn
         .prepare(
             "SELECT ts.job_id, m.title, m.thumbnail, ts.text, ts.segment_index
@@ -2497,9 +5281,899 @@ pub fn get_search_result(conn: &Connection, job_id: i64, chunk_index: i64) -> Op
     .ok()
 }
 
+// =========================================================================
+// Profile Channels and Content Items Repository
+// =========================================================================
+
+pub fn update_profile_source_metadata(
+    conn: &Connection,
+    source_id: i64,
+    display_name: Option<&str>,
+    avatar_url: Option<&str>,
+    cover_url: Option<&str>,
+    verified: Option<bool>,
+    following_count: Option<i64>,
+    followers_count: Option<i64>,
+    likes_count: Option<i64>,
+    posts_count: Option<i64>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE collection_sources SET
+            display_name = coalesce(?2, display_name),
+            avatar_url = coalesce(?3, avatar_url),
+            cover_url = coalesce(?4, cover_url),
+            verified = coalesce(?5, verified),
+            following_count = coalesce(?6, following_count),
+            followers_count = coalesce(?7, followers_count),
+            likes_count = coalesce(?8, likes_count),
+            posts_count = coalesce(?9, posts_count),
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?1",
+        params![
+            source_id,
+            display_name,
+            avatar_url,
+            cover_url,
+            verified,
+            following_count,
+            followers_count,
+            likes_count,
+            posts_count,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn ensure_profile_channels(
+    conn: &Connection,
+    profile_source_id: i64,
+    watch_config_json: &str,
+) -> Result<()> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(watch_config_json).unwrap_or(serde_json::json!({}));
+    let posts_enabled = parsed
+        .get("posts")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let reposts_enabled = parsed
+        .get("reposts")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let saved_enabled = parsed
+        .get("saved")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let favorites_enabled = parsed
+        .get("favorites")
+        .and_then(|v| v.as_bool())
+        .or_else(|| parsed.get("likes").and_then(|v| v.as_bool()))
+        .unwrap_or(false);
+
+    let channels = [
+        ("posts", posts_enabled),
+        ("reposts", reposts_enabled),
+        ("saved", saved_enabled),
+        ("favorites", favorites_enabled),
+    ];
+
+    for (kind, enabled) in channels {
+        conn.execute(
+            "INSERT INTO profile_channels (profile_source_id, kind, enabled, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'idle', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT(profile_source_id, kind) DO UPDATE SET
+                 enabled = excluded.enabled,
+                 updated_at = CURRENT_TIMESTAMP",
+            params![profile_source_id, kind, enabled],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn get_profile_channels(
+    conn: &Connection,
+    profile_source_id: i64,
+) -> Result<Vec<ProfileChannelRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, profile_source_id, kind, enabled, status, discovered_count,
+                last_discovery_at, last_successful_discovery_at, cursor,
+                newest_known_content_id, oldest_known_content_id, error_code,
+                error_message, created_at, updated_at
+         FROM profile_channels
+         WHERE profile_source_id = ?1
+         ORDER BY id ASC",
+    )?;
+    let rows = stmt.query_map(params![profile_source_id], |row| {
+        Ok(ProfileChannelRecord {
+            id: row.get(0)?,
+            profile_source_id: row.get(1)?,
+            kind: row.get(2)?,
+            enabled: row.get(3)?,
+            status: row.get(4)?,
+            discovered_count: row.get(5)?,
+            last_discovery_at: row.get(6)?,
+            last_successful_discovery_at: row.get(7)?,
+            cursor: row.get(8)?,
+            newest_known_content_id: row.get(9)?,
+            oldest_known_content_id: row.get(10)?,
+            error_code: row.get(11)?,
+            error_message: row.get(12)?,
+            created_at: row.get(13)?,
+            updated_at: row.get(14)?,
+        })
+    })?;
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row?);
+    }
+    Ok(records)
+}
+
+pub fn update_profile_channel_status(
+    conn: &Connection,
+    profile_source_id: i64,
+    kind: &str,
+    status: &str,
+    error_code: Option<&str>,
+    error_message: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE profile_channels SET
+            status = ?3,
+            error_code = ?4,
+            error_message = ?5,
+            last_discovery_at = CURRENT_TIMESTAMP,
+            last_successful_discovery_at = CASE WHEN ?3 IN ('idle', 'completed_initial_backfill') THEN CURRENT_TIMESTAMP ELSE last_successful_discovery_at END,
+            updated_at = CURRENT_TIMESTAMP
+         WHERE profile_source_id = ?1 AND kind = ?2",
+        params![profile_source_id, kind, status, error_code, error_message],
+    )?;
+    Ok(())
+}
+
+pub fn update_profile_channel_checkpoint(
+    conn: &Connection,
+    profile_source_id: i64,
+    kind: &str,
+    status: &str,
+    discovered_count: i64,
+    cursor: Option<&str>,
+    newest_id: Option<&str>,
+    oldest_id: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE profile_channels SET
+            status = ?3,
+            discovered_count = ?4,
+            cursor = coalesce(?5, cursor),
+            newest_known_content_id = coalesce(?6, newest_known_content_id),
+            oldest_known_content_id = coalesce(?7, oldest_known_content_id),
+            last_discovery_at = CURRENT_TIMESTAMP,
+            last_successful_discovery_at = CURRENT_TIMESTAMP,
+            error_code = NULL,
+            error_message = NULL,
+            updated_at = CURRENT_TIMESTAMP
+         WHERE profile_source_id = ?1 AND kind = ?2",
+        params![
+            profile_source_id,
+            kind,
+            status,
+            discovered_count,
+            cursor,
+            newest_id,
+            oldest_id
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn upsert_content_item(
+    conn: &Connection,
+    platform: &str,
+    platform_content_id: &str,
+    canonical_url: &str,
+    author_id: Option<&str>,
+    author_handle: Option<&str>,
+    title: Option<&str>,
+    published_at: Option<&str>,
+    job_id: Option<i64>,
+) -> Result<(i64, bool)> {
+    let existing: Option<(i64, Option<i64>)> = conn
+        .query_row(
+            "SELECT id, job_id FROM content_items WHERE platform = ?1 AND platform_content_id = ?2",
+            params![platform, platform_content_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+
+    if let Some((id, existing_job_id)) = existing {
+        let target_job_id = job_id.or(existing_job_id);
+        conn.execute(
+            "UPDATE content_items SET
+                canonical_url = coalesce(nullif(?1, ''), canonical_url),
+                author_id = coalesce(?2, author_id),
+                author_handle = coalesce(?3, author_handle),
+                title = coalesce(?4, title),
+                published_at = coalesce(?5, published_at),
+                job_id = coalesce(?6, job_id),
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?7",
+            params![
+                canonical_url,
+                author_id,
+                author_handle,
+                title,
+                published_at,
+                target_job_id,
+                id
+            ],
+        )?;
+        Ok((id, false))
+    } else {
+        conn.execute(
+            "INSERT INTO content_items
+                (platform, platform_content_id, canonical_url, author_id, author_handle,
+                 title, published_at, discovered_at, updated_at, availability, job_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'available', ?8)",
+            params![platform, platform_content_id, canonical_url, author_id, author_handle, title, published_at, job_id],
+        )?;
+        Ok((conn.last_insert_rowid(), true))
+    }
+}
+
+pub fn upsert_content_relationship(
+    conn: &Connection,
+    content_id: i64,
+    profile_source_id: i64,
+    channel_kind: &str,
+    provenance_json: Option<&str>,
+    sync_run_id: Option<&str>,
+) -> Result<(i64, bool)> {
+    let existing_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM content_relationships
+         WHERE content_id = ?1 AND profile_source_id = ?2 AND channel_kind = ?3",
+            params![content_id, profile_source_id, channel_kind],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(id) = existing_id {
+        conn.execute(
+            "UPDATE content_relationships SET
+                active = 1,
+                last_seen_at = CURRENT_TIMESTAMP,
+                provenance_json = coalesce(?2, provenance_json),
+                sync_run_id = coalesce(?3, sync_run_id)
+             WHERE id = ?1",
+            params![id, provenance_json, sync_run_id],
+        )?;
+        Ok((id, false))
+    } else {
+        conn.execute(
+            "INSERT INTO content_relationships
+                (content_id, profile_source_id, channel_kind, first_seen_at, last_seen_at, active, provenance_json, sync_run_id)
+             VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, ?4, ?5)",
+            params![content_id, profile_source_id, channel_kind, provenance_json, sync_run_id],
+        )?;
+        Ok((conn.last_insert_rowid(), true))
+    }
+}
+
+pub fn link_content_item_job(conn: &Connection, content_id: i64, job_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE content_items SET job_id = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![job_id, content_id],
+    )?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn find_content_item_by_platform_id(
+    conn: &Connection,
+    platform: &str,
+    platform_content_id: &str,
+) -> Result<Option<ContentItemRecord>> {
+    conn.query_row(
+        "SELECT id, platform, platform_content_id, canonical_url, author_id,
+                author_handle, title, published_at, discovered_at, updated_at,
+                availability, job_id
+         FROM content_items
+         WHERE platform = ?1 AND platform_content_id = ?2",
+        params![platform, platform_content_id],
+        |row| {
+            Ok(ContentItemRecord {
+                id: row.get(0)?,
+                platform: row.get(1)?,
+                platform_content_id: row.get(2)?,
+                canonical_url: row.get(3)?,
+                author_id: row.get(4)?,
+                author_handle: row.get(5)?,
+                title: row.get(6)?,
+                published_at: row.get(7)?,
+                discovered_at: row.get(8)?,
+                updated_at: row.get(9)?,
+                availability: row.get(10)?,
+                job_id: row.get(11)?,
+            })
+        },
+    )
+    .optional()
+}
+
+#[allow(dead_code)]
+pub fn count_channel_content_items(
+    conn: &Connection,
+    profile_source_id: i64,
+    channel_kind: &str,
+) -> Result<i64> {
+    conn.query_row(
+        "SELECT count(*) FROM content_relationships
+         WHERE profile_source_id = ?1 AND channel_kind = ?2 AND active = 1",
+        params![profile_source_id, channel_kind],
+        |row| row.get(0),
+    )
+}
+
+pub fn get_channel_content_items(
+    conn: &Connection,
+    profile_source_id: i64,
+    channel_kind: &str,
+    limit: i64,
+) -> Result<Vec<ContentItemRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.platform, c.platform_content_id, c.canonical_url,
+                c.author_id, c.author_handle, c.title, c.published_at,
+                c.discovered_at, c.updated_at, c.availability, c.job_id
+         FROM content_items c
+         INNER JOIN content_relationships r ON c.id = r.content_id
+         WHERE r.profile_source_id = ?1 AND r.channel_kind = ?2 AND r.active = 1
+         ORDER BY c.published_at DESC, c.discovered_at DESC
+         LIMIT ?3",
+    )?;
+    let rows = stmt.query_map(params![profile_source_id, channel_kind, limit], |row| {
+        Ok(ContentItemRecord {
+            id: row.get(0)?,
+            platform: row.get(1)?,
+            platform_content_id: row.get(2)?,
+            canonical_url: row.get(3)?,
+            author_id: row.get(4)?,
+            author_handle: row.get(5)?,
+            title: row.get(6)?,
+            published_at: row.get(7)?,
+            discovered_at: row.get(8)?,
+            updated_at: row.get(9)?,
+            availability: row.get(10)?,
+            job_id: row.get(11)?,
+        })
+    })?;
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row?);
+    }
+    Ok(items)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_sources_deduplication_saved_and_reposts() {
+        // Requirement 39.A: same video in saved + repost -> 1 ContentItem, 2 relationships
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: true,
+            saved: true,
+            favorites: false,
+        };
+        let profile = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@testcreator",
+            &selection,
+        )
+        .unwrap();
+        let source_id = profile.source.id;
+
+        // Discovered video in 'saved'
+        let (content_id_1, is_new_1) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "740011223344",
+            "https://www.tiktok.com/@testcreator/video/740011223344",
+            None,
+            Some("@testcreator"),
+            Some("Viral Video"),
+            Some("2026-09-01"),
+            None,
+        )
+        .unwrap();
+        assert!(is_new_1);
+
+        let (rel_id_1, rel_new_1) = upsert_content_relationship(
+            &conn,
+            content_id_1,
+            source_id,
+            "saved",
+            Some("{\"reason\":\"user_saved\"}"),
+            Some("sync-1"),
+        )
+        .unwrap();
+        assert!(rel_new_1);
+
+        // Same video discovered in 'reposts'
+        let (content_id_2, is_new_2) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "740011223344",
+            "https://www.tiktok.com/@testcreator/video/740011223344",
+            None,
+            Some("@testcreator"),
+            Some("Viral Video"),
+            Some("2026-09-01"),
+            None,
+        )
+        .unwrap();
+        assert!(!is_new_2, "Must not be considered new content item");
+        assert_eq!(content_id_1, content_id_2, "Same content item ID");
+
+        let (rel_id_2, rel_new_2) = upsert_content_relationship(
+            &conn,
+            content_id_2,
+            source_id,
+            "reposts",
+            Some("{\"reason\":\"creator_reposted\"}"),
+            Some("sync-1"),
+        )
+        .unwrap();
+        assert!(rel_new_2);
+        assert_ne!(rel_id_1, rel_id_2, "Different relationship IDs");
+
+        // Verify total counts in DB
+        let total_items: i64 = conn
+            .query_row("SELECT count(*) FROM content_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            total_items, 1,
+            "Invariant 1: exactly ONE ContentItem in SQLite"
+        );
+
+        let total_relationships: i64 = conn
+            .query_row("SELECT count(*) FROM content_relationships", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            total_relationships, 2,
+            "Invariant 2: TWO relationships for the single content item"
+        );
+    }
+
+    #[test]
+    fn profile_sources_deduplication_across_two_profiles() {
+        // Requirement 39.B: same video in two profiles -> 1 ContentItem, 2 relationships
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: true,
+            favorites: false,
+        };
+        let p1 = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@user_alpha",
+            &selection,
+        )
+        .unwrap();
+        let p2 = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@user_beta",
+            &selection,
+        )
+        .unwrap();
+
+        let (c1, new_c1) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "9988776655",
+            "https://www.tiktok.com/@someone/video/9988776655",
+            None,
+            Some("@someone"),
+            Some("Shared Video"),
+            Some("2026-09-10"),
+            None,
+        )
+        .unwrap();
+        assert!(new_c1);
+
+        upsert_content_relationship(&conn, c1, p1.source.id, "saved", None, None).unwrap();
+
+        let (c2, new_c2) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "9988776655",
+            "https://www.tiktok.com/@someone/video/9988776655",
+            None,
+            Some("@someone"),
+            Some("Shared Video"),
+            Some("2026-09-10"),
+            None,
+        )
+        .unwrap();
+        assert!(!new_c2);
+        assert_eq!(c1, c2);
+
+        upsert_content_relationship(&conn, c2, p2.source.id, "posts", None, None).unwrap();
+
+        let total_items: i64 = conn
+            .query_row("SELECT count(*) FROM content_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(total_items, 1);
+
+        let total_rel: i64 = conn
+            .query_row("SELECT count(*) FROM content_relationships", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(total_rel, 2);
+    }
+
+    #[test]
+    fn profile_sources_canonical_url_variants_and_id_extraction() {
+        // Requirement 39.C: canonical URL variants -> same ContentItem
+        use crate::application::profile_discovery_service::extract_content_id_from_url;
+        use crate::url_utils::canonicalize_tiktok_url;
+
+        let raw1 = "https://www.tiktok.com/@dancer/video/7350001112223334445?is_from_webapp=1&sender_device=pc";
+        let raw2 = "https://tiktok.com/@dancer/video/7350001112223334445";
+
+        let canonical1 = canonicalize_tiktok_url(raw1);
+        let canonical2 = canonicalize_tiktok_url(raw2);
+        assert_eq!(canonical1, canonical2);
+
+        let id1 = extract_content_id_from_url(&canonical1, None);
+        let id2 = extract_content_id_from_url(&canonical2, None);
+        assert_eq!(id1, "7350001112223334445");
+        assert_eq!(id2, "7350001112223334445");
+    }
+
+    #[test]
+    fn profile_sources_removed_saved_relationship_preserves_content() {
+        // Requirement 39.D: removed saved relationship -> content remains
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: false,
+            reposts: false,
+            saved: true,
+            favorites: false,
+        };
+        let p = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@preservetest",
+            &selection,
+        )
+        .unwrap();
+
+        let (c_id, _) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "112233",
+            "https://www.tiktok.com/@author/video/112233",
+            None,
+            Some("@author"),
+            Some("Item to keep"),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let (rel_id, _) =
+            upsert_content_relationship(&conn, c_id, p.source.id, "saved", None, None).unwrap();
+
+        // Simulate unsave / relationship removal
+        conn.execute(
+            "UPDATE content_relationships SET active = 0 WHERE id = ?1",
+            [rel_id],
+        )
+        .unwrap();
+
+        // Invariant 8: turning off a source or un-saving does not delete the content item
+        let content_still_exists = conn
+            .query_row(
+                "SELECT count(*) FROM content_items WHERE id = ?1",
+                [c_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(
+            content_still_exists, 1,
+            "Content item must remain in library even if relationship deactivated"
+        );
+    }
+
+    #[test]
+    fn profile_sources_unknown_metrics_remain_null_not_zero() {
+        // Requirement 39.E: Invariant 9: unknown count -> remains null, not 0
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let p = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@nulltest",
+            &selection,
+        )
+        .unwrap();
+
+        // Update metadata with known followers (e.g. 500) but unknown likes and unknown posts
+        update_profile_source_metadata(
+            &conn,
+            p.source.id,
+            Some("Display Name"),
+            None,
+            None,
+            Some(false),
+            None,      // following unknown
+            Some(500), // followers known
+            None,      // likes unknown
+            None,      // posts unknown
+        )
+        .unwrap();
+
+        let stored = get_collection_source(&conn, p.source.id).unwrap();
+        assert_eq!(stored.followers_count, Some(500));
+        assert_eq!(
+            stored.following_count, None,
+            "Unknown following must remain None (null), not 0"
+        );
+        assert_eq!(
+            stored.likes_count, None,
+            "Unknown likes must remain None (null), not 0"
+        );
+        assert_eq!(
+            stored.posts_count, None,
+            "Unknown posts must remain None (null), not 0"
+        );
+    }
+
+    #[test]
+    fn profile_sources_channel_ordering_newest_first() {
+        // Requirement 40.A: results returned newest-first -> inventory preserves newest-first
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let p = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@newestfirst",
+            &selection,
+        )
+        .unwrap();
+
+        // Insert items in mixed order with timestamps
+        let (id_old, _) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "vid_1",
+            "https://tiktok.com/@newestfirst/video/vid_1",
+            None,
+            Some("@newestfirst"),
+            Some("Old Video"),
+            Some("2026-01-01T00:00:00Z"),
+            None,
+        )
+        .unwrap();
+        let (id_mid, _) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "vid_2",
+            "https://tiktok.com/@newestfirst/video/vid_2",
+            None,
+            Some("@newestfirst"),
+            Some("Mid Video"),
+            Some("2026-05-01T00:00:00Z"),
+            None,
+        )
+        .unwrap();
+        let (id_new, _) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "vid_3",
+            "https://tiktok.com/@newestfirst/video/vid_3",
+            None,
+            Some("@newestfirst"),
+            Some("New Video"),
+            Some("2026-09-01T00:00:00Z"),
+            None,
+        )
+        .unwrap();
+
+        upsert_content_relationship(&conn, id_old, p.source.id, "posts", None, None).unwrap();
+        upsert_content_relationship(&conn, id_mid, p.source.id, "posts", None, None).unwrap();
+        upsert_content_relationship(&conn, id_new, p.source.id, "posts", None, None).unwrap();
+
+        let items = get_channel_content_items(&conn, p.source.id, "posts", 10).unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(
+            items[0].platform_content_id, "vid_3",
+            "Newest item must be first"
+        );
+        assert_eq!(items[1].platform_content_id, "vid_2", "Middle item second");
+        assert_eq!(items[2].platform_content_id, "vid_1", "Oldest item last");
+    }
+
+    #[test]
+    fn profile_sources_checkpoint_persistence_and_resumption() {
+        // Requirement 40.B & 42: checkpoint persistence & reopen recovery
+        let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
+        let test_dir = std::env::temp_dir().join(format!(
+            "pulsaria-checkpoint-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&test_dir).unwrap();
+        std::env::set_var("PULSAR_DATA_DIR", &test_dir);
+
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: true,
+            saved: true,
+            favorites: false,
+        };
+
+        let source_id = {
+            let conn = init_db().unwrap();
+            let reg = crate::application::collection_service::register_profile_source(
+                &conn,
+                "@checkpointuser",
+                &selection,
+            )
+            .unwrap();
+            ensure_profile_channels(&conn, reg.source.id, &reg.source.watch_config_json).unwrap();
+
+            // Simulate discovering 850 items
+            update_profile_channel_checkpoint(
+                &conn,
+                reg.source.id,
+                "posts",
+                "idle",
+                850,
+                Some("cursor_page_8"),
+                Some("vid_850"),
+                Some("vid_1"),
+            )
+            .unwrap();
+            reg.source.id
+        };
+
+        // Close and reopen DB (simulating Pulsaria restart)
+        {
+            let conn = init_db().unwrap();
+            let channels = get_profile_channels(&conn, source_id).unwrap();
+            let posts_channel = channels
+                .iter()
+                .find(|c| c.kind == "posts")
+                .expect("posts channel must exist");
+
+            assert_eq!(posts_channel.discovered_count, 850);
+            assert_eq!(posts_channel.cursor.as_deref(), Some("cursor_page_8"));
+            assert_eq!(
+                posts_channel.newest_known_content_id.as_deref(),
+                Some("vid_850")
+            );
+            assert_eq!(
+                posts_channel.oldest_known_content_id.as_deref(),
+                Some("vid_1")
+            );
+            assert_eq!(posts_channel.status, "idle");
+        }
+    }
+
+    #[test]
+    fn profile_sources_queue_integration_dedup_and_existing_pipeline() {
+        // Requirement 41: TESTS — QUEUE INTEGRATION
+        // A. new ContentItem -> existing Pulsaria processing queue
+        // B. already-downloaded content -> no second download
+        // C. already-transcribed content -> no duplicate transcription
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: true,
+            saved: true,
+            favorites: false,
+        };
+        let p = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@queuetest",
+            &selection,
+        )
+        .unwrap();
+
+        // 1. Discover item 1
+        let (c_id, is_new) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "799001",
+            "https://www.tiktok.com/@queuetest/video/799001",
+            None,
+            Some("@queuetest"),
+            Some("Fresh Video"),
+            Some("2026-09-20T12:00:00Z"),
+            None,
+        )
+        .unwrap();
+        assert!(is_new);
+        upsert_content_relationship(&conn, c_id, p.source.id, "posts", None, None).unwrap();
+
+        // 2. Canonical queue insertion (reusing insert_job)
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@queuetest/video/799001").unwrap();
+        link_content_item_job(&conn, c_id, job_id).unwrap();
+
+        // Verify job created in standard Pulsaria queue
+        let (job_status, job_url): (String, String) = conn
+            .query_row(
+                "SELECT status, url FROM jobs WHERE id = ?1",
+                [job_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(job_status, "queued");
+        assert_eq!(job_url, "https://www.tiktok.com/@queuetest/video/799001");
+
+        // 3. Mark job as completed and media downloaded & transcribed
+        update_job_status(&conn, job_id, "completed", 100).unwrap();
+        conn.execute(
+            "INSERT INTO media (job_id, title, author, platform) VALUES (?1, ?2, ?3, ?4)",
+            params![job_id, "Fresh Video", "@queuetest", "tiktok"],
+        )
+        .unwrap();
+
+        // 4. Same video discovered in 'saved' channel:
+        let (c_id_2, is_new_2) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "799001",
+            "https://www.tiktok.com/@queuetest/video/799001",
+            None,
+            Some("@queuetest"),
+            Some("Fresh Video"),
+            Some("2026-09-20T12:00:00Z"),
+            None,
+        )
+        .unwrap();
+        assert!(!is_new_2, "Discovered item is not new");
+        assert_eq!(c_id, c_id_2);
+        upsert_content_relationship(&conn, c_id_2, p.source.id, "saved", None, None).unwrap();
+
+        // Check if content already has a linked job
+        let existing = find_content_item_by_platform_id(&conn, "tiktok", "799001")
+            .unwrap()
+            .unwrap();
+        assert_eq!(existing.job_id, Some(job_id));
+
+        // Invariant 2 & 7: exactly 1 job in queue, 1 media row, 2 relationships
+        let total_jobs: i64 = conn
+            .query_row("SELECT count(*) FROM jobs", [], |r| r.get(0))
+            .unwrap();
+        let total_media: i64 = conn
+            .query_row("SELECT count(*) FROM media", [], |r| r.get(0))
+            .unwrap();
+        let total_rels: i64 = conn
+            .query_row("SELECT count(*) FROM content_relationships", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+
+        assert_eq!(total_jobs, 1, "Must NOT create duplicate job in queue");
+        assert_eq!(total_media, 1, "Must NOT duplicate downloaded media");
+        assert_eq!(total_rels, 2, "Must record both relationships");
+    }
 
     static DATA_DIR_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -2522,6 +6196,268 @@ mod tests {
         fs::remove_dir_all(base).unwrap();
     }
 
+    #[test]
+    fn playlist_memberships_are_content_canonical_and_idempotent() {
+        let conn = memory_db();
+        let first_job =
+            insert_job(&conn, "https://www.tiktok.com/@creator/video/74001?lang=es").unwrap();
+        let duplicate_job = insert_job(&conn, "https://tiktok.com/@creator/video/74001/").unwrap();
+        assert_eq!(
+            first_job, duplicate_job,
+            "URL variants must reuse the same job"
+        );
+
+        let content_count: i64 = conn
+            .query_row("SELECT count(*) FROM content_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(content_count, 1, "one canonical content identity per video");
+
+        let first_playlist =
+            create_playlist(&conn, "Favoritos de prueba", None, "#8a5cff", false).unwrap();
+        let second_playlist = create_playlist(&conn, "Otra lista", None, "#25f4ee", false).unwrap();
+        add_job_to_playlist(&conn, first_playlist, first_job).unwrap();
+        add_job_to_playlist(&conn, first_playlist, first_job).unwrap();
+        add_job_to_playlist(&conn, second_playlist, first_job).unwrap();
+
+        let membership_count: i64 = conn
+            .query_row("SELECT count(*) FROM playlist_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(membership_count, 2, "adding twice must be idempotent");
+        let distinct_content_count: i64 = conn
+            .query_row(
+                "SELECT count(DISTINCT content_id) FROM playlist_items",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            distinct_content_count, 1,
+            "the same content can belong to many playlists"
+        );
+    }
+
+    #[test]
+    fn removing_or_deleting_playlist_preserves_jobs_and_content() {
+        let conn = memory_db();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@creator/video/74002").unwrap();
+        let playlist_id = create_playlist(&conn, "Lista durable", None, "#8a5cff", false).unwrap();
+        add_job_to_playlist(&conn, playlist_id, job_id).unwrap();
+
+        remove_job_from_playlist(&conn, playlist_id, job_id).unwrap();
+        let after_remove: i64 = conn
+            .query_row("SELECT count(*) FROM playlist_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(after_remove, 0);
+        assert!(conn
+            .query_row("SELECT 1 FROM jobs WHERE id = ?1", params![job_id], |row| {
+                row.get::<_, i64>(0)
+            })
+            .optional()
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM content_items", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+
+        add_job_to_playlist(&conn, playlist_id, job_id).unwrap();
+        delete_playlist(&conn, playlist_id).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM playlist_items", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM jobs", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM content_items", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn playlist_content_view_keeps_remote_memberships_without_jobs() {
+        let conn = memory_db();
+        let playlist_id =
+            create_playlist(&conn, "Contenido remoto", None, "#25f4ee", false).unwrap();
+        let (content_id, _) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "remote-74004",
+            "https://www.tiktok.com/@creator/video/74004",
+            None,
+            Some("@creator"),
+            Some("Pendiente de ingestión"),
+            None,
+            None,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE content_items SET availability = 'pending' WHERE id = ?1",
+            params![content_id],
+        )
+        .unwrap();
+        add_content_to_playlist(&conn, playlist_id, content_id, "user").unwrap();
+
+        let views = get_playlist_content_views(&conn, playlist_id).unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].content_id, content_id);
+        assert_eq!(views[0].job_id, None);
+        assert_eq!(views[0].job.id, -content_id);
+        assert_eq!(views[0].availability, "pending");
+        assert_eq!(views[0].job.source_state, "online");
+    }
+
+    #[test]
+    fn source_content_view_uses_the_shared_projection_without_a_job() {
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            saved: false,
+            favorites: false,
+            reposts: false,
+        };
+        let registered = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@remotesource",
+            &selection,
+        )
+        .unwrap();
+        let (content_id, _) = upsert_content_item(
+            &conn,
+            "tiktok",
+            "remote-source-1",
+            "https://www.tiktok.com/@remotesource/video/remote-source-1",
+            None,
+            Some("@remotesource"),
+            Some("Remote source item"),
+            None,
+            None,
+        )
+        .unwrap();
+        upsert_content_relationship(&conn, content_id, registered.source.id, "posts", None, None)
+            .unwrap();
+
+        let views = get_channel_content_views(&conn, registered.source.id, "posts", 50).unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].content_id, content_id);
+        assert_eq!(views[0].job_id, None);
+        assert_eq!(views[0].job.id, -content_id);
+        assert_eq!(views[0].availability, "available");
+    }
+
+    #[test]
+    fn migrates_legacy_playlist_memberships_to_content_ids() {
+        let mut conn = memory_db();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@creator/video/74003").unwrap();
+        let playlist_id = create_playlist(&conn, "Migración", None, "#8a5cff", true).unwrap();
+
+        conn.execute("DROP TABLE playlist_items", []).unwrap();
+        conn.execute(
+            "CREATE TABLE playlist_items (
+                playlist_id INTEGER NOT NULL,
+                job_id INTEGER NOT NULL,
+                added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (playlist_id, job_id)
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO playlist_items (playlist_id, job_id, added_at)
+             VALUES (?1, ?2, '2026-01-02T03:04:05Z')",
+            params![playlist_id, job_id],
+        )
+        .unwrap();
+
+        let transaction = conn.transaction().unwrap();
+        migrate_playlist_memberships(&transaction).unwrap();
+        transaction.commit().unwrap();
+
+        let (content_id, added_at, added_by): (i64, String, String) = conn
+            .query_row(
+                "SELECT content_id, added_at, added_by FROM playlist_items WHERE playlist_id = ?1",
+                params![playlist_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert!(content_id > 0);
+        assert_eq!(added_at, "2026-01-02T03:04:05Z");
+        assert_eq!(added_by, "legacy_auto");
+    }
+
+    #[test]
+    fn migrates_playlist_updated_at_from_a_legacy_table_with_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE playlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO playlists (name, created_at)
+            VALUES ('Legacy playlist', '2026-01-02T03:04:05Z');",
+        )
+        .unwrap();
+
+        let transaction = conn.transaction().unwrap();
+        ensure_timestamp_column(
+            &transaction,
+            "playlists",
+            "updated_at",
+            "created_at, CURRENT_TIMESTAMP",
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+
+        let (name, created_at, updated_at): (String, String, String) = conn
+            .query_row(
+                "SELECT name, created_at, updated_at FROM playlists WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "Legacy playlist");
+        assert_eq!(updated_at, created_at);
+    }
+
+    #[test]
+    fn migrates_missing_playlist_item_timestamp_without_a_non_constant_default() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE playlist_items (
+                playlist_id INTEGER NOT NULL,
+                content_id INTEGER NOT NULL,
+                PRIMARY KEY (playlist_id, content_id)
+            );
+            INSERT INTO playlist_items (playlist_id, content_id) VALUES (1, 2);",
+        )
+        .unwrap();
+
+        let transaction = conn.transaction().unwrap();
+        migrate_playlist_memberships(&transaction).unwrap();
+        transaction.commit().unwrap();
+
+        let (position, added_at, added_by): (f64, String, String) = conn
+            .query_row(
+                "SELECT position, added_at, added_by FROM playlist_items WHERE playlist_id = 1 AND content_id = 2",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(position, 0.0);
+        assert!(!added_at.is_empty());
+        assert_eq!(added_by, "user");
+    }
+
     fn memory_db() -> Connection {
         let conn = Connection::open_in_memory().expect("Failed to open in-memory SQLite");
         conn.execute_batch(
@@ -2534,6 +6470,16 @@ mod tests {
                 retry_count INTEGER NOT NULL DEFAULT 0,
                 error_message TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE job_activity_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                progress INTEGER NOT NULL DEFAULT 0,
+                user_message TEXT,
+                technical_error TEXT,
+                error_code TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE media (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2623,16 +6569,66 @@ mod tests {
                 url TEXT NOT NULL UNIQUE,
                 source_type TEXT NOT NULL DEFAULT 'collection',
                 browser TEXT,
-                active BOOLEAN NOT NULL DEFAULT 1,
+                profile_url TEXT,
+                platform TEXT NOT NULL DEFAULT 'tiktok',
+                username TEXT,
+                 display_name TEXT,
+                 avatar_url TEXT,
+                 cover_url TEXT,
+                 verified BOOLEAN,
+                 following_count INTEGER,
+                 followers_count INTEGER,
+                 likes_count INTEGER,
+                 posts_count INTEGER,
+                 active BOOLEAN NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'active',
+                capabilities_json TEXT NOT NULL DEFAULT '{}',
+                watch_config_json TEXT NOT NULL DEFAULT '{}',
+                initial_import_mode TEXT NOT NULL DEFAULT 'new_only',
+                history_limit INTEGER,
+                history_from TEXT,
+                rules_json TEXT NOT NULL DEFAULT '{}',
                 interval_minutes INTEGER NOT NULL DEFAULT 15,
                 last_attempt_at DATETIME,
+                last_sync_at DATETIME,
                 last_success_at DATETIME,
                 next_sync_at DATETIME,
                 discovered_count INTEGER NOT NULL DEFAULT 0,
                 consecutive_failures INTEGER NOT NULL DEFAULT 0,
                 last_error TEXT,
-                last_synced_at DATETIME,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                 last_sync_summary_json TEXT,
+                 last_synced_at DATETIME,
+                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                 updated_at DATETIME
+             );
+            CREATE TABLE collection_source_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL,
+                canonical_url TEXT NOT NULL,
+                platform_video_id TEXT,
+                activity_types_json TEXT NOT NULL DEFAULT '[]',
+                state TEXT NOT NULL,
+                job_id INTEGER,
+                reason TEXT,
+                first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source_id, canonical_url)
+            );
+            CREATE TABLE collection_source_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                event_type TEXT NOT NULL,
+                activity_type TEXT,
+                message TEXT NOT NULL,
+                canonical_url TEXT,
+                job_id INTEGER,
+                state TEXT,
+                found_count INTEGER NOT NULL DEFAULT 0,
+                queued_count INTEGER NOT NULL DEFAULT 0,
+                duplicate_count INTEGER NOT NULL DEFAULT 0,
+                ignored_count INTEGER NOT NULL DEFAULT 0,
+                error_count INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE health_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2643,16 +6639,160 @@ mod tests {
                 action TEXT,
                 result TEXT
             );
-            CREATE TABLE embedding_metadata (
-                id INTEGER PRIMARY KEY CHECK(id = 1),
-                model_id TEXT NOT NULL,
-                model_hash TEXT NOT NULL,
-                dimensions INTEGER NOT NULL,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+             CREATE TABLE embedding_metadata (
+                 id INTEGER PRIMARY KEY CHECK(id = 1),
+                 provider_id TEXT NOT NULL DEFAULT 'onnx',
+                 model_id TEXT NOT NULL,
+                 model_version TEXT NOT NULL DEFAULT '',
+                 model_hash TEXT NOT NULL,
+                 tokenizer_hash TEXT,
+                 dimensions INTEGER NOT NULL,
+                 generated_at DATETIME,
+                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+             );
+            CREATE TABLE profile_channels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_source_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'idle',
+                discovered_count INTEGER NOT NULL DEFAULT 0,
+                last_discovery_at DATETIME,
+                last_successful_discovery_at DATETIME,
+                cursor TEXT,
+                newest_known_content_id TEXT,
+                oldest_known_content_id TEXT,
+                error_code TEXT,
+                error_message TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(profile_source_id, kind)
+            );
+             CREATE TABLE content_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL DEFAULT 'tiktok',
+                platform_content_id TEXT NOT NULL,
+                canonical_url TEXT NOT NULL,
+                author_id TEXT,
+                author_handle TEXT,
+                title TEXT,
+                published_at DATETIME,
+                discovered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                availability TEXT NOT NULL DEFAULT 'available',
+                job_id INTEGER,
+                 UNIQUE(platform, platform_content_id)
+             );
+             CREATE TABLE search_units (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 job_id INTEGER NOT NULL,
+                 content_id INTEGER,
+                 representation TEXT NOT NULL,
+                 ordinal INTEGER NOT NULL,
+                 text TEXT NOT NULL,
+                 start_time REAL,
+                 end_time REAL,
+                 language TEXT,
+                 artifact_id INTEGER,
+                 provenance_json TEXT,
+                 confidence REAL,
+                 source_hash TEXT,
+                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                 UNIQUE(job_id, representation, ordinal)
+             );
+             CREATE TABLE search_embeddings (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 search_unit_id INTEGER NOT NULL,
+                 provider_id TEXT NOT NULL,
+                 model_version TEXT NOT NULL,
+                 dimensions INTEGER NOT NULL,
+                 vector_blob BLOB NOT NULL,
+                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                 UNIQUE(search_unit_id, provider_id, model_version)
+             );
+             CREATE TABLE content_annotations (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 job_id INTEGER NOT NULL,
+                 content_id INTEGER,
+                 annotation_type TEXT NOT NULL,
+                 normalized_value TEXT NOT NULL,
+                 display_value TEXT NOT NULL,
+                 confidence REAL,
+                 source TEXT NOT NULL,
+                 evidence_unit_id INTEGER,
+                 start_time REAL,
+                 end_time REAL,
+                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                 UNIQUE(job_id, annotation_type, normalized_value, source)
+             );
+             CREATE TABLE search_enrichment_status (
+                 job_id INTEGER NOT NULL,
+                 stage TEXT NOT NULL,
+                 status TEXT NOT NULL DEFAULT 'pending',
+                 version TEXT,
+                 error_message TEXT,
+                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                 PRIMARY KEY(job_id, stage)
+             );
+             CREATE VIRTUAL TABLE search_units_fts USING fts5(
+                 text,
+                 representation UNINDEXED,
+                 job_id UNINDEXED,
+                 tokenize = 'unicode61 remove_diacritics 2'
+             );
+             CREATE TABLE content_relationships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content_id INTEGER NOT NULL,
+                profile_source_id INTEGER NOT NULL,
+                channel_kind TEXT NOT NULL,
+                first_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                active BOOLEAN NOT NULL DEFAULT 1,
+                provenance_json TEXT,
+                sync_run_id TEXT,
+                UNIQUE(profile_source_id, channel_kind, content_id)
+            );
+            CREATE TABLE playlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                color TEXT NOT NULL DEFAULT '#8a5cff',
+                is_smart BOOLEAN NOT NULL DEFAULT 0,
+                auto_generated BOOLEAN NOT NULL DEFAULT 0,
+                cover_job_id INTEGER,
+                topic_keywords TEXT DEFAULT '[]',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                kind TEXT NOT NULL DEFAULT 'manual',
+                sort_mode TEXT NOT NULL DEFAULT 'manual',
+                smart_query TEXT,
+                smart_filters_json TEXT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE playlist_items (
+                playlist_id INTEGER NOT NULL,
+                content_id INTEGER NOT NULL,
+                position REAL NOT NULL DEFAULT 0,
+                added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                added_by TEXT NOT NULL DEFAULT 'user',
+                PRIMARY KEY (playlist_id, content_id)
             );",
         )
         .expect("Failed to create test schema");
         conn
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_data_dir_is_pinned_to_the_workspace() {
+        let previous = std::env::var_os("PULSAR_DATA_DIR");
+        std::env::remove_var("PULSAR_DATA_DIR");
+        let path = data_dir_path();
+        assert!(path.ends_with("data"));
+        assert!(path.parent().unwrap().join("package.json").exists());
+        if let Some(previous) = previous {
+            std::env::set_var("PULSAR_DATA_DIR", previous);
+        }
     }
 
     fn test_embedding(first: f32, second: f32) -> Vec<f32> {
@@ -2660,6 +6800,176 @@ mod tests {
         embedding[0] = first;
         embedding[1] = second;
         embedding
+    }
+
+    #[test]
+    fn unified_search_units_keep_timestamps_and_migrate_legacy_vectors() {
+        let mut conn = memory_db();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/search-units").unwrap();
+        insert_or_update_media_metadata(
+            &conn,
+            job_id,
+            &MediaMetadata {
+                title: "Óptimo opset 17 en local",
+                author: "Pulsaria Lab",
+                thumbnail: "poster.jpg",
+                duration: 30,
+                upload_date: "20260923",
+                video_path: "video.mp4",
+                audio_path: "audio.mp3",
+                transcript_path: "transcript.txt",
+                platform: "tiktok",
+            },
+        )
+        .unwrap();
+
+        let embedding = test_embedding(1.0, 0.0);
+        replace_search_units_with_embeddings(
+            &mut conn,
+            job_id,
+            &[SearchUnitInput {
+                ordinal: 0,
+                text: "Óptimo opset 17 funciona localmente".to_string(),
+                start_time: Some(12.5),
+                end_time: Some(16.0),
+                representation: SearchRepresentation::Transcript,
+                language: Some("es".to_string()),
+                artifact_id: None,
+                provenance_json: Some(r#"{"source":"whisper"}"#.to_string()),
+                confidence: Some(0.98),
+            }],
+            &[embedding.clone()],
+            "onnx",
+            EMBEDDING_MODEL_ID,
+        )
+        .unwrap();
+
+        let hits = search_search_units(&conn, "optimo opset 17", 10, true).unwrap();
+        assert!(
+            !hits.is_empty(),
+            "FTS5 should remove diacritics for exact search"
+        );
+        assert_eq!(hits[0].unit.start_time, Some(12.5));
+        assert_eq!(hits[0].unit.end_time, Some(16.0));
+        assert_eq!(
+            hits[0].unit.representation,
+            SearchRepresentation::Transcript
+        );
+
+        conn.execute(
+            "DELETE FROM search_embeddings WHERE search_unit_id IN (SELECT id FROM search_units WHERE job_id = ?1)",
+            params![job_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO transcript_embeddings(job_id, chunk_index, chunk_text, embedding_vector)
+             VALUES (?1, 0, ?2, ?3)",
+            params![job_id, "legacy", serialize_embedding(&embedding).unwrap()],
+        )
+        .unwrap();
+        let transaction = conn.transaction().unwrap();
+        migrate_legacy_search_embeddings(&transaction).unwrap();
+        transaction.commit().unwrap();
+        let migrated_dimensions: i64 = conn
+            .query_row(
+                "SELECT dimensions FROM search_embeddings se
+                 JOIN search_units su ON su.id = se.search_unit_id
+                 WHERE su.job_id = ?1",
+                params![job_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migrated_dimensions, EMBEDDING_DIMS as i64);
+    }
+
+    #[test]
+    fn structured_relationship_and_category_filters_are_hard_constraints() {
+        let conn = memory_db();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/filtering").unwrap();
+        let content_id = upsert_content_item(
+            &conn,
+            "tiktok",
+            "filtering",
+            "https://www.tiktok.com/@test/video/filtering",
+            None,
+            Some("@test"),
+            Some("Receta local"),
+            Some("2026-09-20"),
+            Some(job_id),
+        )
+        .unwrap()
+        .0;
+        conn.execute(
+            "INSERT INTO content_relationships(content_id, profile_source_id, channel_kind)
+             VALUES (?1, 1, 'saved')",
+            params![content_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO content_annotations(job_id, content_id, annotation_type,
+                 normalized_value, display_value, confidence, source)
+             VALUES (?1, ?2, 'category', 'recipe', 'Recipe', 0.9, 'test')",
+            params![job_id, content_id],
+        )
+        .unwrap();
+        let filters = ParsedFilters {
+            relationship: Some("saved".to_string()),
+            content_type: Some("recipe".to_string()),
+            ..ParsedFilters::default()
+        };
+        assert!(job_matches_filters(&conn, job_id, &filters).unwrap());
+
+        let wrong_relationship = ParsedFilters {
+            relationship: Some("liked".to_string()),
+            ..filters
+        };
+        assert!(!job_matches_filters(&conn, job_id, &wrong_relationship).unwrap());
+    }
+
+    #[test]
+    fn ocr_units_are_timestamped_idempotent_and_linked_to_keyframes() {
+        let mut conn = memory_db();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/ocr").unwrap();
+        conn.execute(
+            "INSERT INTO media_artifacts(job_id, kind, path, timestamp, size_bytes)
+             VALUES (?1, 'keyframe', 'frame-01.jpg', 18.0, 10)",
+            params![job_id],
+        )
+        .unwrap();
+        let visual = r#"{
+            "ocr_available": true,
+            "frames": [{
+                "timestamp": 18.0,
+                "ocr_text": "180°C",
+                "artifact_path": "frame-01.jpg"
+            }]
+        }"#;
+        assert_eq!(
+            index_visual_search_units(&mut conn, job_id, Some(visual)).unwrap(),
+            1
+        );
+        assert_eq!(
+            index_visual_search_units(&mut conn, job_id, Some(visual)).unwrap(),
+            1
+        );
+        let (count, artifact_id): (i64, Option<i64>) = conn
+            .query_row(
+                "SELECT COUNT(*), MAX(artifact_id) FROM search_units
+                 WHERE job_id = ?1 AND representation = 'ocr'",
+                params![job_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        assert!(artifact_id.is_some());
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM search_enrichment_status WHERE job_id = ?1 AND stage = 'ocr'",
+                params![job_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "ready");
     }
 
     #[test]
@@ -2855,6 +7165,45 @@ mod tests {
     }
 
     #[test]
+    fn activity_timeline_records_real_transitions_and_errors() {
+        let conn = memory_db();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/activity").unwrap();
+
+        update_job_status(&conn, job_id, "downloading", 15).unwrap();
+        update_job_status(&conn, job_id, "downloading", 50).unwrap();
+        update_job_status(&conn, job_id, "transcribing", 65).unwrap();
+        update_job_error(
+            &conn,
+            job_id,
+            "error",
+            "ProcessSpawnError: worker unavailable",
+        )
+        .unwrap();
+
+        let events = get_job_activity(&conn, job_id).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.status.as_str())
+                .collect::<Vec<_>>(),
+            ["queued", "downloading", "transcribing", "error",]
+        );
+        assert_eq!(events[1].progress, 15);
+        assert_eq!(
+            events[3].error_code.as_deref(),
+            Some("LOCAL_WORKER_START_FAILED")
+        );
+        assert_eq!(
+            events[3].user_message.as_deref(),
+            Some("No pudimos completar este trabajo.")
+        );
+        assert_eq!(
+            events[3].technical_error.as_deref(),
+            Some("ProcessSpawnError: worker unavailable")
+        );
+    }
+
+    #[test]
     fn canonical_url_variants_do_not_create_a_second_job() {
         let conn = memory_db();
         let first = insert_job(
@@ -2895,6 +7244,133 @@ mod tests {
         assert_eq!(recovered.consecutive_failures, 0);
         assert_eq!(recovered.discovered_count, 3);
         assert!(recovered.last_error.is_none());
+    }
+
+    #[test]
+    fn profile_source_registration_persists_selection_and_deduplicates() {
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: true,
+            favorites: true,
+        };
+
+        let first = crate::application::collection_service::register_profile_source(
+            &conn, "@daniel", &selection,
+        )
+        .unwrap();
+        assert!(!first.duplicate);
+        assert_eq!(first.source.profile_url, "https://www.tiktok.com/@daniel");
+        assert_eq!(first.source.status, "ready");
+
+        let duplicate = crate::application::collection_service::register_profile_source(
+            &conn,
+            "https://tiktok.com/@daniel/",
+            &selection,
+        )
+        .unwrap();
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.source.id, first.source.id);
+        assert_eq!(
+            get_collection_sources(&conn).unwrap().len(),
+            1,
+            "canonical profile variants must share one SQLite row"
+        );
+
+        let stored = get_collection_source(&conn, first.source.id).unwrap();
+        assert_eq!(
+            stored.watch_config_json,
+            r#"{"posts":true,"likes":true,"saved":true,"reposts":false}"#
+        );
+        assert!(get_collection_sources_to_sync(&conn).unwrap().is_empty());
+
+        let paused = crate::application::collection_service::ProfileSourceSelection {
+            posts: false,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let updated = crate::application::collection_service::update_profile_source_settings(
+            &conn,
+            first.source.id,
+            &paused,
+        )
+        .unwrap();
+        assert_eq!(updated.status, "paused");
+        assert!(!updated.active);
+        let reloaded = get_collection_source(&conn, first.source.id).unwrap();
+        assert_eq!(reloaded.status, "paused");
+        assert_eq!(
+            reloaded.watch_config_json,
+            r#"{"posts":false,"likes":false,"saved":false,"reposts":false}"#
+        );
+    }
+
+    #[test]
+    fn profile_source_survives_database_reopen_with_updated_settings() {
+        let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
+        let original = std::env::var_os("PULSAR_DATA_DIR");
+        let test_dir = std::env::temp_dir().join(format!(
+            "pulsaria-profile-source-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&test_dir).unwrap();
+        std::env::set_var("PULSAR_DATA_DIR", &test_dir);
+
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let source_id = {
+            let connection = init_db().unwrap();
+            crate::application::collection_service::register_profile_source(
+                &connection,
+                "@persisted",
+                &selection,
+            )
+            .unwrap()
+            .source
+            .id
+        };
+
+        let updated_selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: false,
+            reposts: false,
+            saved: true,
+            favorites: false,
+        };
+        {
+            let connection = init_db().unwrap();
+            let stored = get_collection_source(&connection, source_id).unwrap();
+            assert_eq!(stored.status, "ready");
+            assert_eq!(stored.username.as_deref(), Some("@persisted"));
+            crate::application::collection_service::update_profile_source_settings(
+                &connection,
+                source_id,
+                &updated_selection,
+            )
+            .unwrap();
+        }
+
+        let reopened = init_db().unwrap();
+        let stored = get_collection_source(&reopened, source_id).unwrap();
+        assert_eq!(stored.status, "ready");
+        assert_eq!(
+            stored.watch_config_json,
+            r#"{"posts":false,"likes":false,"saved":true,"reposts":false}"#
+        );
+        drop(reopened);
+
+        if let Some(value) = original {
+            std::env::set_var("PULSAR_DATA_DIR", value);
+        } else {
+            std::env::remove_var("PULSAR_DATA_DIR");
+        }
+        fs::remove_dir_all(&test_dir).unwrap();
     }
 
     #[test]
@@ -3331,5 +7807,94 @@ mod tests {
         assert!(clusters.iter().any(|cluster| {
             cluster.contains(&first) && cluster.contains(&third) && !cluster.contains(&second)
         }));
+    }
+
+    #[test]
+    fn init_db_auto_quarantines_corrupted_database_and_creates_fresh_db() {
+        let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
+        let original_dir = std::env::var_os("PULSAR_DATA_DIR");
+        let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let test_dir = std::env::temp_dir().join(format!("pulsar-corrupt-test-{}", stamp));
+        fs::create_dir_all(&test_dir).unwrap();
+        std::env::set_var("PULSAR_DATA_DIR", &test_dir);
+
+        let db_path = test_dir.join("library.db");
+        // Write invalid garbage into library.db
+        fs::write(&db_path, b"NOT_A_VALID_SQLITE_DATABASE_CORRUPT_BYTES").unwrap();
+
+        // Calling init_db() must not crash or fail; it should quarantine and create fresh DB
+        let conn = init_db().expect("init_db must succeed by self-healing corrupt database");
+        let is_ok: String = conn
+            .query_row("PRAGMA integrity_check;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(is_ok.to_lowercase(), "ok");
+
+        // Verify quarantine file exists in backups/
+        let backups_dir = test_dir.join("backups");
+        assert!(backups_dir.is_dir());
+        let quarantined = fs::read_dir(&backups_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                name.starts_with("library-corrupt-") && name.ends_with(".db")
+            });
+        assert!(
+            quarantined.is_some(),
+            "Quarantined corrupt file must exist in backups"
+        );
+
+        drop(conn);
+        if let Some(val) = original_dir {
+            std::env::set_var("PULSAR_DATA_DIR", val);
+        } else {
+            std::env::remove_var("PULSAR_DATA_DIR");
+        }
+        let _ = fs::remove_dir_all(&test_dir);
+    }
+
+    #[test]
+    fn init_db_restores_from_healthy_backup_when_database_is_corrupt() {
+        let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
+        let original_dir = std::env::var_os("PULSAR_DATA_DIR");
+        let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let test_dir = std::env::temp_dir().join(format!("pulsar-restore-test-{}", stamp));
+        fs::create_dir_all(&test_dir).unwrap();
+        std::env::set_var("PULSAR_DATA_DIR", &test_dir);
+
+        let db_path = test_dir.join("library.db");
+        let backups_dir = test_dir.join("backups");
+        fs::create_dir_all(&backups_dir).unwrap();
+
+        // 1. Create a valid database with a job
+        let job_id = {
+            let conn = init_db().unwrap();
+            let id = insert_job(&conn, "https://www.tiktok.com/@backup/video/777").unwrap();
+            // Drop connection to flush to disk
+            id
+        };
+
+        // 2. Copy the valid database to backups/ as a pre-migration backup
+        let backup_path = backups_dir.join("library-pre-v7-20261001-120000-000-0.db");
+        fs::copy(&db_path, &backup_path).unwrap();
+
+        // 3. Corrupt the active library.db
+        fs::write(&db_path, b"MALFORMED_HEADER_GARBAGE_PAYLOAD_HERE").unwrap();
+
+        // 4. init_db() should quarantine the corrupt file and restore from the backup
+        let conn = init_db().expect("init_db must succeed by restoring from healthy backup");
+        let restored_job = get_job_by_id(&conn, job_id)
+            .unwrap()
+            .expect("job must be restored");
+        assert_eq!(restored_job.url, "https://www.tiktok.com/@backup/video/777");
+
+        drop(conn);
+        if let Some(val) = original_dir {
+            std::env::set_var("PULSAR_DATA_DIR", val);
+        } else {
+            std::env::remove_var("PULSAR_DATA_DIR");
+        }
+        let _ = fs::remove_dir_all(&test_dir);
     }
 }

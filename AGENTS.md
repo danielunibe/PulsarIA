@@ -13,16 +13,16 @@ This document helps AI agents work efficiently in the Pulsaria codebase by provi
 Pulsaria/
 ├── src-tauri/           ← Rust + Tauri 2 backend
 │   ├── src/
-│   │   ├── main.rs      ← Composition root (285 LOC, bootstrap only)
+│   │   ├── main.rs      ← Composition root, startup, window and IPC wiring (~767 LOC)
 │   │   ├── commands.rs  ← All #[tauri::command] IPC handlers
 │   │   ├── db.rs        ← SQLite schema & queries
 │   │   ├── domain/      ← Pure domain models & ports
 │   │   ├── application/ ← Use cases & orchestration
-│   │   ├── infrastructure/ ← External adapters (Python, Redis, HNSW)
+│   │   ├── infrastructure/ ← External adapters (Python, vector index, OS/runtime)
 │   │   ├── api/         ← REST API gateway
 │   │   └── ...
 │   └── Cargo.toml
-├── app/                 ← Next.js 15 frontend
+├── app/                 ← Next.js 16.3.8 frontend
 │   ├── page.tsx         ← Main dashboard
 │   ├── components/      ← React components
 │   ├── hooks/           ← Custom hooks
@@ -77,8 +77,8 @@ cargo check --manifest-path src-tauri/Cargo.toml
 # Frontend only
 npm run build
 
-# Full stack
-cargo check && npm run build
+# Full stack (run from repository root)
+cargo check --manifest-path src-tauri/Cargo.toml && npm run build
 ```
 
 ## Common Tasks
@@ -106,16 +106,27 @@ cargo check && npm run build
 - **DON'T** access `rusqlite::Connection` directly from UI components
 - **DON'T** hardcode ports/paths — use `data_dir_path()` or env vars
 
-## God Modules (Avoid Expanding)
+## Large Modules (Snapshot: 2026-09-28; avoid expanding)
 
 | Module | LOC | Why Critical |
 |--------|-----|--------------|
-| `commands.rs` | ~1600 | All IPC commands — OK to be large, but extract domain logic to application/ |
-| `db.rs` | 861 | All SQL queries — consider splitting by domain |
-| `queue.rs` (legacy) | 798 | Python worker dispatch — being superseded by queue_service.rs |
+| `main.rs` | ~767 | Startup and Tauri composition — keep business logic in application services |
+| `commands.rs` | ~5451 | IPC command adapters — keep workflows in application services |
+| `db.rs` | ~7583 | SQLite schema, migrations, and queries — split only with clear ownership |
+| `application/queue_service.rs` | ~1433 | Queue orchestration — keep worker-specific details behind infrastructure ports |
 
 ## Circular Dependencies (Fixed)
 
 | Before | After |
 |--------|-------|
 | `queue_service.rs` ↔ `python_runner.rs` | `JobMessage` moved to `domain/models.rs` |
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

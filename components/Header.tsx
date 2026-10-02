@@ -1,120 +1,83 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
-import { motion } from 'motion/react';
-import { cn } from '@/lib/utils';
-import { TT_PINK, TT_CYAN, TIKTOK_LOGO_PATH } from '@/lib/design-tokens';
-import { 
-    FaMagnifyingGlass, 
-    FaXmark, 
-    FaLayerGroup,
-    FaGear, 
-    FaClock, 
-    FaCalendarDay, 
-    FaArrowDownAZ, 
-    FaStopwatch, 
-    FaTableCells, 
-    FaListUl, 
-    FaGrip,
-    FaCheck,
-    FaFilter,
-    FaWindowMinimize,
-    FaWindowMaximize,
-    FaWindowRestore,
-    FaFilm,
-    FaXmark as FaClose
-} from 'react-icons/fa6';
-import { toast } from 'sonner';
-import { useI18n, type TranslationKey } from '@/lib/i18n';
-import { type PageConfig, type GridLayout, type GridColumns, type SortKey } from './PagePanel';
 
-const TikTokIcon = ({ size = 28, className = "" }: { size?: number, className?: string }) => (
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { motion } from 'motion/react';
+import Image from 'next/image';
+import { cn } from '@/lib/utils';
+import { TIKTOK_LOGO_PATH } from '@/lib/design-tokens';
+import { FaEye, FaEyeSlash, FaFilter } from '@/components/icon-library';
+import { PagePanel, type PageConfig } from '@/components/PagePanel';
+import { toast } from 'sonner';
+import { useI18n } from '@/lib/i18n';
+
+export const TikTokIcon = ({ size = 28, className = '' }: { size?: number; className?: string }) => (
     <svg
         width={size}
         height={size}
         viewBox="0 0 24 24"
         className={className}
-        style={{
-            fill: 'rgba(255,255,255,0.85)',
-            filter: `drop-shadow(2px 0px 0px ${TT_PINK}40) drop-shadow(-2px 0px 0px ${TT_CYAN}40)`,
-        }}
+        style={{ fill: 'rgba(255,255,255,0.85)' }}
     >
         <path d={TIKTOK_LOGO_PATH} />
     </svg>
 );
 
-const SearchIcon = () => <FaMagnifyingGlass size={14} />;
-const XIcon = () => <FaXmark size={12} />;
-const ViewOrganizationIcon = () => <FaLayerGroup size={14} />;
-const SettingsIcon = () => <FaGear size={15} />;
-const ClockFillIcon = () => <FaClock size={13} />;
-const CalendarFillIcon = () => <FaCalendarDay size={13} />;
-const SortAlphaIcon = () => <FaArrowDownAZ size={13} />;
-const TimerFillIcon = () => <FaStopwatch size={13} />;
-const MinimizeIcon = () => <FaWindowMinimize size={12} />;
-const MaximizeIcon = () => <FaWindowMaximize size={12} />;
-const RestoreIcon = () => <FaWindowRestore size={12} />;
-const CloseIcon = () => <FaClose size={12} />;
+export const PulsariaIcon = ({ size = 28, className = '' }: { size?: number; className?: string }) => (
+    <Image
+        src="/pulsaria-icon.png"
+        alt=""
+        aria-hidden="true"
+        width={size}
+        height={size}
+        unoptimized
+        loading="eager"
+        draggable={false}
+        className={cn('pulsaria-mark object-contain', className)}
+    />
+);
 
-export const TITLEBAR_HEIGHT_PX = 40;
+const WindowGlyph = ({ kind }: { kind: 'minimize' | 'maximize' | 'restore' | 'close' }) => (
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {kind === 'minimize' && <path d="M4 10h12" />}
+        {kind === 'maximize' && <rect x="4.5" y="4.5" width="11" height="11" rx="1.5" />}
+        {kind === 'restore' && <path d="M7 5h8v8M5 8v7h8" />}
+        {kind === 'close' && <path d="m5 5 10 10M15 5 5 15" />}
+    </svg>
+);
 
-const SORT_OPTIONS = [
-    { id: 'date_desc', labelKey: 'recent', Icon: ClockFillIcon },
-    { id: 'date_asc', labelKey: 'oldest', Icon: CalendarFillIcon },
-    { id: 'title', labelKey: 'byName', Icon: SortAlphaIcon },
-    { id: 'duration', labelKey: 'byDuration', Icon: TimerFillIcon },
-];
+export type { SearchMode } from '@/lib/unified-search';
 
-const btnBase: React.CSSProperties = {
-    height: '40px',
-    borderRadius: '14px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1)',
-    border: '1px solid rgba(255,255,255,0.08)',
-    background: 'rgba(0,0,0,0.4)',
-    backdropFilter: 'blur(30px)',
-    boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.2), inset 0 0 0 1px rgba(255,255,255,0.05), 0 8px 16px rgba(0,0,0,0.5)',
-    cursor: 'pointer',
-    transform: 'scale(1)',
-};
-
-export type SearchMode = 'literal' | 'semantic';
-
-/**
- * Props del componente Header.
- */
 interface HeaderProps {
-    /** Callback para abrir el panel de Settings */
-    onOpenSettings: () => void;
-    /** Número de videos activos */
     activeCount?: number;
-    /** Si los jobs se están cargando inicialmente */
     isLoading?: boolean;
-    /** Callback cuando el usuario envía una búsqueda */
-    onSearchSubmit?: (query: string, mode?: SearchMode) => void;
-    /** Callback cuando el usuario limpia la búsqueda */
-    onSearchClear?: () => void;
-    /** Configuración actual de presentación y filtros de biblioteca */
-    pageConfig?: PageConfig;
-    /** Callback para actualizar la configuración de vista */
-    onPageConfigChange?: (config: PageConfig) => void;
-    /** Callback cuando cambia el criterio de ordenamiento */
-    onSortChange?: (key: string) => void;
-    /** Clave de ordenamiento actual */
-    sortKey?: string;
-    /** Modo de búsqueda actual */
-    searchMode?: SearchMode;
-    /** Callback para cambiar modo de búsqueda */
-    onSearchModeChange?: (mode: SearchMode) => void;
-    /** Abre el visor inmersivo de videos visibles */
-    onOpenCinema?: () => void;
-    /** Indica si existe una colección lista para Cinema */
-    canOpenCinema?: boolean;
+    onOpenSearch?: () => void;
+    showTikTokPill?: boolean;
+    onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void;
+    backgroundVisible: boolean;
+    onToggleBackground: () => void;
+    showDemoVideos: boolean;
+    onToggleDemoVideos: () => void;
+    onToggleTikTokPill: () => void;
+    pageConfig: PageConfig;
+    onPageConfigChange: (config: PageConfig) => void;
 }
 
-function useWindowControls() {
+export interface WindowControlsApi {
+    isMaximized: boolean;
+    minimize: () => Promise<void>;
+    maximize: () => Promise<void>;
+    close: () => Promise<void>;
+    windowAction: 'minimize' | 'maximize' | 'close' | null;
+}
+
+export function useWindowControls(onClose?: () => Promise<void> | void): WindowControlsApi {
     const [isMaximized, setIsMaximized] = useState(false);
+    const [windowAction, setWindowAction] = useState<'minimize' | 'maximize' | 'close' | null>(null);
+
+    const markWindowAction = (action: 'minimize' | 'maximize' | 'close') => {
+        setWindowAction(action);
+        window.setTimeout(() => setWindowAction(null), 280);
+    };
 
     const reportWindowError = (action: string, error: unknown) => {
         console.warn(`Window ${action} failed:`, error);
@@ -125,39 +88,41 @@ function useWindowControls() {
     };
 
     const minimize = async () => {
+        markWindowAction('minimize');
         try {
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
-            const window = getCurrentWindow();
-            await window.minimize();
-        } catch (e) {
-            reportWindowError('minimizar', e);
+            await getCurrentWindow().minimize();
+        } catch (error) {
+            reportWindowError('minimizar', error);
         }
     };
 
     const maximize = async () => {
+        markWindowAction('maximize');
         try {
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
-            const window = getCurrentWindow();
-            // Use Tauri's atomic toggle so two quick clicks cannot race a
-            // stale React value between maximize and unmaximize.
-            await window.toggleMaximize();
-            setIsMaximized(await window.isMaximized());
-        } catch (e) {
-            reportWindowError('maximizar', e);
+            const currentWindow = getCurrentWindow();
+            await currentWindow.toggleMaximize();
+            setIsMaximized(await currentWindow.isMaximized());
+        } catch (error) {
+            reportWindowError('maximizar', error);
         }
     };
 
     const close = async () => {
+        markWindowAction('close');
         try {
+            if (onClose) {
+                await onClose();
+                return;
+            }
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
-            const window = getCurrentWindow();
-            await window.close();
-        } catch (e) {
-            reportWindowError('cerrar', e);
+            await getCurrentWindow().close();
+        } catch (error) {
+            reportWindowError('cerrar', error);
         }
     };
 
-    // Listen for maximize/unmaximize events
     useEffect(() => {
         let unlistenResize: (() => void) | undefined;
         let active = true;
@@ -179,455 +144,220 @@ function useWindowControls() {
         };
     }, []);
 
-    return { isMaximized, minimize, maximize, close };
+    return { isMaximized, minimize, maximize, close, windowAction };
 }
 
-/** Barra de título nativa sin decoraciones de Windows. Vive en el shell raíz. */
-export function WindowTitlebar() {
-    const { isMaximized, minimize, maximize, close } = useWindowControls();
+export function WindowControls({ controls }: { controls: WindowControlsApi }) {
+    const { isMaximized, minimize, maximize, close, windowAction } = controls;
+    const { t } = useI18n();
 
     return (
-        <div
-            data-tauri-drag-region="true"
-            className="w-full shrink-0 flex items-center justify-between px-4"
-            style={{
-                position: 'relative',
-                zIndex: 100,
-                height: `${TITLEBAR_HEIGHT_PX}px`,
-                background: 'rgba(10, 11, 16, 0.78)',
-                backdropFilter: 'blur(40px)',
-                WebkitBackdropFilter: 'blur(40px)',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-                userSelect: 'none',
-            }}
-            onDoubleClick={(event) => {
-                const target = event.target;
-                if (!(target instanceof Element) || !target.closest('button')) void maximize();
-            }}
-        >
-            <div className="flex items-center gap-2.5 pointer-events-none">
-                <TikTokIcon size={18} className="drop-shadow-[0_0_8px_rgba(254,44,85,0.5)]" />
-                <span className="font-black tracking-[0.15em] uppercase text-white/90 text-[11px]">PULSARIA</span>
-            </div>
-
-            <div className="flex items-center gap-1 pointer-events-auto app-no-drag">
-                <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void minimize(); }} title="Minimizar" aria-label="Minimizar" className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer app-no-drag">
-                    <MinimizeIcon />
-                </button>
-                <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void maximize(); }} title={isMaximized ? 'Restaurar' : 'Maximizar'} aria-label={isMaximized ? 'Restaurar ventana' : 'Maximizar ventana'} className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer app-no-drag">
-                    {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
-                </button>
-                <button type="button" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); void close(); }} title="Cerrar" aria-label="Cerrar" className="w-8 h-8 flex items-center justify-center rounded-lg text-white/60 hover:text-[#fe2c55] hover:bg-[#fe2c55]/10 transition-colors cursor-pointer app-no-drag">
-                    <CloseIcon />
-                </button>
-            </div>
+        <div className="pulsaria-window-header__window-controls flex shrink-0 items-center gap-1 pointer-events-auto app-no-drag">
+            <motion.button
+                type="button"
+                onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
+                onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void minimize(); }}
+                title={t('windowMinimize')}
+                aria-label={t('windowMinimize')}
+                style={{ width: '36px', height: '36px', borderRadius: 0, border: 0, background: 'transparent', boxShadow: 'none', padding: 0 }}
+                animate={windowAction === 'minimize' ? { scale: [1, 0.82, 1] } : { scale: 1 }}
+                transition={{ duration: 0.28 }}
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.95 }}
+                className="pulsaria-window-control flex items-center justify-center text-white/55 transition-colors hover:text-white cursor-pointer app-no-drag"
+            >
+                <WindowGlyph kind="minimize" />
+            </motion.button>
+            <motion.button
+                type="button"
+                onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
+                onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void maximize(); }}
+                title={isMaximized ? t('windowRestore') : t('windowMaximize')}
+                aria-label={isMaximized ? t('windowRestore') : t('windowMaximize')}
+                style={{ width: '36px', height: '36px', borderRadius: 0, border: 0, background: 'transparent', boxShadow: 'none', padding: 0 }}
+                animate={windowAction === 'maximize' ? { scale: [1, 1.16, 1] } : { scale: 1 }}
+                transition={{ duration: 0.28 }}
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.95 }}
+                className="pulsaria-window-control flex items-center justify-center text-white/55 transition-colors hover:text-white cursor-pointer app-no-drag"
+            >
+                <WindowGlyph kind={isMaximized ? 'restore' : 'maximize'} />
+            </motion.button>
+            <motion.button
+                type="button"
+                onMouseDown={(event: ReactMouseEvent<HTMLButtonElement>) => event.stopPropagation()}
+                onClick={(event: ReactMouseEvent<HTMLButtonElement>) => { event.stopPropagation(); void close(); }}
+                title={t('windowClose')}
+                aria-label={t('windowClose')}
+                style={{ width: '36px', height: '36px', borderRadius: 0, border: 0, background: 'transparent', boxShadow: 'none', padding: 0 }}
+                animate={windowAction === 'close' ? { scale: [1, 0.82, 1] } : { scale: 1 }}
+                transition={{ duration: 0.28 }}
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.95 }}
+                className="pulsaria-window-control flex items-center justify-center text-white/55 transition-colors hover:text-rose-200 cursor-pointer app-no-drag"
+            >
+                <WindowGlyph kind="close" />
+            </motion.button>
         </div>
     );
 }
 
+function startWindowDrag(event: ReactMouseEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('button, input, a, [data-no-drag], .app-no-drag')) return;
+    void (async () => {
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            await getCurrentWindow().startDragging();
+        } catch {
+            // En navegador no existe una ventana nativa que arrastrar.
+        }
+    })();
+}
+
 export function Header({
-    onOpenSettings,
     activeCount = 0,
-    onSearchSubmit,
-    onSearchClear,
+    onOpenSearch,
+    isLoading = false,
+    showTikTokPill = true,
+    onContextMenu,
+    backgroundVisible,
+    onToggleBackground,
+    showDemoVideos,
+    onToggleDemoVideos,
+    onToggleTikTokPill,
     pageConfig,
     onPageConfigChange,
-    onSortChange,
-    sortKey,
-    searchMode = 'literal',
-    isLoading = false,
-    onOpenCinema,
-    canOpenCinema = false,
 }: HeaderProps) {
     const { t } = useI18n();
-    const [viewMenuOpen, setViewMenuOpen] = useState(false);
-    const activeSort = sortKey || pageConfig?.sortKey || 'date_desc';
-    const [query, setQuery] = useState('');
-    const inputRef = useRef<HTMLInputElement>(null);
-    const menuRef = useRef<HTMLDivElement>(null);
+    const windowControls = useWindowControls();
+    const [openHeaderPanel, setOpenHeaderPanel] = useState<'visibility' | 'filters' | null>(null);
+    const headerToolsRef = useRef<HTMLDivElement>(null);
 
-    // Cerrar menú al hacer clic fuera
     useEffect(() => {
-        const handler = (e: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-                setViewMenuOpen(false);
+        if (!openHeaderPanel) return;
+        const onPointerDown = (event: PointerEvent) => {
+            if (event.target instanceof Node && !headerToolsRef.current?.contains(event.target)) {
+                setOpenHeaderPanel(null);
             }
         };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, []);
-
-    // Debounced search
-    const onSearchSubmitRef = useRef(onSearchSubmit);
-    const onSearchClearRef = useRef(onSearchClear);
-    const searchModeRef = useRef<SearchMode>(searchMode);
-    useEffect(() => {
-        onSearchSubmitRef.current = onSearchSubmit;
-        onSearchClearRef.current = onSearchClear;
-        searchModeRef.current = searchMode;
-    }, [onSearchSubmit, onSearchClear, searchMode]);
-
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    useEffect(() => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        const trimmed = query.trim();
-        if (trimmed.length === 0) {
-            onSearchClearRef.current?.();
-            return;
-        }
-        if (trimmed.length < 2) return;
-        debounceRef.current = setTimeout(() => {
-            onSearchSubmitRef.current?.(query, searchModeRef.current);
-        }, 600);
-        return () => {
-            if (debounceRef.current) clearTimeout(debounceRef.current);
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setOpenHeaderPanel(null);
         };
-    }, [query]);
+        document.addEventListener('pointerdown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', onPointerDown);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [openHeaderPanel]);
 
-    const updateConfig = (partial: Partial<PageConfig>) => {
-        if (pageConfig && onPageConfigChange) {
-            onPageConfigChange({ ...pageConfig, ...partial });
-        }
-        if (partial.sortKey && onSortChange) {
-            onSortChange(partial.sortKey);
-        }
-    };
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+                event.preventDefault();
+                onOpenSearch?.();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [onOpenSearch]);
 
     return (
-        <div className="w-full sticky top-0 z-50 pointer-events-none">
-            {/* Header Content — Search, View/Sort, Settings */}
-            <div className="w-full px-8 pt-4 pb-3 flex items-center justify-between sticky top-0 z-40 self-start pointer-events-none">
-                {/* 1. Contador de Tiktoks */}
-                <div
-                    onClick={() => {
-                        if (activeCount === 0) {
-                            toast.info(t('noResults'), {
-                                description: t('pasteLinks'),
-                                duration: 3500
-                            });
-                        } else {
-                            toast.success(t('library'), {
-                                description: `${activeCount} ${t('library').toLowerCase()}.`,
-                                duration: 3000
-                            });
-                        }
-                    }}
-                    className="h-10 flex items-center gap-2.5 px-4 pointer-events-auto relative overflow-hidden group shadow-lg cursor-pointer"
-                    style={{
-                        ...btnBase,
-                        background: 'linear-gradient(135deg, rgba(254,44,85,0.2) 0%, rgba(37,244,238,0.2) 100%)',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        boxShadow: 'inset 0 4px 15px rgba(0,0,0,0.5), inset 0 0 20px rgba(254,44,85,0.1)',
-                    }}
-                >
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] duration-1000 transition-all pointer-events-none" />
-                    <div className="absolute top-0 bottom-0 left-0 w-[2px] bg-[#fe2c55] shadow-[0_0_10px_#fe2c55]" />
-                    <div className="absolute top-0 bottom-0 right-0 w-[2px] bg-[#25f4ee] shadow-[0_0_10px_#25f4ee]" />
-                    <div className="flex items-center justify-center relative scale-[1.05]">
-                        <TikTokIcon size={20} className="relative z-10" />
+        <div
+            data-tauri-drag-region="true"
+            className="app-drag-region pulsaria-window-header w-full sticky top-0 z-50 pointer-events-auto font-sans select-none relative"
+            onMouseDown={startWindowDrag}
+            onDoubleClick={(event) => {
+                const target = event.target;
+                if (!(target instanceof Element) || !target.closest('button, input, a, [data-no-drag], .app-no-drag')) void windowControls.maximize();
+            }}
+            onContextMenu={(event) => {
+                const target = event.target;
+                if (target instanceof Element && target.closest('input, textarea, [contenteditable="true"]')) return;
+                if (!onContextMenu) return;
+                event.preventDefault();
+                event.stopPropagation();
+                onContextMenu(event);
+            }}
+        >
+            <div aria-hidden="true" className="pulsaria-window-header__wash absolute inset-x-0 top-0 pointer-events-none select-none overflow-hidden" style={{ zIndex: 0 }} />
+
+            <div className="pulsaria-window-header__topbar w-full min-w-0 relative z-10 self-start pointer-events-none">
+                <div className="pulsaria-window-header__brand min-w-0 flex items-center gap-2.5 overflow-visible pointer-events-auto">
+                    <div className="flex items-center gap-2.5" aria-label="Pulsaria">
+                        <span className="text-sm font-black tracking-[0.18em] text-white/90">Pulsaria</span>
                     </div>
-                    <span className="font-black tracking-[0.2em] uppercase text-white drop-shadow-md relative z-10 text-[12px]">
-                        {isLoading ? '...' : `${activeCount} TIKTOKS`}
-                    </span>
                 </div>
 
-                {/* 2. Barra de Búsqueda TikTok Pink + Botón de Vista y Orden + Configuración */}
-                <div className="flex items-center gap-3 pointer-events-auto">
-                    {/* Search Bar TikTok Pink Estilizada y Simple */}
-                    <div 
-                        className="group/search relative flex items-center h-10 px-3 rounded-[14px] transition-[width] duration-300 w-10 hover:w-80 focus-within:w-80 cursor-text overflow-hidden"
-                        style={{
-                            height: '40px',
-                            justifyContent: 'flex-start',
-                            gap: '10px',
-                            border: 'none',
-                            background: '#fe2c55',
-                            boxShadow: 'none',
-                        }}
-                        onClick={() => inputRef.current?.focus()}
-                    >
-                        <span className="flex-shrink-0 flex items-center text-white">
-                            <SearchIcon />
-                        </span>
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            aria-label={t('search')}
-                            value={query}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
-                            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                                if (e.key === 'Enter' && onSearchSubmit) {
-                                    if (debounceRef.current) clearTimeout(debounceRef.current);
-                                    onSearchSubmit(query, searchMode);
-                                }
-                            }}
-                            placeholder={`${t('search')}…`}
-                            className="min-w-0 flex-1 bg-transparent text-xs font-medium text-white placeholder-white/75 outline-none opacity-0 pointer-events-none transition-opacity duration-200 group-hover/search:opacity-100 group-hover/search:pointer-events-auto group-focus-within/search:opacity-100 group-focus-within/search:pointer-events-auto"
-                        />
-                        {query.trim().length > 0 && (
-                            <button
-                                type="button"
-                                onClick={(e: React.MouseEvent) => {
-                                    e.stopPropagation();
-                                    setQuery('');
-                                    if (onSearchClear) onSearchClear();
-                                }}
-                                className="flex-shrink-0 cursor-pointer border-none bg-transparent p-1 text-white/80 transition-colors hover:text-white"
-                                 title={t('clearSearch')}
-                            >
-                                <XIcon />
-                            </button>
-                        )}
-                    </div>
-
-                    {/* Botón y Menú Unificado: Vista y Ordenamiento */}
-                    <div ref={menuRef} className="relative">
-                        <motion.button
+                <div className="pulsaria-window-header__center-tools app-no-drag" ref={headerToolsRef}>
+                    <div className="pulsaria-header-tool-buttons">
+                        <button
                             type="button"
-                            onClick={() => setViewMenuOpen(o => !o)}
-                            aria-label="Vista y ordenamiento"
-                            aria-expanded={viewMenuOpen}
-                            aria-controls="view-organization-menu"
-                            title="Opciones de visualización y ordenamiento"
-                            style={{
-                                ...btnBase,
-                                width: '40px',
-                                border: viewMenuOpen ? '1px solid rgba(37,244,238,0.5)' : btnBase.border,
-                                background: viewMenuOpen ? 'rgba(8,18,22,0.85)' : btnBase.background,
-                            }}
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            animate={viewMenuOpen
-                                ? { boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.8), 0 0 14px rgba(37,244,238,0.25)' }
-                                : { boxShadow: btnBase.boxShadow as string }
-                            }
-                            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                            className="group"
+                            className="pulsaria-header-tool"
+                            aria-expanded={openHeaderPanel === 'visibility'}
+                            aria-controls="pulsaria-visibility-popover"
+                            onClick={() => setOpenHeaderPanel((current) => current === 'visibility' ? null : 'visibility')}
                         >
-                            <motion.span
-                                animate={{ rotate: 0, color: viewMenuOpen ? '#25f4ee' : 'rgba(255,255,255,0.6)' }}
-                                transition={{ duration: 0.2 }}
-                                style={{ display: 'flex', filter: viewMenuOpen ? 'drop-shadow(0 0 8px rgba(37,244,238,0.6))' : 'none' }}
-                            >
-                                <ViewOrganizationIcon />
-                            </motion.span>
-                        </motion.button>
-
-                        {/* Popover / Menú Desplegable de Vista y Filtros */}
-                        {viewMenuOpen && (
-                            <motion.div
-                                id="view-organization-menu"
-                                className="absolute top-full right-0 mt-2 w-64 p-3.5 overflow-hidden z-50 flex flex-col gap-3 font-sans"
-                                initial={{ opacity: 0, y: -8, scale: 0.96, transformOrigin: 'top right' }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                                transition={{ type: 'spring', stiffness: 380, damping: 26 }}
-                                style={{
-                                    background: 'rgba(8, 10, 16, 0.96)',
-                                    backdropFilter: 'blur(40px)',
-                                    borderRadius: '18px',
-                                    border: '1px solid rgba(37,244,238,0.18)',
-                                    boxShadow: '0 25px 50px rgba(0,0,0,0.8), 0 0 0 1px rgba(37,244,238,0.08), inset 0 1px 0 rgba(255,255,255,0.08)',
-                                }}
-                            >
-                                {/* Cabecera del Menú */}
-                                <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
-                                    <div className="flex items-center gap-2">
-                                        <ViewOrganizationIcon />
-                                        <span className="font-bold uppercase tracking-[0.2em] text-white/50 text-[10px]">
-                                            Vista y Ordenamiento
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {/* 1. Selector de Disposición (Layout) */}
-                                <div className="flex flex-col gap-1.5">
-                                    <span className="text-[9px] font-bold uppercase tracking-wider text-white/40">
-                                        Disposición
-                                    </span>
-                                    <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-white/[0.03] border border-white/5">
-                                        {[
-                                            { id: 'grid', label: 'Grid', icon: FaTableCells },
-                                            { id: 'list', label: 'Lista', icon: FaListUl },
-                                            { id: 'compact', label: 'Compacto', icon: FaGrip },
-                                        ].map(opt => {
-                                            const Icon = opt.icon;
-                                            const isSelected = (pageConfig?.layout || 'grid') === opt.id;
-                                            return (
-                                                <button
-                                                    type="button"
-                                                    key={opt.id}
-                                                    onClick={() => updateConfig({ layout: opt.id as GridLayout })}
-                                                    className={`py-1.5 px-1 flex items-center justify-center gap-1 text-[10px] font-bold rounded-lg transition-all cursor-pointer ${
-                                                        isSelected
-                                                            ? 'bg-[#25f4ee]/20 text-[#25f4ee] border border-[#25f4ee]/40 shadow-[0_0_10px_rgba(37,244,238,0.2)]'
-                                                            : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
-                                                    }`}
-                                                >
-                                                    <Icon size={10} />
-                                                    <span>{opt.label}</span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-
-                                {/* 2. Columnas en Pantalla (si el layout es Grid) */}
-                                {(pageConfig?.layout || 'grid') === 'grid' && (
-                                    <div className="flex flex-col gap-1.5">
-                                        <span className="text-[9px] font-bold uppercase tracking-wider text-white/40">
-                                            Columnas
-                                        </span>
-                                        <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-white/[0.03] border border-white/5">
-                                            {([0, 2, 3, 4] as GridColumns[]).map(col => {
-                                                const isSelected = (pageConfig?.columns ?? 0) === col;
-                                                return (
-                                                    <button
-                                                        type="button"
-                                                        key={col}
-                                                        onClick={() => updateConfig({ columns: col })}
-                                                        className={`py-1 text-[10px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
-                                                            isSelected
-                                                                ? 'bg-[#8a5cff]/20 text-[#8a5cff] border border-[#8a5cff]/40 shadow-[0_0_10px_rgba(138,92,255,0.25)]'
-                                                                : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
-                                                        }`}
-                                                    >
-                                                        {col === 0 ? 'Auto' : `${col} Col`}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* 3. Criterio de Orden */}
-                                <div className="flex flex-col gap-1.5 pt-1 border-t border-white/[0.04]">
-                                    <span className="text-[9px] font-bold uppercase tracking-wider text-white/40">
-                                        {t('sortBy')}
-                                    </span>
-                                    <div className="flex flex-col gap-0.5">
-                                        {SORT_OPTIONS.map(opt => {
-                                            const isSelected = activeSort === opt.id;
-                                            return (
-                                                <button
-                                                    key={opt.id}
-                                                    type="button"
-                                                    onClick={() => updateConfig({ sortKey: opt.id as SortKey })}
-                                                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
-                                                        isSelected 
-                                                            ? 'bg-white/[0.06] text-[#25f4ee]' 
-                                                            : 'text-white/60 hover:text-white hover:bg-white/[0.03]'
-                                                    }`}
-                                                >
-                                                    <span className={isSelected ? 'text-[#25f4ee]' : 'text-white/40'}>
-                                                        <opt.Icon />
-                                                    </span>
-                                                    <span className="text-xs font-semibold flex-1">
-                                                         {t(opt.labelKey as TranslationKey)}
-                                                    </span>
-                                                    {isSelected && (
-                                                        <div className="w-1.5 h-1.5 rounded-full bg-[#25f4ee] shadow-[0_0_6px_#25f4ee]" />
-                                                    )}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-
-                                {/* 4. Filtro Rápido: Solo Completados */}
-                                <div className="pt-2 border-t border-white/[0.04]">
-                                    <button
-                                        type="button"
-                                        onClick={() => updateConfig({ showOnlyCompleted: !(pageConfig?.showOnlyCompleted ?? true) })}
-                                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 text-left transition-all cursor-pointer"
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            <FaFilter size={10} className="text-white/40" />
-                                            <span className="text-xs font-medium text-white/80">
-                                                Solo completados
-                                            </span>
-                                        </div>
-                                        <div 
-                                            className={`w-4 h-4 rounded-md flex items-center justify-center border transition-all ${
-                                                pageConfig?.showOnlyCompleted ?? true
-                                                    ? 'bg-[#10b981]/20 border-[#10b981]/50 text-[#10b981]'
-                                                    : 'border-white/20 bg-black/40'
-                                            }`}
-                                        >
-                                            {(pageConfig?.showOnlyCompleted ?? true) && <FaCheck size={9} />}
-                                        </div>
-                                    </button>
-                                </div>
-                            </motion.div>
-                        )}
+                            {backgroundVisible || showDemoVideos || showTikTokPill ? <FaEye size={16} /> : <FaEyeSlash size={16} />}
+                            <span>Vista</span>
+                        </button>
+                        <button
+                            type="button"
+                            className="pulsaria-header-tool"
+                            aria-expanded={openHeaderPanel === 'filters'}
+                            aria-controls="pulsaria-filter-popover"
+                            onClick={() => setOpenHeaderPanel((current) => current === 'filters' ? null : 'filters')}
+                        >
+                            <FaFilter size={15} />
+                            <span>Filtros</span>
+                        </button>
                     </div>
-
-                    {/* Modo Cinema: control discreto junto a las vistas de biblioteca */}
-                    <motion.button
+                    {showTikTokPill && (
+                    <button
                         type="button"
-                        onClick={onOpenCinema}
-                        disabled={!canOpenCinema}
-                        aria-label={t('openCinema')}
-                        title={canOpenCinema ? t('openCinema') : t('noVideosCinema')}
-                        style={{
-                            ...btnBase,
-                            height: '40px',
-                            padding: '0 12px',
-                            gap: '7px',
-                            border: canOpenCinema ? '1px solid rgba(254,44,85,0.28)' : '1px solid rgba(255,255,255,0.06)',
-                            background: canOpenCinema ? 'linear-gradient(135deg, rgba(254,44,85,0.12), rgba(37,244,238,0.08))' : 'rgba(0,0,0,0.24)',
-                            opacity: canOpenCinema ? 1 : 0.42,
-                            cursor: canOpenCinema ? 'pointer' : 'not-allowed',
+                        onClick={() => {
+                            if (activeCount === 0) {
+                                toast.info(t('noResults'), { description: t('pasteLinks'), duration: 3500 });
+                            } else {
+                                toast.success(t('library'), { description: `${activeCount} ${t('library').toLowerCase()}.`, duration: 3000 });
+                            }
                         }}
-                        whileHover={canOpenCinema ? { scale: 1.04, borderColor: 'rgba(37,244,238,0.6)', boxShadow: '0 0 18px rgba(254,44,85,0.22)' } : undefined}
-                        whileTap={canOpenCinema ? { scale: 0.96 } : undefined}
-                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                        className="group"
+                        aria-label={`${activeCount} TikToks en la biblioteca`}
+                        className="pulsaria-window-header__library-pill group header-control header-control--pill flex h-[38px] items-center gap-2 rounded-[13px] px-3.5 pointer-events-auto select-none"
+                        style={{ height: '38px', borderRadius: '13px', background: 'linear-gradient(135deg, rgba(254,44,85,0.2) 0%, rgba(37,244,238,0.2) 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), 0 8px 18px rgba(0,0,0,0.28)' }}
                     >
-                        <FaFilm size={14} className="text-[#fe2c55] transition-colors group-hover:text-[#25f4ee]" />
-                        <span className="hidden lg:inline text-[10px] font-black uppercase tracking-[0.16em] text-white/75">Cinema</span>
-                    </motion.button>
-
-                    {/* 3. Botón de Configuración */}
-                    <motion.button
-                        type="button"
-                        onClick={onOpenSettings}
-                        aria-label={t('settings')}
-                        title={t('settings')}
-                        style={{
-                            ...btnBase,
-                            height: '40px',
-                            padding: '0 14px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            background: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.03) 100%)',
-                            border: '1px solid rgba(255,255,255,0.22)',
-                            boxShadow: '0 6px 20px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.25)',
-                        }}
-                        whileHover={{
-                            scale: 1.04,
-                            borderColor: 'rgba(37,244,238,0.6)',
-                            boxShadow: '0 0 20px rgba(37,244,238,0.3), inset 0 1px 2px rgba(255,255,255,0.4)',
-                        }}
-                        whileTap={{ scale: 0.96 }}
-                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-                        className="group cursor-pointer"
-                    >
-                        <motion.span
-                            style={{ color: '#ffffff', display: 'flex' }}
-                            whileHover={{ rotate: 90, color: '#25f4ee' }}
-                            transition={{ type: 'spring', stiffness: 300, damping: 15 }}
-                            className="drop-shadow-[0_0_8px_rgba(255,255,255,0.6)]"
-                        >
-                            <SettingsIcon />
-                        </motion.span>
-                        <span className="hidden md:inline text-xs font-bold text-white tracking-wider uppercase drop-shadow-sm">
-                            {t('settings')}
+                        <span className="flex items-center justify-center"><TikTokIcon size={19} /></span>
+                        <span className="font-black tracking-[0.16em] uppercase text-white/90 relative z-10 text-[11px] whitespace-nowrap">
+                            {isLoading ? 'TIKTOKS...' : `${activeCount} TIKTOKS`}
                         </span>
-                    </motion.button>
+                    </button>
+                    )}
+                    {openHeaderPanel === 'visibility' && (
+                        <div id="pulsaria-visibility-popover" className="pulsaria-header-popover pulsaria-header-visibility-popover" role="group" aria-label="Visibilidad de la interfaz">
+                            <span className="pulsaria-header-popover__title">VISIBILIDAD</span>
+                            <button type="button" aria-pressed={backgroundVisible} onClick={onToggleBackground} className="pulsaria-header-toggle">
+                                <span>Fondo ambiental</span><span className={`pulsaria-header-switch${backgroundVisible ? ' is-on' : ''}`} aria-hidden="true" />
+                            </button>
+                            <button type="button" aria-pressed={showDemoVideos} onClick={onToggleDemoVideos} className="pulsaria-header-toggle">
+                                <span>Videos de ejemplo</span><span className={`pulsaria-header-switch${showDemoVideos ? ' is-on' : ''}`} aria-hidden="true" />
+                            </button>
+                            <button type="button" aria-pressed={showTikTokPill} onClick={onToggleTikTokPill} className="pulsaria-header-toggle">
+                                <span>Contador de TikToks</span><span className={`pulsaria-header-switch${showTikTokPill ? ' is-on' : ''}`} aria-hidden="true" />
+                            </button>
+                        </div>
+                    )}
+                    {openHeaderPanel === 'filters' && (
+                        <div id="pulsaria-filter-popover" className="pulsaria-header-popover pulsaria-header-filter-popover" aria-label="Filtros de videos">
+                            <PagePanel config={pageConfig} onChange={onPageConfigChange} />
+                        </div>
+                    )}
                 </div>
+
+                <WindowControls controls={windowControls} />
             </div>
+
         </div>
     );
 }

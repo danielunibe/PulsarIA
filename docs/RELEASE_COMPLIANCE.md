@@ -15,7 +15,8 @@ advice or a signed review by the rights holder and counsel.
 - [ ] Ownership and contributor provenance reviewed privately.
 - [ ] No contractor, employer, client, university, or generated asset has
       unresolved ownership.
-- [ ] SPDX/CycloneDX SBOM generated from the release candidate.
+- [ ] Aggregate SPDX SBOM generated from npm, Cargo, bundled Python distributions,
+      and every hashed runtime-manifest file; inspect the exact candidate version.
 - [ ] Third-party notices include every shipped binary, runtime, package,
       font, icon, and model.
 - [ ] Model revision, size, license, URL, and SHA-256 are pinned.
@@ -32,7 +33,10 @@ advice or a signed review by the rights holder and counsel.
 - [ ] Local model download uses HTTPS, temporary files, atomic rename, and
       SHA-256 verification.
 - [ ] Local sidecar binds only to 127.0.0.1 and has no filesystem tools.
-- [ ] Authenticode signature, timestamp, updater signature, and hashes pass.
+- [ ] Direct beta route: installed NSIS smoke and SHA-256 checks pass; release
+      notes disclose that Authenticode signing and automatic updates are absent.
+- [ ] Signed stable/updater route: Authenticode signature, timestamp, updater
+      signature, and hashes pass.
 - [ ] Clean-install, upgrade, rollback, and data-preservation checks pass.
 - [ ] Legal review recorded outside the public repository.
 

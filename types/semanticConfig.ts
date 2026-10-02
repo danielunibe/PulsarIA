@@ -27,6 +27,14 @@ export interface SystemMetrics {
   average_db_time_ms: number;
   model_load_time_ms: number;
   total_queries_run: number;
+  first_frame_time_ms?: number | null;
+  transcription_seconds_per_audio_minute?: number | null;
+  llm_tokens_per_second?: number | null;
+  queue_throughput_per_minute?: number | null;
+  active_backends?: string[];
+  max_vram_bytes?: number | null;
+  fallbacks_count?: number;
+  last_benchmark_at?: string | null;
 }
 
 export interface DebugSearchResult {

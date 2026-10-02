@@ -1,22 +1,15 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { FaPlay } from 'react-icons/fa6';
+import { FaPlay } from '@/components/icon-library';
+import { TikTokIcon } from './Header';
 
 // ============================================================
-// VideoCardOverlay — Minimalista
-// Reducción: de 9 elementos simultáneos a 3-4
-// En reposo: solo play + título
-// En hover: aparecen tags y autor
-// Sidebar icons eliminados (decorativos, no funcionales)
-// Vinyl eliminado
+// VideoCardOverlay — macOS 27 Liquid Glassmorphism Edition
 // ============================================================
 
 /**
  * Props del overlay de VideoCard.
- * 
- * Muestra información superpuesta sobre la tarjeta de video:
- * título, autor, tags, waveform de audio animado, y botón de play.
  */
 interface VideoCardOverlayProps {
     /** Autor del video */
@@ -29,14 +22,13 @@ interface VideoCardOverlayProps {
     isFullPlaying: boolean;
     /** Callback al hacer click en el botón de play */
     onPlayClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+    /** Demo cards must never be presented as TikTok content. */
+    isDemo?: boolean;
+    demoLabel?: string;
 }
 
 /**
- * VideoCardOverlay — Overlay minimalista sobre VideoCard.
- * 
- * En reposo: muestra solo play + título.
- * En hover: aparecen tags y autor.
- * Cuando reproduce: muestra waveform de audio animado.
+ * VideoCardOverlay — Elementos flotantes con glassmorfismo líquido estilo macOS.
  */
 export function VideoCardOverlay({
     author,
@@ -44,54 +36,74 @@ export function VideoCardOverlay({
     tags = [],
     isFullPlaying,
     onPlayClick,
+    isDemo = false,
+    demoLabel = 'DEMO',
 }: VideoCardOverlayProps) {
     return (
-        <>
-            <div
-                className="absolute inset-0 z-20 flex flex-col justify-between pointer-events-none"
-            >
-                {/* Gradientes Protectores Transparentes */}
-                <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-black/80 to-transparent pointer-events-none opacity-80" />
-                <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-black/50 to-transparent pointer-events-none opacity-60" />
-                {/* Centro: Play button */}
-                <div className={cn(
-                    "flex-1 flex items-center justify-center transition-all duration-300",
-                    isFullPlaying ? "opacity-0 scale-75 pointer-events-none" : "opacity-100 scale-100"
-                )}>
-                    <button
-                        onClick={onPlayClick}
-                        className="w-14 h-14 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 cursor-pointer pointer-events-auto"
-                        style={{
-                            background: 'rgba(255,255,255,0.12)',
-                            backdropFilter: 'blur(12px)',
-                            border: '1px solid rgba(255,255,255,0.2)',
-                            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                        }}
-                    >
-                        <FaPlay className="w-8 h-8 text-white/95 ml-1" />
-                    </button>
-                </div>
-
-                {/* Bottom: solo título + autor (sin tags para reducir ruido) */}
-                <div className="flex flex-col gap-1.5 p-5 relative z-30 transition-opacity duration-300">
-                    {author && (
-                        <span
-                            className="text-[10px] font-bold tracking-wider uppercase"
-                            style={{ color: 'rgba(255,255,255,0.7)', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}
-                        >
-                            {author}
-                        </span>
-                    )}
-                    {title && (
-                        <h3
-                            className="font-semibold leading-tight line-clamp-2"
-                            style={{ fontSize: 'var(--text-base)', color: 'rgba(255,255,255,0.95)', textShadow: '0 2px 5px rgba(0,0,0,0.8)' }}
-                        >
-                            {title}
-                        </h3>
-                    )}
+        <div className="absolute inset-0 z-20 flex flex-col justify-between pointer-events-none">
+            {/* Top: Capsule badge estilo macOS Glass */}
+            <div className="relative z-30 p-3.5 flex items-center justify-between">
+                <div
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold text-white/90 shadow-[0_4px_16px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.2)]"
+                    style={{
+                        background: 'rgba(22, 22, 26, 0.72)',
+                        backdropFilter: 'blur(20px) saturate(140%)',
+                        WebkitBackdropFilter: 'blur(20px) saturate(140%)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                    }}
+                >
+                    {!isDemo && <TikTokIcon size={12} className="drop-shadow-sm" />}
+                    <span className="tracking-wide text-[10px]">{isDemo ? demoLabel : 'TikTok'}</span>
                 </div>
             </div>
-        </>
+
+            {/* Centro: Botón Play flotante (Liquid Glass Disc de macOS) */}
+            <div className={cn(
+                "flex-1 flex items-center justify-center transition-all duration-300",
+                isFullPlaying ? "opacity-0 scale-75 pointer-events-none" : "opacity-100 scale-100"
+            )}>
+                <button
+                    type="button"
+                    onClick={onPlayClick}
+                    aria-label="Reproducir video"
+                    className="w-13 h-13 sm:w-14 sm:h-14 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 active:scale-95 cursor-pointer pointer-events-auto shadow-[0_12px_32px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.28)] group/play"
+                    style={{
+                        background: 'rgba(28, 28, 32, 0.75)',
+                        backdropFilter: 'blur(24px) saturate(140%)',
+                        WebkitBackdropFilter: 'blur(24px) saturate(140%)',
+                        border: '1px solid rgba(255, 255, 255, 0.20)',
+                    }}
+                >
+                    <FaPlay className="w-5 h-5 text-white ml-0.5 drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] transition-transform group-hover/play:scale-105" />
+                </button>
+            </div>
+
+            {/* Bottom: Dock flotante de cristal esmerilado macOS */}
+            <div
+                className="relative z-30 m-3 p-3.5 rounded-[16px] shadow-[0_12px_28px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.16)] flex flex-col gap-1 transition-all duration-300 group-hover:bg-[rgba(26,26,30,0.85)] group-hover:border-white/20"
+                style={{
+                    background: 'rgba(18, 18, 21, 0.72)',
+                    backdropFilter: 'blur(24px) saturate(140%)',
+                    WebkitBackdropFilter: 'blur(24px) saturate(140%)',
+                    border: '1px solid rgba(255, 255, 255, 0.10)',
+                }}
+            >
+                {author && (
+                    <span
+                        className="text-[10px] font-bold tracking-wider uppercase text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] truncate"
+                    >
+                        @{author.replace(/^@/, '')}
+                    </span>
+                )}
+                {title && (
+                    <h3
+                        className="font-medium text-xs sm:text-[13px] leading-snug line-clamp-2 text-white/95"
+                        style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}
+                    >
+                        {title}
+                    </h3>
+                )}
+            </div>
+        </div>
     );
 }

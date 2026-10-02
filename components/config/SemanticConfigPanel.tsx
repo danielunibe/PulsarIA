@@ -6,7 +6,7 @@ import SearchParametersCard from '@/components/config/SearchParametersCard';
 import PerformanceMetricsCard from '@/components/config/PerformanceMetricsCard';
 import PipelineDebugPanel from '@/components/config/PipelineDebugPanel';
 import SystemLogsCard from '@/components/config/SystemLogsCard';
-import { FaServer, FaRotate, FaTriangleExclamation } from 'react-icons/fa6';
+import { FaServer, FaRotate, FaTriangleExclamation } from '@/components/icon-library';
 
 export default function SemanticConfigPanel() {
   const config = useSemanticConfig();

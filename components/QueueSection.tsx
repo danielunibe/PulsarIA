@@ -35,7 +35,7 @@ function GlobalProgress({ percentage }: { percentage: number }) {
   const { t } = useI18n();
 
   return (
-    <div className="flex shrink-0 items-center gap-2 rounded-[10px] border border-white/10 bg-white/[.04] px-2.5 py-1.5">
+    <div className="flex shrink-0 items-center gap-2 rounded-[10px] border-0 bg-white/[.04] px-2.5 py-1.5">
       <span className="font-mono text-[12px] font-bold tabular-nums text-white">{percentage}%</span>
       <span className="text-[8px] font-black uppercase tracking-[.12em] text-white/45">{t('progress')}</span>
     </div>
@@ -61,6 +61,18 @@ function stageFor(status: string): 'MP4' | 'MP3' | 'TXT' | 'complete' {
 
 function taskKey(task: JobRecord | PendingJob) {
   return 'jobId' in task && task.jobId ? `job-${task.jobId}` : 'id' in task ? `job-${task.id}` : `pending-${task.clientId}`;
+}
+
+function displayTaskTitle(task: JobRecord | PendingJob, fallback: string) {
+  const rawTitle = task.title?.trim();
+  if (rawTitle && !/^https?:\/\//i.test(rawTitle)) return rawTitle;
+  try {
+    const parsed = new URL(task.url);
+    const segment = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '').replace(/[-_]+/g, ' ').trim();
+    return segment || parsed.hostname.replace(/^www\./i, '') || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetryPending }: QueueSectionProps) {
@@ -114,16 +126,13 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
           })}
         </div>}
 
-        <div className="grid grid-cols-4 gap-1 px-0.5" aria-label={t('processingStages')}>
-          {['Descarga', 'Audio', 'Transcripción', 'Indexado'].map((label, index) => <span key={label} className={`h-1 rounded-full ${index === 0 ? 'bg-[#25f4ee]' : index < Math.ceil(globalProgress / 25) ? 'bg-[#8a5cff]/70' : 'bg-white/10'}`} title={label} />)}
-        </div>
       </div>}
 
       <div className="flex min-h-0 w-full flex-col gap-2.5">
         {tasks.map((task) => {
           const isPending = 'clientId' in task;
           const status = isPending ? task.status : task.status;
-          const title = task.title || ('url' in task ? task.url : t('preparingLink'));
+          const title = displayTaskTitle(task, t('preparingLink'));
           return (
             <motion.div key={taskKey(task)} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
               <TikTokProcessor
@@ -138,31 +147,55 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
           );
         })}
         {(failedJobs.length > 0 || retryablePending.length > 0) && (
-          <div className="flex flex-col gap-2" aria-label={t('retryableJobs')}>
-            {[...failedJobs.map((job) => ({ key: `failed-${job.id}`, title: job.title || job.url, onRetry: () => onRetryJob(job.id) })), ...retryablePending.map((item) => ({ key: `retry-${item.clientId}`, title: item.url, onRetry: () => onRetryPending(item.clientId) }))].map((item) => (
-              <div key={item.key} className="flex items-center justify-between gap-3 rounded-[14px] border border-white/[.08] bg-white/[.025] px-3 py-2.5">
-                <div className="min-w-0">
-                  <p className="truncate text-[10px] font-semibold text-white/70">{item.title}</p>
-                </div>
-                <button
-                  type="button"
-                  disabled={retryingKey !== null}
-                  onClick={() => {
-                    setRetryError(null);
-                    setRetryingKey(item.key);
-                    void item.onRetry().catch((error: unknown) => {
-                      setRetryError(error instanceof Error ? error.message : String(error));
-                    }).finally(() => setRetryingKey(null));
-                  }}
-                  className="shrink-0 rounded-[10px] border border-white/15 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wider text-white/65 transition hover:border-[#25f4ee]/40 hover:text-[#25f4ee] disabled:cursor-wait disabled:opacity-45"
-                >
-                  {retryingKey === item.key ? t('retrying') : t('retry')}
-                </button>
+          <div className="mt-2 flex flex-col gap-2 rounded-2xl bg-[#fe2c55]/[0.05] p-3 border-0" aria-label={t('retryableJobs')}>
+            <div className="flex items-center justify-between px-1 pb-1">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#fe2c55] shadow-[0_0_8px_rgba(254,44,85,0.8)]" />
+                <span className="text-[10px] font-black uppercase tracking-[0.14em] text-white/80">
+                  Descargas fallidas / Reintentos
+                </span>
               </div>
-            ))}
+              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-[#fe2c55]/20 text-[#fe2c55]">
+                {failedJobs.length + retryablePending.length}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              {[...failedJobs.map((job) => ({ key: `failed-${job.id}`, title: job.title || job.url, onRetry: () => onRetryJob(job.id) })), ...retryablePending.map((item) => ({ key: `retry-${item.clientId}`, title: item.url, onRetry: () => onRetryPending(item.clientId) }))].map((item) => (
+                <div key={item.key} className="flex items-center justify-between gap-2.5 rounded-xl bg-black/40 px-3 py-2 transition-all hover:bg-black/60">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[11px] font-medium text-white/75" title={item.title}>
+                      {item.title}
+                    </p>
+                    <span className="text-[9px] text-[#fe2c55]/80 font-mono">Error al procesar · listo para reintentar</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={retryingKey !== null}
+                    onClick={() => {
+                      setRetryError(null);
+                      setRetryingKey(item.key);
+                      void item.onRetry().catch((error: unknown) => {
+                        setRetryError(error instanceof Error ? error.message : String(error));
+                      }).finally(() => setRetryingKey(null));
+                    }}
+                    className="shrink-0 rounded-lg bg-white/10 hover:bg-white hover:text-black px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wider text-white/90 transition-all duration-200 disabled:cursor-wait disabled:opacity-40"
+                  >
+                    {retryingKey === item.key ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full border border-current border-t-transparent animate-spin" />
+                        {t('retrying')}
+                      </span>
+                    ) : (
+                      t('retry')
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
-        {retryError && <p role="alert" className="rounded-[12px] border border-[#fe2c55]/25 bg-[#fe2c55]/10 px-3 py-2 text-[10px] text-[#fe2c55]">{retryError}</p>}
+        {retryError && <p role="alert" className="rounded-xl bg-[#fe2c55]/15 px-3 py-2 text-[10px] text-[#fe2c55]">{retryError}</p>}
       </div>
     </section>
   );

@@ -20,6 +20,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from process_utils import hidden_process_kwargs
+
 
 _WORKERS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _WORKERS_DIR.parent
@@ -145,6 +147,7 @@ def _probe_duration(ffprobe_path: str, video_path: Path) -> float:
             capture_output=True,
             text=True,
             timeout=30,
+            **hidden_process_kwargs(),
         )
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or str(error)).strip()
@@ -174,17 +177,27 @@ def _probe_duration(ffprobe_path: str, video_path: Path) -> float:
     return duration
 
 
+def _hardware_decode_args() -> list[str]:
+    """Return an opt-in NVDEC request; CPU remains the default fallback."""
+    backend = os.environ.get("PULSAR_FFMPEG_HWACCEL", "cpu").strip().lower()
+    if backend in {"cuda", "nvdec"}:
+        return ["-hwaccel", "cuda"]
+    return []
+
+
 def _extract_frame(
     ffmpeg_path: str,
     video_path: Path,
     timestamp: float,
     output_path: Path,
-) -> None:
+) -> str:
+    hardware_args = _hardware_decode_args()
     command = [
         ffmpeg_path,
         "-hide_banner",
         "-loglevel",
         "error",
+        *hardware_args,
         "-ss",
         f"{timestamp:.3f}",
         "-i",
@@ -203,8 +216,30 @@ def _extract_frame(
             capture_output=True,
             text=True,
             timeout=45,
+            **hidden_process_kwargs(),
         )
+        return "NVDEC" if hardware_args else "CPU"
     except subprocess.CalledProcessError as error:
+        if hardware_args:
+            # A driver can expose CUDA while a particular codec/filter cannot
+            # stay on the device. Retry the same frame on CPU and keep the
+            # reason visible to the caller through the fallback label.
+            cpu_command = [item for item in command if item not in hardware_args]
+            try:
+                subprocess.run(
+                    cpu_command,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=45,
+                    **hidden_process_kwargs(),
+                )
+                return "CPU-fallback-from-NVDEC"
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as cpu_error:
+                detail = (getattr(cpu_error, "stderr", None) or str(cpu_error)).strip()
+                raise RuntimeError(
+                    f"FFmpeg no pudo extraer el frame tras fallback CPU: {detail[:400]}"
+                ) from cpu_error
         detail = (error.stderr or error.stdout or str(error)).strip()
         raise RuntimeError(
             f"FFmpeg no pudo extraer el frame en {timestamp:.3f}s: {detail[:400]}"
@@ -250,6 +285,7 @@ def _ocr_text(tesseract_path: str | None, image_path: Path) -> str:
             capture_output=True,
             text=True,
             timeout=20,
+            **hidden_process_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
@@ -507,7 +543,7 @@ def analyze_video(
         for sample_index, timestamp in enumerate(sample_times):
             frame_path = directory / f"frame-{sample_index}.jpg"
             try:
-                _extract_frame(ffmpeg_path, path, timestamp, frame_path)
+                decode_backend = _extract_frame(ffmpeg_path, path, timestamp, frame_path)
                 stats = _image_statistics(frame_path)
             except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError) as error:
                 frames.append(
@@ -525,6 +561,7 @@ def analyze_video(
                     "status": "ok",
                     **stats,
                     "ocr_text": _ocr_text(tesseract_path, frame_path),
+                    "decode_backend": decode_backend,
                     "_temporary_path": str(frame_path),
                     "_sample_index": sample_index,
                 }
@@ -568,6 +605,11 @@ def analyze_video(
         "artifacts": artifact_records,
         "artifacts_dir": str(poster_path.parent) if poster_path else None,
         "ocr_available": bool(tesseract_path),
+        "decode_backends": sorted({
+            str(frame.get("decode_backend"))
+            for frame in frames
+            if frame.get("status") == "ok" and frame.get("decode_backend")
+        }),
     }
     result["instructional_guide"] = _build_instructional_guide(transcript, frames)
     result["json"] = json.dumps(result, ensure_ascii=False)

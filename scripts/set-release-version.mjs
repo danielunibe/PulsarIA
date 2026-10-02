@@ -12,11 +12,23 @@ if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
 
 function readJson(relativePath) {
   const filePath = path.join(projectRoot, relativePath);
-  return { filePath, value: JSON.parse(fs.readFileSync(filePath, 'utf8')) };
+  return { filePath, value: JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '')) };
 }
 
+const updates = new Map();
 function writeJson(filePath, value) {
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 4)}\n`, 'utf8');
+  let content = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
+  if (value.version !== undefined) content = content.replace(/("version"\s*:\s*")[^"]*(")/, `$1${value.version}$2`);
+  if (value.packages?.['']?.version !== undefined) {
+    content = content.replace(/("packages"\s*:\s*\{\s*""\s*:\s*\{[\s\S]*?"version"\s*:\s*")[^"]*(")/, `$1${value.packages[''].version}$2`);
+  }
+  if (value.release_version !== undefined) {
+    content = /"release_version"\s*:/.test(content)
+      ? content.replace(/("release_version"\s*:\s*")[^"]*(")/, `$1${value.release_version}$2`)
+      : `${JSON.stringify(value, null, 2)}\n`;
+  }
+  if (JSON.stringify(JSON.parse(content)) !== JSON.stringify(value)) throw new Error(`Could not preserve JSON fields in ${filePath}.`);
+  updates.set(filePath, content);
 }
 
 const packageJson = readJson('package.json');
@@ -34,16 +46,28 @@ const tauriConfig = readJson('src-tauri/tauri.conf.json');
 tauriConfig.value.version = version;
 writeJson(tauriConfig.filePath, tauriConfig.value);
 
+const releaseManifest = readJson('legal/release-manifest.json');
+releaseManifest.value.release_version = version;
+writeJson(releaseManifest.filePath, releaseManifest.value);
+
+const projectManifest = readJson('PROJECT.manifest.json');
+projectManifest.value.version = version;
+writeJson(projectManifest.filePath, projectManifest.value);
+
+const runtimeManifest = readJson('src-tauri/resources/runtime-manifest.json');
+runtimeManifest.value.version = version;
+writeJson(runtimeManifest.filePath, runtimeManifest.value);
+
 const cargoManifestPath = path.join(projectRoot, 'src-tauri', 'Cargo.toml');
 const cargoManifest = fs.readFileSync(cargoManifestPath, 'utf8');
 const nextCargoManifest = cargoManifest.replace(
   /(\[package\][\s\S]*?\nversion\s*=\s*")[^"]+(")/,
   `$1${version}$2`,
 );
-if (nextCargoManifest === cargoManifest) {
+if (!/(\[package\][\s\S]*?\nversion\s*=\s*")[^"]+(")/.test(cargoManifest)) {
   throw new Error('Could not update src-tauri/Cargo.toml package version.');
 }
-fs.writeFileSync(cargoManifestPath, nextCargoManifest, 'utf8');
+updates.set(cargoManifestPath, nextCargoManifest);
 
 const cargoLockPath = path.join(projectRoot, 'src-tauri', 'Cargo.lock');
 if (fs.existsSync(cargoLockPath)) {
@@ -52,7 +76,13 @@ if (fs.existsSync(cargoLockPath)) {
     /(name\s*=\s*"pulsaria"\r?\nversion\s*=\s*")[^"]+(")/,
     `$1${version}$2`,
   );
-  if (nextCargoLock !== cargoLock) fs.writeFileSync(cargoLockPath, nextCargoLock, 'utf8');
+  if (!/(name\s*=\s*"pulsaria"\r?\nversion\s*=\s*")[^"]+(")/.test(cargoLock)) {
+    throw new Error('Could not locate Pulsaria version in src-tauri/Cargo.lock.');
+  }
+  updates.set(cargoLockPath, nextCargoLock);
 }
 
+// Parse and validate every input before any file is changed. Repeated calls
+// with the same version are safe, including JSON produced by PowerShell.
+for (const [filePath, content] of updates) fs.writeFileSync(filePath, content, 'utf8');
 console.log(`Release version synchronized: ${version}`);

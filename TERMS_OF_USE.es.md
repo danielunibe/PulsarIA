@@ -56,9 +56,10 @@ para versiones futuras.
 
 ## Contacto
 
-Contacto general: COMPLETAR ANTES DEL RELEASE.
+Contacto general y soporte técnico: https://github.com/danielunibe/PulsarIA/issues
 
-Contacto legal: COMPLETAR ANTES DEL RELEASE.
+Contacto legal y notificaciones: danielunibe10@gmail.com (canal oficial de notificaciones
+electrónicas para la versión beta).
 
 Estos términos no sustituyen el EULA, el Aviso de Privacidad, la Política de
 Contenido ni las licencias de terceros.
