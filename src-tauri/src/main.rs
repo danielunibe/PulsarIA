@@ -797,7 +797,12 @@ async fn main() {
             commands::ensure_local_llm,
             commands::cancel_local_llm_download,
             commands::generate_local_response,
-            commands::generate_gemini_response
+            commands::generate_gemini_response,
+            commands::get_gemini_status,
+            commands::set_gemini_api_key,
+            commands::pick_folder,
+            commands::open_folder_in_explorer,
+            commands::set_profile_auto_enqueue
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|error| {

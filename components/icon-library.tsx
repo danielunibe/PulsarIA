@@ -14,6 +14,7 @@ import {
   ArrowLeftIcon,
   ArrowSquareOutIcon,
   BookmarkIcon,
+  BookOpenIcon,
   BrainIcon,
   CameraIcon,
   CaretLeftIcon,
@@ -31,6 +32,8 @@ import {
   DatabaseIcon,
   DownloadIcon,
   DotsSixVerticalIcon,
+  DotsThreeIcon,
+  DotsThreeVerticalIcon,
   EyeIcon,
   EyeSlashIcon,
   FileTextIcon,
@@ -112,6 +115,7 @@ export const FaArrowLeft = withDreamcoreWeight(ArrowLeftIcon);
 export const FaArrowUpRightFromSquare = withDreamcoreWeight(ArrowSquareOutIcon);
 export const FaBolt = withDreamcoreWeight(LightningIcon);
 export const FaBookmark = withDreamcoreWeight(BookmarkIcon);
+export const FaBookOpen = withDreamcoreWeight(BookOpenIcon);
 export const FaBrain = withDreamcoreWeight(BrainIcon);
 export const FaCamera = withDreamcoreWeight(CameraIcon);
 export const FaChartSimple = withDreamcoreWeight(ChartBarIcon);
@@ -184,4 +188,6 @@ export const FaClose = withDreamcoreWeight(XIcon);
 export const FaXmark = withDreamcoreWeight(XIcon);
 export const FaSliders = withDreamcoreWeight(SlidersHorizontalIcon);
 export const FaGrip = withDreamcoreWeight(DotsSixVerticalIcon);
+export const FaEllipsis = withDreamcoreWeight(DotsThreeIcon);
+export const FaEllipsisVertical = withDreamcoreWeight(DotsThreeVerticalIcon);
 export const FaArrowDownWideShort = withDreamcoreWeight(SortDescendingIcon);

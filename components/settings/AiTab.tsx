@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { SectionCard, SectionTitle, formatStorageBytes } from './types';
-import { FaBrain, FaPlay } from '@/components/icon-library';
+import { FaBrain, FaPlay, FaShieldHalved, FaWandMagicSparkles } from '@/components/icon-library';
 import { JobRecord } from '@/hooks/use-jobs';
 import { LocalLlmStatus } from '@/lib/local-llm';
+import { toast } from 'sonner';
 
 interface AiTabProps {
     localLlmStatus: LocalLlmStatus | null;
@@ -45,6 +46,35 @@ export function AiTab({
     onPlaylistSelect,
     onClose,
 }: AiTabProps) {
+    const [geminiActive, setGeminiActive] = useState<boolean | null>(null);
+    const [apiKeyInput, setApiKeyInput] = useState('');
+    const [isSavingKey, setIsSavingKey] = useState(false);
+
+    useEffect(() => {
+        if (!isTauri) return;
+        import('@tauri-apps/api/core').then(({ invoke }) => {
+            invoke<boolean>('get_gemini_status')
+                .then(setGeminiActive)
+                .catch(() => setGeminiActive(false));
+        });
+    }, [isTauri]);
+
+    const handleSaveKey = async () => {
+        if (!isTauri) return;
+        setIsSavingKey(true);
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('set_gemini_api_key', { apiKey: apiKeyInput });
+            const status = await invoke<boolean>('get_gemini_status');
+            setGeminiActive(status);
+            setApiKeyInput('');
+            toast.success(status ? 'Clave de Gemini configurada en memoria para esta sesión' : 'Clave de Gemini eliminada de la sesión');
+        } catch (error) {
+            toast.error(`Error al actualizar clave: ${error}`);
+        } finally {
+            setIsSavingKey(false);
+        }
+    };
     return (
         <div className="flex flex-col gap-4">
             {/* IA Local llama.cpp */}
@@ -97,6 +127,59 @@ export function AiTab({
                             Cancelar descarga
                         </button>
                     )}
+                </div>
+            </SectionCard>
+
+            {/* Síntesis Nube Gemini */}
+            <SectionCard className="flex flex-col gap-3">
+                <div className="flex items-start justify-between gap-3">
+                    <SectionTitle icon={FaWandMagicSparkles} label="Síntesis Nube Opcional (Gemini)" />
+                    <span className={`rounded-full px-2.5 py-0.5 text-[8px] font-black uppercase tracking-wider ${
+                        geminiActive
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : 'bg-white/10 text-white/40'
+                    }`}>
+                        {geminiActive ? 'Activa en memoria' : 'No configurada'}
+                    </span>
+                </div>
+                <p className="text-[10px] leading-relaxed text-white/50">
+                    Opcional y manual. Si configuras una clave para tu sesión o mediante la variable de entorno <code className="font-mono text-white/80 bg-black/40 px-1 py-0.5 rounded">PULSAR_GOOGLE_API_KEY</code>, podrás solicitar respuestas avanzadas de Gemini desde el buscador Spotlight.
+                </p>
+                <div className="flex items-center gap-2 rounded-[14px] bg-black/35 p-2 shadow-inner">
+                    <input
+                        type="password"
+                        value={apiKeyInput}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        placeholder={geminiActive ? '•••••••••••••••• (configurada)' : 'Ingresa clave para esta sesión…'}
+                        className="flex-1 bg-transparent px-2 text-xs font-mono text-white outline-none placeholder:text-white/25"
+                    />
+                    <button
+                        type="button"
+                        onClick={handleSaveKey}
+                        disabled={isSavingKey || !apiKeyInput.trim()}
+                        className="rounded-xl bg-white/10 hover:bg-white/15 px-3 py-1.5 text-[9px] font-bold text-white transition-all cursor-pointer disabled:opacity-40"
+                    >
+                        {isSavingKey ? 'Guardando…' : 'Establecer'}
+                    </button>
+                    {geminiActive && (
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                setApiKeyInput('');
+                                const { invoke } = await import('@tauri-apps/api/core');
+                                await invoke('set_gemini_api_key', { apiKey: '' });
+                                setGeminiActive(false);
+                                toast.success('Clave eliminada de la sesión');
+                            }}
+                            className="rounded-xl bg-rose-500/10 hover:bg-rose-500/20 px-2.5 py-1.5 text-[9px] font-bold text-rose-400 transition-all cursor-pointer"
+                        >
+                            Quitar
+                        </button>
+                    )}
+                </div>
+                <div className="flex items-center gap-2 text-[9px] text-white/40">
+                    <FaShieldHalved size={10} className="text-[#25f4ee]" />
+                    <span>La clave nunca se persiste en disco ni se incluye en backups o telemetría.</span>
                 </div>
             </SectionCard>
 

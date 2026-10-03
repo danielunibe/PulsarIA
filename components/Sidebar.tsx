@@ -2,10 +2,10 @@
 
 import type { ComponentType } from 'react';
 import Image from 'next/image';
-import { FaMagnifyingGlass } from '@/components/icon-library';
+import { FaMagnifyingGlass, FaBookOpen } from '@/components/icon-library';
 import { useI18n } from '@/lib/i18n';
 
-export type GlobalSection = 'home' | 'profiles' | 'activity' | 'library' | 'settings';
+export type GlobalSection = 'home' | 'profiles' | 'activity' | 'library' | 'magazines' | 'settings';
 
 type RailIcon = ComponentType<{ size?: number; className?: string }>;
 
@@ -161,6 +161,13 @@ export function Sidebar({
                     activeSection={activeSection}
                     onNavigate={onNavigate}
                     artwork="/icons/menu/playlist.webp"
+                />
+                <RailButton
+                    section="magazines"
+                    label={t('navMagazines')}
+                    activeSection={activeSection}
+                    onNavigate={onNavigate}
+                    Icon={FaBookOpen}
                 />
                 <RailButton section="settings" label={t('navSettings')} activeSection={activeSection} onNavigate={onNavigate} artwork="/icons/menu/settings.webp" />
             </nav>

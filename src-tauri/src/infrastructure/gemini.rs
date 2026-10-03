@@ -174,6 +174,22 @@ async fn generate_at(
     Ok(GeminiResponse { text })
 }
 
+/// Returns true if an API key is configured in the process environment.
+pub fn is_configured() -> bool {
+    configured_api_key().is_ok()
+}
+
+/// Sets or clears the in-memory API key for the current process session.
+pub fn set_api_key(api_key: &str) -> Result<(), String> {
+    let trimmed = api_key.trim();
+    if trimmed.is_empty() {
+        std::env::remove_var("PULSAR_GOOGLE_API_KEY");
+    } else {
+        std::env::set_var("PULSAR_GOOGLE_API_KEY", trimmed);
+    }
+    Ok(())
+}
+
 /// Generates one user-requested response through the native Gemini adapter.
 /// The key is read only at call time from the process environment.
 pub async fn generate(prompt: &str, max_output_tokens: u32) -> Result<GeminiResponse, String> {

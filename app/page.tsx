@@ -12,6 +12,7 @@ import { QueueSection } from '@/components/QueueSection';
 import { ActivityCenter } from '@/components/ActivityCenter';
 import { PlaylistsPanel } from '@/components/PlaylistsPanel';
 import { SettingsPanel } from '@/components/SettingsPanel';
+import { MagazinesBookshelf } from '@/components/MagazinesBookshelf';
 import { SpotlightSearch } from '@/components/SpotlightSearch';
 import { LibraryBackdrop } from '@/components/LibraryBackdrop';
 
@@ -506,7 +507,7 @@ export default function Page() {
             const request: UnifiedSearchRequest = {
                 query: normalizedQuery,
                 mode: normalizeSearchMode(requestedMode),
-                limit: 10,
+                limit: settings.maxResults || 10,
                 context: searchContext,
             };
             let response: UnifiedSearchResponse;
@@ -527,8 +528,12 @@ export default function Page() {
             }
             const normalizedResponse = normalizeUnifiedResponse(response);
             if (requestId !== searchRequestRef.current) return;
-            setSearchResponse(normalizedResponse);
-            setSearchResults(normalizedResponse.results);
+            const threshold = typeof settings.minScore === 'number' && Number.isFinite(settings.minScore) ? settings.minScore : 0.45;
+            const filteredResults = normalizedResponse.results.filter(
+                (result) => result.score >= threshold || result.primaryMoment.representation !== 'summary'
+            );
+            setSearchResponse({ ...normalizedResponse, results: filteredResults });
+            setSearchResults(filteredResults);
             setSearchContext(normalizedResponse.context);
             setSearchModeUsed(normalizedResponse.mode);
 
@@ -760,7 +765,7 @@ export default function Page() {
     return (
 
         <div
-            className="flex h-screen w-full flex-col font-sans overflow-hidden relative"
+            className="pulsaria-window-frame flex h-screen w-full flex-col font-sans overflow-hidden relative rounded-[18px] border border-white/[0.08] shadow-[0_20px_50px_rgba(0,0,0,0.8)]"
             style={{ 
                 color: 'var(--text-strong)',
                 // Keep the composition usable at the native Tauri minimum;
@@ -1018,7 +1023,30 @@ export default function Page() {
                         )}
                     </div>
                 ) : (
-                    <div className={`pulsaria-workspace${activeSection === 'settings' ? ' pulsaria-workspace--settings' : ''}`}>
+                ) : activeSection === 'magazines' ? (
+                    <div className="flex-1 w-full min-h-0 overflow-hidden flex flex-col">
+                        <MagazinesBookshelf />
+                    </div>
+                ) : activeSection === 'settings' ? (
+                    <div className="flex-1 w-full min-h-0 overflow-y-auto custom-scrollbar p-6 lg:p-8 bg-black/40">
+                        <div className="w-full max-w-5xl mx-auto">
+                            <SettingsPanel
+                                embedded
+                                jobs={jobs}
+                                onPlaylistSelect={handlePlaylistSelect}
+                                pageConfig={pageConfig}
+                                onPageConfigChange={handlePageConfigChange}
+                                searchMode={searchMode}
+                                onSearchModeChange={setSearchMode}
+                                onClose={() => handleGlobalNavigate('home')}
+                                onReviewConsent={() => setLegalReviewOpen(true)}
+                                setupPending={nativeShell && processingSetup.needsSetup}
+                                onResumeSetup={processingSetup.resumeSetup}
+                            />
+                        </div>
+                    </div>
+                ) : (
+                    <div className="pulsaria-workspace">
                         <aside className="pulsaria-context-pane" aria-label="Panel contextual">
                             {activeSection === 'home' && (
                                 <div className="pulsaria-context-pane__scroll custom-scrollbar">
@@ -1085,11 +1113,11 @@ export default function Page() {
                                         onRefresh={() => void refreshJobs()}
                                         globalProgress={globalProgress}
                                         onOpenLibrary={(jobId) => {
-                                            handleClearSearch();
-                                            setActiveSection('home');
-                                            setSelectedPlaylistId(null);
-                                            setSelectedSourceCollection(null);
-                                            setActiveVideoId(jobId);
+                                             handleClearSearch();
+                                             setActiveSection('home');
+                                             setSelectedPlaylistId(null);
+                                             setSelectedSourceCollection(null);
+                                             setActiveVideoId(jobId);
                                         }}
                                     />
                                 </div>
@@ -1102,24 +1130,6 @@ export default function Page() {
                                         selectedPlaylistId={selectedPlaylistId}
                                         onSourceCollectionSelect={handleSourceCollectionSelect}
                                         selectedSourceCollection={selectedSourceCollection}
-                                    />
-                                </div>
-                            )}
-
-                            {activeSection === 'settings' && (
-                                <div className="pulsaria-context-pane__settings">
-                                    <SettingsPanel
-                                        embedded
-                                        jobs={jobs}
-                                        onPlaylistSelect={handlePlaylistSelect}
-                                        pageConfig={pageConfig}
-                                        onPageConfigChange={handlePageConfigChange}
-                                        searchMode={searchMode}
-                                        onSearchModeChange={setSearchMode}
-                                        onClose={() => handleGlobalNavigate('home')}
-                                        onReviewConsent={() => setLegalReviewOpen(true)}
-                                        setupPending={nativeShell && processingSetup.needsSetup}
-                                        onResumeSetup={processingSetup.resumeSetup}
                                     />
                                 </div>
                             )}

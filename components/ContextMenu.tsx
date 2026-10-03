@@ -131,28 +131,9 @@ export function ContextMenu({ x, y, kind, onAction, onClose }: ContextMenuProps)
             style={{ left: position.left, top: position.top }}
             onContextMenu={(event) => event.preventDefault()}
         >
-            <div className="pulsaria-context-menu__header">
-                <div className="pulsaria-context-menu__identity">
-                    <span className="pulsaria-context-menu__mark" aria-hidden="true" />
-                    <span className="pulsaria-context-menu__titles">
-                        <span className="pulsaria-context-menu__kicker">Menú contextual</span>
-                        <span className="pulsaria-context-menu__title">{menuTitle(kind)}</span>
-                    </span>
-                </div>
-                <span className="pulsaria-context-menu__shortcut" aria-hidden="true">Esc</span>
-                <button
-                    type="button"
-                    aria-label="Cerrar menú contextual"
-                    className="pulsaria-context-menu__close"
-                    onClick={onClose}
-                >
-                    <FaXmark size={12} />
-                </button>
-            </div>
-            <div className="pulsaria-context-menu__divider" />
             <div className="pulsaria-context-menu__items">
                 {items.map((item) => {
-                    if (item.id === 'separator') return <div key="separator" className="my-1 h-px bg-white/[.06]" />;
+                    if (item.id === 'separator') return <div key="separator" className="pulsaria-context-menu__divider" />;
                     const Icon = item.Icon;
                     return (
                         <button
@@ -168,7 +149,6 @@ export function ContextMenu({ x, y, kind, onAction, onClose }: ContextMenuProps)
                             </span>
                             <span className="pulsaria-context-menu__item-copy">
                                 <span className="pulsaria-context-menu__item-label">{item.label}</span>
-                                {item.description && <span className="pulsaria-context-menu__item-description">{item.description}</span>}
                             </span>
                         </button>
                     );

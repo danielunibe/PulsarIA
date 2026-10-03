@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { motion } from 'motion/react';
 import Image from 'next/image';
@@ -17,6 +17,7 @@ import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useSemanticIO } from '@/hooks/useSemanticIO';
 import { apiFetch } from '@/lib/api-client';
+import { useSettings } from '@/lib/settings-context';
 
 // ============================================================
 // ExpandedVideoModal — AAA Multimodal Knowledge Hub
@@ -111,6 +112,7 @@ async function resolveArtifactUrl(path: string): Promise<string | undefined> {
  * - Búsqueda semántica inline sobre la transcripción
  */
 export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }: ExpandedVideoModalProps) {
+    const { settings } = useSettings();
     const videoRef = useRef<HTMLVideoElement>(null);
     const semanticInputRef = useRef<HTMLInputElement>(null);
     const [mounted, setMounted] = useState(false);
@@ -124,8 +126,8 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
     // Playback state
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [currentTime, setCurrentTime] = useState('00:00.000');
-    const [duration, setDuration] = useState('00:00.000');
+    const [currentTime, setCurrentTime] = useState('0:00');
+    const [duration, setDuration] = useState('0:00');
     const [rawDuration, setRawDuration] = useState(0);
     const [rawCurrentTime, setRawCurrentTime] = useState(0);
     const [isMuted, setIsMuted] = useState(true);
@@ -447,6 +449,13 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [onClose, rawDuration, toggleMute, togglePlay]);
 
+    const formatCleanTime = (seconds: number) => {
+        if (isNaN(seconds) || seconds < 0) return '0:00';
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    };
+
     const formatPreciseTime = (seconds: number) => {
         if (isNaN(seconds) || seconds < 0) return '00:00.000';
         const m = Math.floor(seconds / 60);
@@ -460,7 +469,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
         const current = videoRef.current.currentTime;
         const dur = videoRef.current.duration || rawDuration;
         setRawCurrentTime(current);
-        setCurrentTime(formatPreciseTime(current));
+        setCurrentTime(formatCleanTime(current));
         setProgress(dur > 0 ? (current / dur) * 100 : 0);
     };
 
@@ -468,7 +477,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
         if (!videoRef.current) return;
         const dur = videoRef.current.duration;
         setRawDuration(dur);
-        setDuration(formatPreciseTime(dur));
+        setDuration(formatCleanTime(dur));
     };
 
     const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -640,13 +649,15 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
             >
                 {/* ── Left Column: Video Cinema Player ── */}
                 <div className="pulsaria-detail-media-pane w-full md:w-[48%] h-[42%] min-h-0 md:h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
-                    {/* Compact metadata header; the product identity already lives in the main window. */}
-                    <div className="flex items-center justify-between gap-3 mb-4 shrink-0">
+                {/* ── Left Column: Video Cinema Player ── */}
+                <div className="pulsaria-detail-media-pane w-full md:w-[48%] h-[42%] min-h-0 md:h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
+                    {/* Compact metadata header */}
+                    <div className="flex items-center justify-between gap-3 mb-3.5 shrink-0">
                         <div className="flex items-center gap-2">
-                            <span className={`rounded-lg border px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${sourceState === 'local' ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300' : sourceState === 'online' ? 'border-[#25f4ee]/25 bg-[#25f4ee]/10 text-[#25f4ee]' : 'border-amber-400/25 bg-amber-400/10 text-amber-200'}`}>
+                            <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-medium tracking-wide backdrop-blur-md ${sourceState === 'local' ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : sourceState === 'online' ? 'border-sky-400/20 bg-sky-400/10 text-sky-300' : 'border-amber-400/20 bg-amber-400/10 text-amber-200'}`}>
                                 {sourceStateLabel}
                             </span>
-                            <span className="text-xs font-mono font-bold text-white/50 bg-white/5 px-2.5 py-1 rounded-lg border border-white/5">
+                            <span className="text-[11px] font-mono text-white/40 bg-white/[0.04] px-2 py-0.5 rounded-md border border-white/5">
                                 #{video.id}
                             </span>
                         </div>
@@ -656,32 +667,42 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                 aria-label={favorite ? 'Quitar de favoritos' : 'Marcar como favorito'}
                                 aria-pressed={favorite}
                                 onClick={() => { void updateProtection('favorite'); }}
-                                className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${favorite ? 'border-amber-300/40 bg-amber-300/15 text-amber-200' : 'border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-amber-200'}`}
+                                className={`flex h-7 w-7 items-center justify-center rounded-full border transition-all ${favorite ? 'border-amber-400/30 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-white/[0.04] text-white/50 hover:bg-white/10 hover:text-white'}`}
                                 title={favorite ? 'Quitar favorito' : 'Marcar favorito'}
                             >
-                                <FaStar size={12} />
+                                <FaStar size={11} />
                             </button>
                             <button
                                 type="button"
                                 aria-label={pinned ? 'Desfijar video' : 'Fijar video'}
                                 aria-pressed={pinned}
                                 onClick={() => { void updateProtection('pinned'); }}
-                                className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${pinned ? 'border-[#25f4ee]/40 bg-[#25f4ee]/15 text-[#25f4ee]' : 'border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-[#25f4ee]'}`}
+                                className={`flex h-7 w-7 items-center justify-center rounded-full border transition-all ${pinned ? 'border-sky-400/30 bg-sky-400/15 text-sky-300' : 'border-white/10 bg-white/[0.04] text-white/50 hover:bg-white/10 hover:text-white'}`}
                                 title={pinned ? 'Desfijar video' : 'Fijar video'}
                             >
-                                <FaThumbtack size={12} />
+                                <FaThumbtack size={11} />
                             </button>
                         </div>
                     </div>
 
-                    {/* Video Player Shell */}
-                    <div className="pulsaria-detail-video-viewport flex-1 min-h-0 rounded-2xl overflow-hidden relative bg-black flex items-center justify-center shadow-2xl">
+                    {/* Video Player Shell with Ambient Glow */}
+                    <div className="pulsaria-detail-video-viewport flex-1 min-h-0 rounded-2xl overflow-hidden relative bg-black/90 flex items-center justify-center shadow-2xl border border-white/[0.06]">
+                        {/* Ambient Backdrop Blur: proyecta los colores del video abarcando el espacio disponible */}
+                        {video.thumb && (
+                            <div
+                                aria-hidden="true"
+                                className="absolute inset-0 bg-cover bg-center filter blur-3xl scale-125 opacity-40 transition-opacity duration-700 pointer-events-none select-none"
+                                style={{ backgroundImage: `url(${video.thumb})` }}
+                            />
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30 pointer-events-none" />
+
                         {video.videoSrc ? (
                             <video
                                 ref={videoRef}
                                 src={video.videoSrc}
                                 poster={video.thumb}
-                                className="pulsaria-detail-video block h-full w-full object-contain"
+                                className={`pulsaria-detail-video relative z-10 block max-h-full max-w-full rounded-xl object-contain shadow-2xl transition-all ${settings.videoFit === 'cover' ? '!h-full !w-full !object-cover !rounded-none' : ''}`}
                                 playsInline
                                 loop
                                 autoPlay
@@ -698,21 +719,18 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                 onClick={togglePlay}
                             />
                         ) : (
-                            <div className="relative flex h-full w-full flex-col items-center justify-center gap-3 overflow-hidden p-8 text-center">
-                                {video.thumb && (
-                                    <div aria-hidden="true" className="absolute inset-0 bg-cover bg-center opacity-30 blur-sm" style={{ backgroundImage: `url(${video.thumb})` }} />
-                                )}
-                                <div className="relative z-[1] flex max-w-sm flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/55 p-6 backdrop-blur-md">
-                                    <FaVideo size={32} className="text-white/25" />
-                                    <p className="text-xs font-bold text-white/75">
+                            <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-3 overflow-hidden p-8 text-center">
+                                <div className="flex max-w-sm flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/55 p-6 backdrop-blur-md">
+                                    <FaVideo size={28} className="text-white/30" />
+                                    <p className="text-xs font-semibold text-white/80">
                                         {sourceState === 'online' ? 'El medio local está fuera de esta cuota.' : 'La fuente remota no está disponible localmente.'}
                                     </p>
-                                    <p className="text-[10px] leading-relaxed text-white/50">La ficha, el transcript y los timestamps permanecen disponibles. No se redescarga nada automáticamente.</p>
+                                    <p className="text-[11px] leading-relaxed text-white/50">La ficha, el transcript y los timestamps permanecen disponibles. No se redescarga nada automáticamente.</p>
                                     {video.originalUrl && (
                                     <button
                                         type="button"
                                         onClick={() => void openOriginal()}
-                                        className="px-3 py-2 rounded-xl bg-[#25f4ee]/10 border border-[#25f4ee]/30 text-[#25f4ee] text-xs font-bold hover:bg-[#25f4ee]/20 transition-colors"
+                                        className="px-3.5 py-1.5 rounded-lg bg-white/10 border border-white/15 text-white text-xs font-medium hover:bg-white/20 transition-all"
                                     >
                                         Abrir en TikTok
                                     </button>
@@ -720,39 +738,37 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                 </div>
                             </div>
                         )}
-
                     </div>
 
                     {playbackError && video.videoSrc && <div className="mt-2 shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1 text-center text-[9px] font-bold uppercase tracking-wider text-white/55">Video no disponible</div>}
 
-                    {/* Controles fuera del lienzo de video: la imagen queda limpia y
-                        el reproductor conserva la relación de aspecto del archivo. */}
-                    {video.videoSrc && <div className="pulsaria-detail-controls mt-3 shrink-0 rounded-2xl border border-white/10 bg-white/[0.04] p-3 flex flex-col gap-2.5">
+                    {/* Controles estilo Apple fuera del lienzo de video */}
+                    {video.videoSrc && (
+                        <div className="pulsaria-detail-controls mt-3 shrink-0 rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-md p-3 flex flex-col gap-2">
                             {/* Seekbar */}
-                            <div className="flex items-center gap-3">
-                                <span className="text-[#25f4ee] font-mono text-[11px] font-bold shrink-0">{currentTime}</span>
-                                                                    <input
-                                        type="range"
-                                        aria-label="Posición del video"
-                                        min="0"
-
+                            <div className="flex items-center gap-2.5">
+                                <span className="text-white/80 font-mono text-[11px] font-medium shrink-0">{currentTime}</span>
+                                <input
+                                    type="range"
+                                    aria-label="Posición del video"
+                                    min="0"
                                     max="100"
                                     value={progress}
                                     onChange={handleSeek}
-                                    className="flex-1 accent-[#25f4ee] h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer hover:h-2 transition-all"
+                                    className="flex-1 accent-white h-1 bg-white/15 rounded-full appearance-none cursor-pointer hover:h-1.5 transition-all"
                                 />
-                                <span className="text-white/60 font-mono text-[11px] shrink-0">{duration}</span>
+                                <span className="text-white/40 font-mono text-[11px] shrink-0">{duration}</span>
                             </div>
 
                             {/* Control Bar */}
-                            <div className="flex items-center justify-between pt-1">
-                                <div className="flex items-center gap-2">
+                            <div className="flex items-center justify-between pt-0.5">
+                                <div className="flex items-center gap-1.5">
                                     <button
                                         type="button"
                                         aria-label="Guardar captura del frame actual"
                                         onClick={() => { void saveCurrentFrame(); }}
                                         disabled={savingFrame}
-                                        className="w-8 h-8 rounded-lg bg-white/10 hover:bg-[#25f4ee]/20 border border-white/10 flex items-center justify-center text-white transition-all disabled:cursor-wait disabled:opacity-50"
+                                        className="w-7 h-7 rounded-full bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all disabled:opacity-40"
                                         title="Guardar captura protegida"
                                     >
                                         <FaCamera size={11} />
@@ -761,34 +777,34 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                         type="button"
                                         aria-label={isPlaying ? 'Pausar video' : 'Reproducir video'}
                                         onClick={togglePlay}
-                                        className="w-8 h-8 rounded-lg bg-white/10 hover:bg-[#fe2c55]/20 hover:text-[#fe2c55] border border-white/10 flex items-center justify-center text-white transition-all"
+                                        className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 text-white border border-white/15 flex items-center justify-center transition-all shadow-sm"
                                     >
-                                        {isPlaying ? <FaPause size={12} /> : <FaPlay size={12} className="ml-0.5" />}
+                                        {isPlaying ? <FaPause size={11} /> : <FaPlay size={11} className="ml-0.5" />}
                                     </button>
                                     <button
                                         type="button"
                                         aria-label={isMuted ? 'Activar sonido' : 'Silenciar video'}
                                         onClick={toggleMute}
-                                        className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white transition-all"
+                                        className="w-7 h-7 rounded-full bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all"
                                     >
-                                        {isMuted ? <FaVolumeXmark size={12} className="text-red-400" /> : <FaVolumeHigh size={12} />}
+                                        {isMuted ? <FaVolumeXmark size={11} className="text-red-400" /> : <FaVolumeHigh size={11} />}
                                     </button>
                                     <button
                                         type="button"
                                         aria-label="Cambiar velocidad de reproducción"
                                         onClick={cyclePlaybackRate}
-                                        className="px-2.5 h-8 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white text-[11px] font-mono font-bold transition-all"
+                                        className="px-2 h-7 rounded-full bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 flex items-center justify-center text-white/80 text-[10px] font-mono font-semibold transition-all"
                                     >
                                         {playbackRate}x
                                     </button>
                                 </div>
 
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1.5">
                                     <button
                                         type="button"
                                         aria-label="Reiniciar video"
                                         onClick={() => seekToSecond(0)}
-                                        className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white transition-all"
+                                        className="w-7 h-7 rounded-full bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all"
                                         title="Reiniciar Video"
                                     >
                                         <FaRotateLeft size={11} />
@@ -798,7 +814,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                             type="button"
                                             aria-label="Abrir en modo Cinema"
                                             onClick={onOpenCinema}
-                                            className="w-8 h-8 rounded-lg bg-[#25f4ee]/15 hover:bg-[#25f4ee]/25 border border-[#25f4ee]/30 flex items-center justify-center text-[#25f4ee] transition-all"
+                                            className="w-7 h-7 rounded-full bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-all"
                                             title="Abrir en modo Cinema"
                                         >
                                             <FaFilm size={11} />
@@ -806,78 +822,79 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                     )}
                                 </div>
                             </div>
-                    </div>}
+                        </div>
+                    )}
 
                     {/* Video Info Summary Footer */}
-                    <div className="pulsaria-detail-meta mt-4 pt-3 border-t border-white/10 flex flex-col gap-1.5 shrink-0">
-                        <h3 className="text-white font-bold text-sm truncate" title={video.title}>
+                    <div className="pulsaria-detail-meta mt-3 pt-3 border-t border-white/[0.08] flex flex-col gap-1 shrink-0">
+                        <h3 className="text-white font-semibold text-sm truncate" title={video.title}>
                             {video.title || `TikTok Video #${video.id}`}
                         </h3>
                         <div className="flex items-center justify-between text-xs text-white/50">
-                            <span className="truncate">Por <strong className="text-white/80">@{video.author || "desconocido"}</strong></span>
-                            <span className="shrink-0 text-[11px] bg-white/5 px-2 py-0.5 rounded border border-white/5 font-mono">
-                                Duración: {video.duration}
+                            <span className="truncate">Por <strong className="text-white/80 font-medium">@{video.author || "desconocido"}</strong></span>
+                            <span className="shrink-0 text-[10px] bg-white/[0.04] px-2 py-0.5 rounded border border-white/5 font-mono text-white/60">
+                                {video.duration}
                             </span>
                         </div>
                     </div>
                 </div>
 
                 {/* ── Right Column: AAA Inspector, Transcript & Export ── */}
-                <div className="pulsaria-detail-inspector w-full md:w-[52%] h-[58%] min-h-0 md:h-full flex flex-col p-5 bg-[#0b0d14]/90 overflow-hidden relative">
+                <div className="pulsaria-detail-inspector w-full md:w-[52%] h-[58%] min-h-0 md:h-full flex flex-col p-5 bg-[#0b0d14]/95 overflow-hidden relative">
                     {/* Header Action Row */}
-                    <div className="pulsaria-detail-inspector-header flex min-w-0 items-center justify-between gap-3 pb-3 border-b border-white/10 shrink-0">
-                        {/* Tab Switcher */}
-                        <div className="pulsaria-detail-tabs flex min-w-0 max-w-full shrink overflow-x-auto bg-black/40 p-1 rounded-xl border border-white/10 gap-1">
+                    <div className="pulsaria-detail-inspector-header flex min-w-0 items-center justify-between gap-3 pb-3 border-b border-white/[0.08] shrink-0">
+                        {/* Tab Switcher - Apple Segmented Control */}
+                        <div className="pulsaria-detail-tabs flex min-w-0 max-w-full shrink overflow-x-auto bg-white/[0.05] p-1 rounded-xl border border-white/[0.08] gap-1">
                             <button
                                 type="button"
                                 aria-pressed={activeTab === 'transcript'}
                                 onClick={() => setActiveTab('transcript')}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
                                     activeTab === 'transcript'
-                                        ? 'bg-[#25f4ee]/20 text-[#25f4ee] border border-[#25f4ee]/30 shadow-[0_0_12px_rgba(37,244,238,0.2)]'
-                                        : 'text-white/50 hover:text-white hover:bg-white/5'
+                                        ? 'bg-white/15 text-white shadow-sm font-semibold'
+                                        : 'text-white/50 hover:text-white/80 hover:bg-white/[0.04]'
                                 }`}
                             >
-                                <FaFileLines size={11} />
+                                <FaFileLines size={11} className={activeTab === 'transcript' ? 'text-white' : 'text-white/40'} />
                                 Transcripción
                             </button>
                             <button
                                 type="button"
                                 aria-pressed={activeTab === 'intel'}
                                 onClick={() => setActiveTab('intel')}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
                                     activeTab === 'intel'
-                                        ? 'bg-[#fe2c55]/20 text-[#fe2c55] border border-[#fe2c55]/30 shadow-[0_0_12px_rgba(254,44,85,0.2)]'
-                                        : 'text-white/50 hover:text-white hover:bg-white/5'
+                                        ? 'bg-white/15 text-white shadow-sm font-semibold'
+                                        : 'text-white/50 hover:text-white/80 hover:bg-white/[0.04]'
                                 }`}
                             >
-                                <FaBrain size={11} />
+                                <FaBrain size={11} className={activeTab === 'intel' ? 'text-white' : 'text-white/40'} />
                                 Ficha IA
                             </button>
                             <button
                                 type="button"
                                 aria-pressed={activeTab === 'export'}
                                 onClick={() => setActiveTab('export')}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
                                     activeTab === 'export'
-                                        ? 'bg-[#8a5cff]/20 text-[#8a5cff] border border-[#8a5cff]/30 shadow-[0_0_12px_rgba(138,92,255,0.2)]'
-                                        : 'text-white/50 hover:text-white hover:bg-white/5'
+                                        ? 'bg-white/15 text-white shadow-sm font-semibold'
+                                        : 'text-white/50 hover:text-white/80 hover:bg-white/[0.04]'
                                 }`}
                             >
-                                <FaCode size={11} />
+                                <FaCode size={11} className={activeTab === 'export' ? 'text-white' : 'text-white/40'} />
                                 Exportar JSON
                             </button>
                             <button
                                 type="button"
                                 aria-pressed={activeTab === 'semantic'}
                                 onClick={() => setActiveTab('semantic')}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 shrink-0 ${
                                     activeTab === 'semantic'
-                                        ? 'bg-[#25f4ee]/20 text-[#25f4ee] border border-[#25f4ee]/30 shadow-[0_0_12px_rgba(37,244,238,0.2)]'
-                                        : 'text-white/50 hover:text-white hover:bg-white/5'
+                                        ? 'bg-white/15 text-white shadow-sm font-semibold'
+                                        : 'text-white/50 hover:text-white/80 hover:bg-white/[0.04]'
                                 }`}
                             >
-                                <FaShareNodes size={11} />
+                                <FaShareNodes size={11} className={activeTab === 'semantic' ? 'text-white' : 'text-white/40'} />
                                 Semantic
                             </button>
                         </div>
@@ -887,10 +904,10 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                             type="button"
                             aria-label="Cerrar reproductor"
                             onClick={onClose}
-                            className="w-8 h-8 shrink-0 rounded-xl bg-white/5 hover:bg-[#fe2c55]/20 hover:text-[#fe2c55] border border-white/10 flex items-center justify-center text-white/70 hover:scale-105 transition-all"
+                            className="w-8 h-8 shrink-0 rounded-full bg-white/[0.05] hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
                             title="Cerrar (Esc)"
                         >
-                            <FaXmark size={14} />
+                            <FaXmark size={13} />
                         </button>
                     </div>
 
@@ -898,7 +915,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                     {activeTab === 'transcript' && (
                         <div className="flex-1 flex flex-col min-h-0 pt-4 overflow-hidden">
                             {/* Search & Copy Bar */}
-                            <div className="flex items-center gap-2.5 mb-3 shrink-0">
+                            <div className="flex items-center gap-2 mb-3 shrink-0">
                                 <div className="flex-1 relative">
                                     <FaMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 text-xs" />
                                     <input
@@ -906,7 +923,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                         placeholder="Filtrar palabras en la transcripción..."
                                         value={filterQuery}
                                         onChange={(e) => setFilterQuery(e.target.value)}
-                                        className="w-full pl-8 pr-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-white/30 focus:outline-none focus:border-[#25f4ee]/50"
+                                        className="w-full pl-8 pr-3 py-2 bg-white/[0.04] border border-white/10 rounded-xl text-xs text-white placeholder-white/30 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all"
                                     />
                                     {filterQuery && (
                                         <button
@@ -923,21 +940,21 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                     type="button"
                                     aria-label="Copiar transcripción completa"
                                     onClick={() => copyToClipboard(fullTranscriptText, 'Texto')}
-                                    className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shrink-0 transition-all active:scale-95"
+                                    className="px-3 py-2 bg-white/[0.05] hover:bg-white/[0.12] border border-white/10 rounded-xl text-xs font-medium text-white/90 flex items-center gap-1.5 shrink-0 transition-all"
                                     title="Copiar transcripción completa"
                                 >
-                                    {copiedFormat === 'Texto' ? <FaCheck className="text-emerald-400" size={12} /> : <FaCopy size={12} />}
+                                    {copiedFormat === 'Texto' ? <FaCheck className="text-emerald-400" size={11} /> : <FaCopy size={11} />}
                                     Copiar
                                 </button>
                             </div>
 
                             {transcriptError && (
-                                <div role="alert" className="mb-3 rounded-xl border border-[#fe2c55]/30 bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-[#fe2c55]">
+                                <div role="alert" className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-[10px] leading-relaxed text-red-300">
                                     No se pudo cargar la transcripción: {transcriptError}
                                 </div>
                             )}
                             {transcriptOnly && !transcriptError && (
-                                <div className="mb-3 rounded-xl border border-[#25f4ee]/20 bg-[#25f4ee]/5 px-3 py-2 text-[10px] leading-relaxed text-[#25f4ee]/75">
+                                <div className="mb-3 rounded-xl border border-sky-400/20 bg-sky-400/10 px-3 py-2 text-[10px] leading-relaxed text-sky-200">
                                     Modo transcript-only: los timestamps se conservan para consulta, pero no hay un video local al que saltar.
                                 </div>
                             )}
@@ -946,7 +963,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                             <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-2 rounded-2xl bg-black/30 border border-white/5 p-3">
                                 {loadingTranscript ? (
                                     <div className="flex items-center justify-center h-full text-white/40 text-xs gap-2">
-                                        <span className="w-4 h-4 rounded-full border-2 border-[#25f4ee] border-t-transparent animate-spin" />
+                                        <span className="w-4 h-4 rounded-full border-2 border-white/60 border-t-transparent animate-spin" />
                                         Cargando transcripción y marcas temporales...
                                     </div>
                                 ) : filteredChunks.length === 0 ? (
@@ -971,18 +988,18 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                                 aria-label={`Ir al segmento ${chunk.chunk_index + 1}, desde ${formatPreciseTime(chunk.start)}`}
                                                 className={`w-full text-left p-3 rounded-xl border transition-all flex flex-col gap-1.5 ${transcriptOnly ? 'cursor-default opacity-90' : 'cursor-pointer'} ${
                                                     isChunkActive
-                                                        ? 'bg-[#25f4ee]/15 border-[#25f4ee]/40 shadow-[0_0_15px_rgba(37,244,238,0.15)]'
-                                                        : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.06] hover:border-white/10'
+                                                        ? 'bg-white/10 border-white/20 shadow-sm'
+                                                        : 'bg-white/[0.02] border-white/5 hover:bg-white/[0.05] hover:border-white/10'
                                                 }`}
-                                                whileHover={{ scale: 1.01 }}
-                                                whileTap={{ scale: 0.99 }}
+                                                whileHover={{ scale: 1.005 }}
+                                                whileTap={{ scale: 0.995 }}
                                             >
                                                 <div className="flex items-center justify-between">
-                                                    <span className={`text-[10px] font-mono font-black ${isChunkActive ? 'text-[#25f4ee]' : 'text-white/40'}`}>
-                                                        {formatPreciseTime(chunk.start)} → {formatPreciseTime(chunk.end)}
+                                                    <span className={`text-[10px] font-mono font-medium ${isChunkActive ? 'text-white' : 'text-white/40'}`}>
+                                                        {formatCleanTime(chunk.start)} → {formatCleanTime(chunk.end)}
                                                     </span>
-                                                    <span className="text-[9px] font-bold uppercase tracking-wider text-white/30">
-                                                        Chunk #{chunk.chunk_index + 1}
+                                                    <span className="text-[9px] font-medium text-white/30">
+                                                        #{chunk.chunk_index + 1}
                                                     </span>
                                                 </div>
                                                 <p className={`text-xs leading-relaxed ${isChunkActive ? 'text-white font-medium' : 'text-white/70'}`}>
@@ -1226,15 +1243,15 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                     )}
 
                     {/* Bottom Quick Actions Hub */}
-                    <div className="pt-4 mt-auto border-t border-white/10 grid grid-cols-4 gap-2 shrink-0">
+                    <div className="pt-3.5 mt-auto border-t border-white/[0.08] grid grid-cols-4 gap-2 shrink-0">
                         <button
                             type="button"
                             aria-label="Copiar transcripción como texto plano"
-                            onClick={() => copyToClipboard(fullTranscriptText, 'Texto Plano')}
-                            className="flex flex-col items-center justify-center py-2.5 px-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-all group"
+                            onClick={() => copyToClipboard(fullTranscriptText, 'Texto')}
+                            className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.08] hover:border-white/20 text-white/80 hover:text-white transition-all text-xs font-medium group"
                         >
-                            <FaFileLines size={13} className="text-white/70 group-hover:scale-110 transition-transform mb-1" />
-                            <span className="text-[10px] font-bold uppercase tracking-wider">Copiar TXT</span>
+                            <FaFileLines size={12} className="text-white/50 group-hover:text-white transition-colors" />
+                            <span>Copiar texto</span>
                         </button>
                         <button
                             type="button"
@@ -1243,28 +1260,28 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
                                 const md = `# ${video.title || 'Video'}\n**Autor:** @${video.author}\n**Duración:** ${video.duration}\n\n## Transcripción\n${fullTranscriptText}`;
                                 copyToClipboard(md, 'Markdown');
                             }}
-                            className="flex flex-col items-center justify-center py-2.5 px-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-all group"
+                            className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.08] hover:border-white/20 text-white/80 hover:text-white transition-all text-xs font-medium group"
                         >
-                            <FaCode size={13} className="text-[#25f4ee] group-hover:scale-110 transition-transform mb-1" />
-                            <span className="text-[10px] font-bold uppercase tracking-wider">Markdown</span>
+                            <FaCode size={12} className="text-white/50 group-hover:text-white transition-colors" />
+                            <span>Markdown</span>
                         </button>
                         <button
                             type="button"
                             aria-label="Copiar payload de exportación"
                             onClick={() => copyToClipboard(JSON.stringify(exportPayload, null, 2), 'Exportar')}
-                            className="flex flex-col items-center justify-center py-2.5 px-2 rounded-xl bg-[#8a5cff]/10 hover:bg-[#8a5cff]/20 border border-[#8a5cff]/30 text-[#8a5cff] transition-all group"
+                            className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.08] hover:border-white/20 text-white/80 hover:text-white transition-all text-xs font-medium group"
                         >
-                            <FaShareNodes size={13} className="group-hover:scale-110 transition-transform mb-1" />
-                            <span className="text-[10px] font-bold uppercase tracking-wider">Exportar</span>
+                            <FaShareNodes size={12} className="text-white/50 group-hover:text-white transition-colors" />
+                            <span>Exportar</span>
                         </button>
                         <button
                             type="button"
                             aria-label="Verificar índice y persistencia SQLite"
                             onClick={() => { void verifyPersistedJob(); }}
-                            className="flex flex-col items-center justify-center py-2.5 px-2 rounded-xl bg-[#fe2c55]/10 hover:bg-[#fe2c55]/20 border border-[#fe2c55]/30 text-[#fe2c55] transition-all group"
+                            className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.08] hover:border-white/20 text-white/80 hover:text-white transition-all text-xs font-medium group"
                         >
-                            <FaCheckDouble size={13} className="group-hover:scale-110 transition-transform mb-1" />
-                            <span className="text-[10px] font-bold uppercase tracking-wider">Verificar índice</span>
+                            <FaCheckDouble size={12} className="text-white/50 group-hover:text-white transition-colors" />
+                            <span>Verificar</span>
                         </button>
                     </div>
                 </div>

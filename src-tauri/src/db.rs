@@ -4460,24 +4460,49 @@ pub fn register_profile_source(
     Ok((conn.last_insert_rowid(), false))
 }
 
+pub fn update_profile_source_settings_with_rules(
+    conn: &Connection,
+    source_id: i64,
+    watch_config_json: &str,
+    active: bool,
+    rules_json: Option<&str>,
+) -> Result<CollectionSourceRecord> {
+    let rows = if let Some(rules) = rules_json {
+        conn.execute(
+            "UPDATE collection_sources SET
+                watch_config_json = ?1,
+                active = ?2,
+                status = CASE WHEN ?2 = 1 THEN 'ready' ELSE 'paused' END,
+                rules_json = ?3,
+                last_error = NULL,
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?4 AND platform = 'tiktok' AND source_type = 'profile'",
+            params![watch_config_json, active, rules, source_id],
+        )?
+    } else {
+        conn.execute(
+            "UPDATE collection_sources SET
+                watch_config_json = ?1,
+                active = ?2,
+                status = CASE WHEN ?2 = 1 THEN 'ready' ELSE 'paused' END,
+                last_error = NULL,
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?3 AND platform = 'tiktok' AND source_type = 'profile'",
+            params![watch_config_json, active, source_id],
+        )?
+    };
+    require_rows_changed(rows)?;
+    get_collection_source(conn, source_id)
+}
+
+#[allow(dead_code)]
 pub fn update_profile_source_settings(
     conn: &Connection,
     source_id: i64,
     watch_config_json: &str,
     active: bool,
 ) -> Result<CollectionSourceRecord> {
-    let rows = conn.execute(
-        "UPDATE collection_sources SET
-            watch_config_json = ?1,
-            active = ?2,
-            status = CASE WHEN ?2 = 1 THEN 'ready' ELSE 'paused' END,
-            last_error = NULL,
-            updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?3 AND platform = 'tiktok' AND source_type = 'profile'",
-        params![watch_config_json, active, source_id],
-    )?;
-    require_rows_changed(rows)?;
-    get_collection_source(conn, source_id)
+    update_profile_source_settings_with_rules(conn, source_id, watch_config_json, active, None)
 }
 
 pub fn register_collection_source(conn: &Connection, url: &str) -> Result<()> {
@@ -7295,6 +7320,7 @@ mod tests {
             &conn,
             first.source.id,
             &paused,
+            None,
         )
         .unwrap();
         assert_eq!(updated.status, "paused");
@@ -7352,6 +7378,7 @@ mod tests {
                 &connection,
                 source_id,
                 &updated_selection,
+                None,
             )
             .unwrap();
         }
@@ -7371,6 +7398,49 @@ mod tests {
             std::env::remove_var("PULSAR_DATA_DIR");
         }
         fs::remove_dir_all(&test_dir).unwrap();
+    }
+
+    #[test]
+    fn profile_source_auto_enqueue_toggle_and_persistence() {
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let registered = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@streaming_user",
+            &selection,
+        )
+        .unwrap();
+
+        let initial = get_collection_source(&conn, registered.source.id).unwrap();
+        assert_eq!(initial.rules_json, r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#);
+
+        // Switch to streaming mode (auto_enqueue = false)
+        let updated = crate::application::collection_service::update_profile_source_settings(
+            &conn,
+            registered.source.id,
+            &selection,
+            Some(false),
+        )
+        .unwrap();
+        assert_eq!(updated.rules_json, r#"{"ignoreDuplicates":true,"autoEnqueue":false}"#);
+
+        let reloaded = get_collection_source(&conn, registered.source.id).unwrap();
+        assert_eq!(reloaded.rules_json, r#"{"ignoreDuplicates":true,"autoEnqueue":false}"#);
+
+        // Switch back to auto_enqueue = true
+        let updated_back = crate::application::collection_service::update_profile_source_settings(
+            &conn,
+            registered.source.id,
+            &selection,
+            Some(true),
+        )
+        .unwrap();
+        assert_eq!(updated_back.rules_json, r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#);
     }
 
     #[test]

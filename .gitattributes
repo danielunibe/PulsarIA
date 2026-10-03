@@ -1,0 +1,3 @@
+# Preserve exact LF line endings for python-workers so that file hashes and byte lengths
+# match src-tauri/resources/runtime-manifest.json deterministically across all platforms.
+python-workers/*.py text eol=lf

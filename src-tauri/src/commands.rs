@@ -183,6 +183,16 @@ pub async fn generate_gemini_response(
         .map(|response| response.text)
 }
 
+#[tauri::command]
+pub fn get_gemini_status() -> bool {
+    crate::infrastructure::gemini::is_configured()
+}
+
+#[tauri::command]
+pub fn set_gemini_api_key(api_key: String) -> Result<(), String> {
+    crate::infrastructure::gemini::set_api_key(&api_key)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WhisperModelStatus {
     pub model: String,
@@ -3381,8 +3391,9 @@ pub async fn add_job(
         .map_err(|error| format!("No se pudo preparar el almacenamiento local: {}", error))?;
     storage::ensure_capacity(&media_root)?;
 
+    let browser = state.worker_config.read().await.cookies_browser.clone();
+
     if is_collection_source(&url) {
-        let browser = state.worker_config.read().await.cookies_browser.clone();
         let source_id = {
             let db = state
                 .db
@@ -3544,7 +3555,14 @@ pub async fn add_job(
         }
     };
 
-    state.queue.dispatch(job_id, url).await?;
+    state
+        .queue
+        .dispatch_with_browser(
+            job_id,
+            url,
+            (!browser.is_empty()).then_some(browser),
+        )
+        .await?;
 
     Ok(job_id)
 }
@@ -3603,6 +3621,8 @@ pub struct RegisterProfileSourceInput {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProfileSourceSettingsInput {
     pub selected_sources: ProfileSourceSelection,
+    #[serde(default)]
+    pub auto_enqueue: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3691,10 +3711,41 @@ pub async fn update_profile_source_settings(
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    let source =
-        update_profile_source_settings_service(&connection, source_id, &input.selected_sources)?;
+    let source = update_profile_source_settings_service(
+        &connection,
+        source_id,
+        &input.selected_sources,
+        input.auto_enqueue,
+    )?;
     let _ = db::ensure_profile_channels(&connection, source_id, &source.watch_config_json);
     Ok(source)
+}
+
+#[tauri::command]
+pub async fn set_profile_auto_enqueue(
+    source_id: i64,
+    auto_enqueue: bool,
+    state: State<'_, AppState>,
+) -> Result<db::CollectionSourceRecord, String> {
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    let source = db::get_collection_source(&connection, source_id)
+        .map_err(|error| error.to_string())?;
+    let mut rules: crate::application::collection_service::SourceRules =
+        serde_json::from_str(&source.rules_json).unwrap_or_default();
+    rules.auto_enqueue = auto_enqueue;
+    let rules_json = serde_json::to_string(&rules).map_err(|e| e.to_string())?;
+    let updated = db::update_profile_source_settings_with_rules(
+        &connection,
+        source_id,
+        &source.watch_config_json,
+        source.active,
+        Some(&rules_json),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(updated)
 }
 
 #[tauri::command]
@@ -4327,6 +4378,7 @@ pub async fn search_transcripts(
 
     let config = state.config.lock().await;
     let final_limit = limit.unwrap_or(config.max_results);
+    let threshold = min_score.unwrap_or(config.min_score);
     drop(config);
     let response = state
         .search
@@ -4337,8 +4389,9 @@ pub async fn search_transcripts(
             context: None,
         })
         .await?;
-    let _ = min_score;
-    Ok(flatten_unified_results(response))
+    let mut results = flatten_unified_results(response);
+    results.retain(|r| r.similarity_score >= threshold);
+    Ok(results)
 }
 
 #[tauri::command]
@@ -5208,6 +5261,62 @@ pub async fn get_download_dir(state: State<'_, AppState>) -> Result<String, Stri
         }
     }
     Ok(default_download_dir().to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn pick_folder() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        #[cfg(windows)]
+        {
+            let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = "Seleccionar carpeta para Pulsaria"
+$dialog.ShowNewFolderButton = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    Write-Output $dialog.SelectedPath
+}
+"#;
+            let output = hidden_std_command("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", script])
+                .output()
+                .map_err(|e| format!("Error al abrir diálogo de selección: {}", e))?;
+
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if path.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(path))
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(None)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn open_folder_in_explorer(path: String) -> Result<(), String> {
+    let target = expand_user_path(&path);
+    if !target.exists() {
+        let _ = std::fs::create_dir_all(&target);
+    }
+    #[cfg(windows)]
+    {
+        hidden_std_command("explorer")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| format!("No se pudo abrir el explorador: {}", e))?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&target).spawn();
+    }
+    Ok(())
 }
 
 #[tauri::command]

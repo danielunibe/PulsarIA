@@ -408,7 +408,45 @@ export function GeneralTab({
 
             {/* Carpeta de Descargas */}
             <SectionCard className="flex flex-col gap-3">
-                <SectionTitle icon={FaFolder} label={t('saveFolder')} />
+                <div className="flex items-center justify-between">
+                    <SectionTitle icon={FaFolder} label={t('saveFolder')} />
+                    {isTauri && (
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    try {
+                                        const { invoke } = await import('@tauri-apps/api/core');
+                                        const selected = await invoke<string | null>('pick_folder');
+                                        if (selected) {
+                                            setFolder(selected);
+                                        }
+                                    } catch (e) {
+                                        console.error('Error al seleccionar carpeta:', e);
+                                    }
+                                }}
+                                className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-[#25f4ee] hover:bg-[#25f4ee]/15 hover:border-[#25f4ee]/30 transition-all cursor-pointer"
+                            >
+                                Examinar…
+                            </button>
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!folder) return;
+                                    try {
+                                        const { invoke } = await import('@tauri-apps/api/core');
+                                        await invoke('open_folder_in_explorer', { path: folder });
+                                    } catch (e) {
+                                        console.error('Error al abrir carpeta:', e);
+                                    }
+                                }}
+                                className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-white/70 hover:bg-white/10 hover:text-white transition-all cursor-pointer"
+                            >
+                                Abrir
+                            </button>
+                        </div>
+                    )}
+                </div>
                 <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-[14px] bg-black/40 shadow-inner">
                     <div className="shrink-0 flex items-center justify-center text-white/40">
                         <FaFolder size={14} />

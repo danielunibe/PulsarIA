@@ -459,7 +459,7 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
                                     playsInline
                                     muted
                                     preload={cardIndex === index ? 'auto' : 'metadata'}
-                                    className="cinema-reference__media"
+                                    className={`cinema-reference__media ${settings.videoFit === 'contain' ? 'is-contain' : 'is-cover'}`}
                                     onPlay={() => { if (cardIndex === index) setPlaying(true); }}
                                     onPause={() => { if (cardIndex === index) setPlaying(false); }}
                                     onLoadedMetadata={(event) => { if (cardIndex === index) setDuration(event.currentTarget.duration); }}
@@ -482,7 +482,7 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
                                     }}
                                 />
                             ) : (
-                                <div className="cinema-reference__media cinema-reference__media-image" style={{ backgroundImage: `url(${video.thumb || '/pulsaria-icon.png'})` }} role="img" aria-label={video.title} />
+                                <div className={`cinema-reference__media cinema-reference__media-image ${settings.videoFit === 'contain' ? 'is-contain' : 'is-cover'}`} style={{ backgroundImage: `url(${video.thumb || '/pulsaria-icon.png'})` }} role="img" aria-label={video.title} />
                             )}
                             <div className="cinema-reference__shade" />
                             {cardIndex === index && (

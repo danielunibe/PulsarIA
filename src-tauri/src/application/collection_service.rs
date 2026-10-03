@@ -84,9 +84,9 @@ impl SourceWatchConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceRules {
-    #[serde(rename = "ignoreDuplicates", default = "default_true")]
+    #[serde(rename = "ignoreDuplicates", alias = "ignore_duplicates", default = "default_true")]
     pub ignore_duplicates: bool,
-    #[serde(rename = "autoEnqueue", default = "default_true")]
+    #[serde(rename = "autoEnqueue", alias = "auto_enqueue", default = "default_true")]
     pub auto_enqueue: bool,
 }
 
@@ -188,12 +188,26 @@ pub fn update_profile_source_settings(
     connection: &rusqlite::Connection,
     source_id: i64,
     selection: &ProfileSourceSelection,
+    auto_enqueue: Option<bool>,
 ) -> Result<db::CollectionSourceRecord, String> {
     let watch = selection.to_watch_config();
     let watch_json = serde_json::to_string(&watch)
         .map_err(|error| format!("No se pudo serializar la selección: {error}"))?;
-    db::update_profile_source_settings(connection, source_id, &watch_json, selection.is_active())
-        .map_err(|error| error.to_string())
+    let rules_json = auto_enqueue.map(|enabled| {
+        let rules = SourceRules {
+            ignore_duplicates: true,
+            auto_enqueue: enabled,
+        };
+        serde_json::to_string(&rules).unwrap_or_default()
+    });
+    db::update_profile_source_settings_with_rules(
+        connection,
+        source_id,
+        &watch_json,
+        selection.is_active(),
+        rules_json.as_deref(),
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone, Serialize)]

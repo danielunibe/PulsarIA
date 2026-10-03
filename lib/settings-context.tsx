@@ -90,6 +90,8 @@ export interface SystemSettings {
     showDemoVideos: boolean;
     /** Oculta la ventana en la bandeja al cerrarla en Tauri. */
     keepInTrayOnClose: boolean;
+    /** Umbral de similitud mínima para búsqueda semántica (0.1 - 0.95). */
+    minScore: number;
 }
 
 interface SettingsContextValue {
@@ -165,6 +167,7 @@ const defaultSettings: SystemSettings = {
     hoverAutoplay: true,
     showDemoVideos: false,
     keepInTrayOnClose: true,
+    minScore: 0.45,
 };
 
 function profileForQuality(quality: number): ProcessingQuality {
@@ -243,6 +246,9 @@ function normalizeSettings(value: unknown): SystemSettings {
     const preferredAdapterId = typeof candidate.preferredAdapterId === 'string' && candidate.preferredAdapterId.trim()
         ? candidate.preferredAdapterId
         : null;
+    const minScore = typeof candidate.minScore === 'number' && Number.isFinite(candidate.minScore)
+        ? Math.max(0.1, Math.min(0.95, candidate.minScore))
+        : defaultSettings.minScore;
 
     return {
         locale: candidate.locale === 'en-US' ? 'en-US' : defaultSettings.locale,
@@ -279,6 +285,7 @@ function normalizeSettings(value: unknown): SystemSettings {
         lastVerifiedAccelerators: typeof candidate.lastVerifiedAccelerators === 'string'
             ? candidate.lastVerifiedAccelerators
             : null,
+        minScore,
     };
 }
 
@@ -356,6 +363,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                             hoverAutoplay: localCandidate?.hoverAutoplay,
                             showDemoVideos: localCandidate?.showDemoVideos,
                             keepInTrayOnClose: response.settings.keepInTrayOnClose,
+                            minScore: response.settings.minScore ?? (typeof localCandidate?.minScore === 'number' ? localCandidate.minScore : undefined),
                         });
                         if (response.source === 'default' && localCandidate) {
                             next = normalizeSettings({ ...next, ...localCandidate });
@@ -407,6 +415,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             active = false;
         };
     }, []);
+
+    useEffect(() => {
+        if (typeof document !== 'undefined') {
+            document.documentElement.setAttribute('data-theme', settings.theme);
+        }
+    }, [settings.theme]);
 
     const updateSettings = useCallback((newSettings: Partial<SystemSettings>) => {
         if (newSettings.locale === 'es-MX' || newSettings.locale === 'en-US') {

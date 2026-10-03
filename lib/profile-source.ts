@@ -42,6 +42,11 @@ export interface ProfileSourceEntry {
   syncState: ProfileSourceSyncState;
 }
 
+export interface ProfileSourceRules {
+  autoEnqueue: boolean;
+  ignoreDuplicates: boolean;
+}
+
 export interface ProfileSource {
   id: number;
   platform: 'tiktok';
@@ -54,6 +59,7 @@ export interface ProfileSource {
   verified: boolean | null;
   metrics: ProfileMetrics;
   sources: Record<ProfileSourceKey, ProfileSourceEntry>;
+  rules: ProfileSourceRules;
   createdAt: string;
   updatedAt: string;
   status: ProfileStatus;
@@ -77,31 +83,39 @@ export type ProfileInputResult =
  * the identity.
  */
 export function normalizeTikTokProfileInput(value: string): ProfileInputResult {
-  const input = value.trim();
+  let input = value.trim();
   if (!input) return { ok: false, reason: 'empty' };
 
   let username: string;
   if (input.startsWith('@')) {
     if (/[/:?#]/.test(input)) return { ok: false, reason: 'invalid_handle' };
     username = input.slice(1);
+  } else if (!input.includes('/') && !input.includes(':') && !input.includes('?') && !input.includes('#')) {
+    // Bare username without @ (e.g. "lua.noctual")
+    username = input;
   } else {
+    // If protocol was omitted (e.g. "tiktok.com/@usuario"), prepend https://
+    if (!input.startsWith('http://') && !input.startsWith('https://')) {
+      input = `https://${input}`;
+    }
     let parsed: URL;
     try {
       parsed = new URL(input);
     } catch {
       return { ok: false, reason: 'malformed' };
     }
-    if (parsed.protocol !== 'https:') return { ok: false, reason: 'malformed' };
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return { ok: false, reason: 'malformed' };
     if (parsed.username || parsed.password) return { ok: false, reason: 'malformed' };
     const host = parsed.hostname.toLowerCase();
     if (host !== 'tiktok.com' && host !== 'www.tiktok.com') {
       return { ok: false, reason: 'unsupported_platform' };
     }
     const segments = parsed.pathname.split('/').filter(Boolean);
-    if (segments.length !== 1 || !segments[0].startsWith('@')) {
+    if (segments.length !== 1) {
       return { ok: false, reason: 'invalid_handle' };
     }
-    username = segments[0].slice(1);
+    const segment = segments[0];
+    username = segment.startsWith('@') ? segment.slice(1) : segment;
   }
 
   if (!/^[a-zA-Z0-9._]{1,24}$/.test(username)) {
@@ -138,6 +152,7 @@ export interface PersistedCollectionSourceRecord {
   active: boolean;
   status: string;
   watch_config_json: string;
+  rules_json?: string | null;
   last_sync_summary_json?: string | null;
   discovered_count: number;
   created_at: string;
@@ -235,6 +250,16 @@ export function toProfileSource(source: PersistedCollectionSourceRecord): Profil
       posts: source.posts_count ?? null,
     },
     sources: entries,
+    rules: {
+      autoEnqueue: (() => {
+        const rawRules = parseJson<{ auto_enqueue?: boolean; autoEnqueue?: boolean }>(source.rules_json, {});
+        return rawRules.auto_enqueue ?? rawRules.autoEnqueue ?? true;
+      })(),
+      ignoreDuplicates: (() => {
+        const rawRules = parseJson<{ ignore_duplicates?: boolean; ignoreDuplicates?: boolean }>(source.rules_json, {});
+        return rawRules.ignore_duplicates ?? rawRules.ignoreDuplicates ?? true;
+      })(),
+    },
     createdAt: source.created_at,
     updatedAt: source.updated_at || source.created_at,
     status: profileStatus(source),

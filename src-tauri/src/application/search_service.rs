@@ -327,6 +327,9 @@ impl SearchService {
                         let vector_hits = vector_results
                             .into_iter()
                             .filter_map(|result| {
+                                if result.similarity_score < config.min_score {
+                                    return None;
+                                }
                                 if !crate::db::job_matches_filters(
                                     &connection,
                                     result.job_id,

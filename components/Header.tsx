@@ -296,22 +296,24 @@ export function Header({
                         <button
                             type="button"
                             className="pulsaria-header-tool"
+                            title="Opciones de vista y visibilidad"
+                            aria-label="Opciones de vista"
                             aria-expanded={openHeaderPanel === 'visibility'}
                             aria-controls="pulsaria-visibility-popover"
                             onClick={() => setOpenHeaderPanel((current) => current === 'visibility' ? null : 'visibility')}
                         >
                             {backgroundVisible || showDemoVideos || showTikTokPill ? <FaEye size={16} /> : <FaEyeSlash size={16} />}
-                            <span>Vista</span>
                         </button>
                         <button
                             type="button"
                             className="pulsaria-header-tool"
+                            title="Filtros de video"
+                            aria-label="Filtros de video"
                             aria-expanded={openHeaderPanel === 'filters'}
                             aria-controls="pulsaria-filter-popover"
                             onClick={() => setOpenHeaderPanel((current) => current === 'filters' ? null : 'filters')}
                         >
                             <FaFilter size={15} />
-                            <span>Filtros</span>
                         </button>
                     </div>
                     {showTikTokPill && (

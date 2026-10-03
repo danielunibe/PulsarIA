@@ -236,8 +236,8 @@
                                              "sourcePath":  "python-workers/audio_extractor.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  5868,
-                                             "sha256":  "8D3F4E865F93811B365C1D4F670055E7B7C6EA885176D26B30BDE7385AA9B22E"
+                                             "sizeBytes":  5982,
+                                             "sha256":  "83CEFD1A8F447AB3CB8F24C22C2F5642DBB04A16102617DE09EEC14DC8B9A3D5"
                                          },
                                          {
                                              "path":  "python-workers/daemon.py",
@@ -252,24 +252,24 @@
                                              "sourcePath":  "python-workers/downloader.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  15641,
-                                             "sha256":  "01A0DEC5ADDF8BDA076A2932AB4234902E0D5744EBAB21B301525EBFE575E9C7"
+                                             "sizeBytes":  15893,
+                                             "sha256":  "46AFDA74A1911E4FCF00FDF1F0653C665742D45A1E00D6F5289DD8C0841FA324"
                                          },
                                          {
                                              "path":  "python-workers/embed_query.py",
                                              "sourcePath":  "python-workers/embed_query.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  1202,
-                                             "sha256":  "E06F292D4164426FD57D542F9DCB6A19EDFB0400BA59D7B13994220E1F23F202"
+                                             "sizeBytes":  1203,
+                                             "sha256":  "4DFD8145427830963D3328C4D848A7DD13788A1F1D0D81BECB476945D05286C5"
                                          },
                                          {
                                              "path":  "python-workers/events.py",
                                              "sourcePath":  "python-workers/events.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  3427,
-                                             "sha256":  "507EEF9AF8E10A6BC7DC11A67CE8900A353FFB0C31195C39FD2005C78CFD4101"
+                                             "sizeBytes":  3434,
+                                             "sha256":  "4762A24100697F419A4D9865EE697AE9751DE6B0BFDD4ADECE8468FA3C508DF9"
                                          },
                                          {
                                              "path":  "python-workers/export_onnx.py",
@@ -284,16 +284,16 @@
                                              "sourcePath":  "python-workers/export_onnx_embeddings.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  1366,
-                                             "sha256":  "C6E430DFA73A6E09D296127591027F294E2AE242FF67DF02432881EAC7CE3A0C"
+                                             "sizeBytes":  1400,
+                                             "sha256":  "035E1602C720BD3BE0EF03DEC6293747C651D5453D6CA7306F46D8CF111C179E"
                                          },
                                          {
                                              "path":  "python-workers/main.py",
                                              "sourcePath":  "python-workers/main.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  15267,
-                                             "sha256":  "1E5C15E7FF1627468DDD9FE1672C5A271A588D8754FB6D6D954CB3D5D0C8ACB2"
+                                             "sizeBytes":  15430,
+                                             "sha256":  "026C2E39797503325A5CC3DCFD57001F771565738C7953E828E817ABC9ED159F"
                                          },
                                          {
                                              "path":  "python-workers/models.py",
@@ -308,56 +308,56 @@
                                              "sourcePath":  "python-workers/output_generator.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  8575,
-                                             "sha256":  "5D96825E3AAF296865FEEF34FB4768AADA5995D15893024BB644F79A2B786FD2"
+                                             "sizeBytes":  8782,
+                                             "sha256":  "EED388FB21585EDC8561948C1D8CF04655DFE64FA7150F3CC2232A762FAC415F"
                                          },
                                          {
                                              "path":  "python-workers/prepare_whisper_model.py",
                                              "sourcePath":  "python-workers/prepare_whisper_model.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  9766,
-                                             "sha256":  "A3953478E960F7833E5B15DD52A6B9261C46E3B3D0FCB2393EB1D5FD35B8111A"
+                                             "sizeBytes":  9994,
+                                             "sha256":  "0EB2B4A614310E2786A61DB1F3729F0B144C6A765ECAC2324C8FEBE1EFB4C707"
                                          },
                                          {
                                              "path":  "python-workers/process_utils.py",
                                              "sourcePath":  "python-workers/process_utils.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  413,
-                                             "sha256":  "964E1F7A592FC24C7D76BC7A714F32C46936F84D2B1216222C542FB5D4DB965F"
+                                             "sizeBytes":  429,
+                                             "sha256":  "FEB6424BA17803E4F718326649C6642BA0ACAD9D660E373A1DFDDD87F268DB5B"
                                          },
                                          {
                                              "path":  "python-workers/profile_metadata.py",
                                              "sourcePath":  "python-workers/profile_metadata.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  8040,
-                                             "sha256":  "465EFC30E5DDA598D9FBD754DC40DD8CE3B02CCD9CCD1E2EBA26EDA0CE19960A"
+                                             "sizeBytes":  8248,
+                                             "sha256":  "70490DD95C14684B0ADF0FBB017F3931D53A6A4AE309084A1BC2FD1AD59E15A9"
                                          },
                                          {
                                              "path":  "python-workers/source_scanner.py",
                                              "sourcePath":  "python-workers/source_scanner.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  7668,
-                                             "sha256":  "D1D573206C64E17EDD3A6E2F9A75B976EDE0EE8BE04D1C8E2ECE02AFAAF321F9"
+                                             "sizeBytes":  7888,
+                                             "sha256":  "E904D87FE687F8463BA5C34DE7063D6CC69010CD3D3074F2A33E9F6A23CF27EC"
                                          },
                                          {
                                              "path":  "python-workers/transcriber.py",
                                              "sourcePath":  "python-workers/transcriber.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  15962,
-                                             "sha256":  "CDF030E44C2918C1C431B595681ED96F4F6BE8CE4DC6FCF181DE75A9533269E0"
+                                             "sizeBytes":  16370,
+                                             "sha256":  "D32FCE6200B55215E291CC75C314B424B397B364EB2710BA2600409EA8312907"
                                          },
                                          {
                                              "path":  "python-workers/visual_analyzer.py",
                                              "sourcePath":  "python-workers/visual_analyzer.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  22783,
-                                             "sha256":  "56C729699B59AE45EDD20EEE48D7992201841856E749B1882BF6DEEAEE39930A"
+                                             "sizeBytes":  23399,
+                                             "sha256":  "C072FCD1E56A02AD6E2348C80A281657D6848E82D6DFA6005C9E94B7B1A252C5"
                                          }
                                      ]
                        },

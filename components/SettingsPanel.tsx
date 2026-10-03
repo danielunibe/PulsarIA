@@ -15,6 +15,7 @@ import { StatsTab } from './settings/StatsTab';
 import { PerformanceTab, type AccelerationStatusUi, type PerformancePolicyUi } from './settings/PerformanceTab';
 import type { PageConfig } from './PagePanel';
 import type { SearchMode } from './Header';
+import { toast } from 'sonner';
 
 import { 
     FaDownload, 
@@ -663,6 +664,7 @@ export function SettingsPanel({
         let active = true;
         queueMicrotask(() => {
             if (!active) return;
+            initialSettingsRef.current = settings;
             setFormats(settings.formats);
             setFolder(settings.folder);
             setSelectedTheme(settings.theme || 'chromatic');
@@ -970,10 +972,36 @@ export function SettingsPanel({
     };
 
     const handleCancel = () => {
-        updateSettings(initialSettingsRef.current);
-        setShowTikTokPill(initialSettingsRef.current.showTikTokPill);
-        setHoverAutoplay(initialSettingsRef.current.hoverAutoplay);
-        setShowDemoVideos(initialSettingsRef.current.showDemoVideos);
+        const init = initialSettingsRef.current;
+        updateSettings(init);
+        setLocale(init.locale);
+        setFormats(init.formats);
+        setFolder(init.folder);
+        setSelectedTheme(init.theme || 'chromatic');
+        setRetention(init.retention || 'keep');
+        setRetentionPreviewPending(false);
+        setCookiesBrowser(init.cookiesBrowser || '');
+        setProcessingQuality(init.processingQuality);
+        setVideoFit(init.videoFit);
+        setStorageIntent(init.storageIntent);
+        setQuotaBytes(init.quotaBytes);
+        setReserveBytes(init.reserveBytes);
+        setShowTikTokPill(init.showTikTokPill);
+        setHoverAutoplay(init.hoverAutoplay);
+        setShowDemoVideos(init.showDemoVideos);
+        setKeepInTrayOnClose(init.keepInTrayOnClose);
+        setSubtitleEnabled(init.subtitleEnabled);
+        setSubtitleStyle(init.subtitleStyle);
+        setPlaybackProfile(init.playbackProfile);
+        setGpuEnhancementEnabled(init.gpuEnhancementEnabled);
+        setPerformanceMode(init.performanceMode);
+        setBackgroundProcessing(init.backgroundProcessing);
+        setStartInBackground(init.startInBackground);
+        setIdleThresholdSeconds(init.idleThresholdSeconds);
+        setAcOnlyForMaximum(init.acOnlyForMaximum);
+        setPreferredAdapterId(init.preferredAdapterId);
+        setAnalysisDepth(init.analysisDepth);
+        setSimilarityThreshold(init.minScore ?? 0.45);
         onClose();
     };
 
@@ -1037,7 +1065,7 @@ export function SettingsPanel({
 
     const handleSave = async () => {
         if (retentionPreviewPending) {
-            setActiveTab('general');
+            setActiveTab('stats');
             setStorageError('Revisa la previsualización y confirma el cambio a «Solo online» antes de guardar. Esta confirmación no elimina medios.');
             return;
         }
@@ -1124,6 +1152,8 @@ export function SettingsPanel({
             }
 
             updateSettings({
+                locale,
+                minScore: similarityThreshold,
                 formats,
                 folder,
                 theme: selectedTheme,
@@ -1153,6 +1183,7 @@ export function SettingsPanel({
                 performanceProfileVersion: settings.performanceProfileVersion,
                 lastVerifiedAccelerators,
             });
+            toast.success(locale === 'en-US' ? 'Settings saved successfully' : 'Configuración guardada correctamente');
             onClose();
         } catch (error) {
             setSettingsError(error instanceof Error ? error.message : String(error));
@@ -1174,13 +1205,43 @@ export function SettingsPanel({
                     : storageStatus
                         ? 'Dentro de la cuota'
                         : 'Medición pendiente';
-    const storageStateClass = storageStatus?.state === 'ok'
-        ? 'text-emerald-400'
-        : storageStatus?.state === 'quota-near' || storageStatus?.state === 'disk-low'
-            ? 'text-amber-300'
-            : storageStatus?.state === 'quota-exceeded' || storageStatus?.state === 'path-error'
-                ? 'text-[#fe2c55]'
-                : 'text-white/45';
+    const isDirty = useMemo(() => {
+        const init = initialSettingsRef.current;
+        return locale !== init.locale
+            || selectedTheme !== (init.theme || 'chromatic')
+            || folder !== init.folder
+            || retention !== (init.retention || 'keep')
+            || cookiesBrowser !== (init.cookiesBrowser || '')
+            || processingQuality !== init.processingQuality
+            || videoFit !== init.videoFit
+            || storageIntent !== init.storageIntent
+            || quotaBytes !== init.quotaBytes
+            || reserveBytes !== init.reserveBytes
+            || showTikTokPill !== init.showTikTokPill
+            || hoverAutoplay !== init.hoverAutoplay
+            || showDemoVideos !== init.showDemoVideos
+            || keepInTrayOnClose !== init.keepInTrayOnClose
+            || subtitleEnabled !== init.subtitleEnabled
+            || subtitleStyle !== init.subtitleStyle
+            || playbackProfile !== init.playbackProfile
+            || performanceMode !== init.performanceMode
+            || backgroundProcessing !== init.backgroundProcessing
+            || startInBackground !== init.startInBackground
+            || idleThresholdSeconds !== init.idleThresholdSeconds
+            || acOnlyForMaximum !== init.acOnlyForMaximum
+            || preferredAdapterId !== init.preferredAdapterId
+            || analysisDepth !== init.analysisDepth
+            || similarityThreshold !== (init.minScore ?? 0.45)
+            || formats.length !== init.formats.length
+            || formats.some((f) => !init.formats.includes(f));
+    }, [
+        locale, selectedTheme, folder, retention, cookiesBrowser,
+        processingQuality, videoFit, storageIntent, quotaBytes, reserveBytes,
+        showTikTokPill, hoverAutoplay, showDemoVideos, keepInTrayOnClose,
+        subtitleEnabled, subtitleStyle, playbackProfile, performanceMode,
+        backgroundProcessing, startInBackground, idleThresholdSeconds,
+        acOnlyForMaximum, preferredAdapterId, analysisDepth, similarityThreshold, formats,
+    ]);
 
     return (
         <div
@@ -1493,6 +1554,18 @@ export function SettingsPanel({
                     </div>
                 )}
 
+                {isDirty && (
+                    <div className="mb-2.5 flex items-center justify-between px-1">
+                        <span className="text-[10px] font-mono text-[#25f4ee] font-bold flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#25f4ee] animate-pulse" />
+                            {locale === 'en-US' ? 'Unsaved changes' : 'Cambios sin guardar'}
+                        </span>
+                        <span className="text-[9px] text-white/40">
+                            {locale === 'en-US' ? 'Press Save to apply' : 'Pulsa Guardar para aplicar'}
+                        </span>
+                    </div>
+                )}
+
                 <div className="flex gap-2">
                 <button
                     type="button"
@@ -1500,13 +1573,15 @@ export function SettingsPanel({
 
                     className="w-full py-2.5 rounded-[12px] font-black tracking-[0.15em] uppercase text-white transition-all active:scale-[0.98] cursor-pointer"
                     style={{
-                        background: 'linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03))',
-                        border: 'none',
-                        boxShadow: `0 4px 15px rgba(0,0,0,0.5)`,
+                        background: isDirty
+                            ? 'linear-gradient(135deg, rgba(37,244,238,0.3) 0%, rgba(254,44,85,0.25) 100%)'
+                            : 'linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03))',
+                        border: isDirty ? '1px solid rgba(37,244,238,0.45)' : 'none',
+                        boxShadow: isDirty ? '0 4px 20px rgba(37,244,238,0.25)' : '0 4px 15px rgba(0,0,0,0.5)',
                         fontSize: '12px',
                     }}
                 >
-                    Guardar Cambios
+                    {t('save')}
                 </button>
                 <button
                     type="button"

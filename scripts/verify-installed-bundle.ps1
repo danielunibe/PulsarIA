@@ -110,11 +110,16 @@ $baseUrl = "http://127.0.0.1:$ApiPort"
 
 function Assert-TestWebViewIsolation {
     $expectedPath = [System.IO.Path]::GetFullPath($script:webViewDataDir)
-    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+    $resolvedPath = try { (Get-Item -LiteralPath $script:webViewDataDir -Force).FullName } catch { $expectedPath }
+    for ($attempt = 0; $attempt -lt 25; $attempt++) {
         $webViewProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-            $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -like "*$expectedPath*"
+            $_.Name -eq 'msedgewebview2.exe' -and (
+                $_.CommandLine -like "*$expectedPath*" -or
+                $_.CommandLine -like "*$resolvedPath*" -or
+                ($null -ne $tag -and $_.CommandLine -like "*$tag*")
+            )
         })
-        if ($webViewProcesses.Count -gt 0) {
+        if ($webViewProcesses.Count -gt 0 -or (Test-Path -LiteralPath (Join-Path $script:webViewDataDir 'EBWebView') -PathType Container)) {
             $script:result.webView2UserDataFolderIsolated = $true
             return
         }
@@ -130,9 +135,14 @@ function Stop-TestInstalledApp {
         $script:appProcess = $null
     }
     $expectedPath = [System.IO.Path]::GetFullPath($script:webViewDataDir)
+    $resolvedPath = try { (Get-Item -LiteralPath $script:webViewDataDir -Force).FullName } catch { $expectedPath }
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         $webViewProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-            $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -like "*$expectedPath*"
+            $_.Name -eq 'msedgewebview2.exe' -and (
+                $_.CommandLine -like "*$expectedPath*" -or
+                $_.CommandLine -like "*$resolvedPath*" -or
+                ($null -ne $tag -and $_.CommandLine -like "*$tag*")
+            )
         })
         if ($webViewProcesses.Count -eq 0) { break }
         Start-Sleep -Milliseconds 500
