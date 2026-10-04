@@ -649,8 +649,6 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime }
             >
                 {/* ── Left Column: Video Cinema Player ── */}
                 <div className="pulsaria-detail-media-pane w-full md:w-[48%] h-[42%] min-h-0 md:h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
-                {/* ── Left Column: Video Cinema Player ── */}
-                <div className="pulsaria-detail-media-pane w-full md:w-[48%] h-[42%] min-h-0 md:h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
                     {/* Compact metadata header */}
                     <div className="flex items-center justify-between gap-3 mb-3.5 shrink-0">
                         <div className="flex items-center gap-2">

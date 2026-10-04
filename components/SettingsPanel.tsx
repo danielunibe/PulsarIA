@@ -1205,6 +1205,13 @@ export function SettingsPanel({
                     : storageStatus
                         ? 'Dentro de la cuota'
                         : 'Medición pendiente';
+    const storageStateClass = storageStatus?.state === 'ok'
+        ? 'text-emerald-400'
+        : storageStatus?.state === 'quota-near' || storageStatus?.state === 'disk-low'
+            ? 'text-amber-300'
+            : storageStatus?.state === 'quota-exceeded' || storageStatus?.state === 'path-error'
+                ? 'text-[#fe2c55]'
+                : 'text-white/45';
     const isDirty = useMemo(() => {
         const init = initialSettingsRef.current;
         return locale !== init.locale

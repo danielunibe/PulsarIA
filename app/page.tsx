@@ -507,7 +507,7 @@ export default function Page() {
             const request: UnifiedSearchRequest = {
                 query: normalizedQuery,
                 mode: normalizeSearchMode(requestedMode),
-                limit: settings.maxResults || 10,
+                limit: 10,
                 context: searchContext,
             };
             let response: UnifiedSearchResponse;
@@ -1022,7 +1022,6 @@ export default function Page() {
                             />
                         )}
                     </div>
-                ) : (
                 ) : activeSection === 'magazines' ? (
                     <div className="flex-1 w-full min-h-0 overflow-hidden flex flex-col">
                         <MagazinesBookshelf />
