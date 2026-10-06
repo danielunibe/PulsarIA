@@ -150,7 +150,7 @@ const defaultSettings: SystemSettings = {
     quotaBytes: 5 * 1024 ** 3,
     reserveBytes: 2 * 1024 ** 3,
     showTikTokPill: true,
-    visualPreferencesVersion: 1,
+    visualPreferencesVersion: 3,
     subtitleEnabled: true,
     subtitleStyle: 'auto',
     playbackProfile: 'intelligent',
@@ -184,7 +184,16 @@ function normalizeSettings(value: unknown): SystemSettings {
     const formats = Array.isArray(candidate.formats)
         ? [...new Set(candidate.formats.filter((format): format is string => typeof format === 'string' && format.trim().length > 0))]
         : defaultSettings.formats;
-    const theme: AppTheme = ['carbon', 'chromatic', 'aurora', 'oled', 'cyberpunk', 'solar'].includes(String(candidate.theme))
+    const themeValid = ['carbon', 'chromatic', 'aurora', 'oled', 'cyberpunk', 'solar'].includes(String(candidate.theme));
+    const storedVisualVersion = typeof candidate.visualPreferencesVersion === 'number'
+        ? Math.max(1, Math.floor(candidate.visualPreferencesVersion))
+        : 0;
+    // El tema Pulsaria (chromatic) es el default activo. Migración una vez:
+    // ajustes guardados sin tema explícito o con los grises heredados
+    // ('oled', 'carbon') adoptan 'chromatic'; una elección explícita de
+    // otro tema se respeta.
+    const legacyGrayTheme = String(candidate.theme) === 'oled' || String(candidate.theme) === 'carbon';
+    const theme: AppTheme = themeValid && (storedVisualVersion >= 3 || !legacyGrayTheme)
         ? candidate.theme as AppTheme
         : defaultSettings.theme;
     const retention: RetentionPolicy = candidate.retention === 'online' || candidate.retention === 'keep'
@@ -212,9 +221,7 @@ function normalizeSettings(value: unknown): SystemSettings {
     const folder = typeof candidate.folder === 'string' && candidate.folder.trim().length > 0
         ? candidate.folder
         : defaultSettings.folder;
-    const visualPreferencesVersion = typeof candidate.visualPreferencesVersion === 'number'
-        ? Math.max(1, Math.floor(candidate.visualPreferencesVersion))
-        : 0;
+    const visualPreferencesVersion = storedVisualVersion;
     // Builds anteriores podían persistir la cápsula oculta aunque todavía no
     // existiera el ajuste explícito. Beta 2 la vuelve a mostrar una vez; a
     // partir de la versión 1 se respeta el toggle del usuario.
@@ -264,7 +271,7 @@ function normalizeSettings(value: unknown): SystemSettings {
         quotaBytes,
         reserveBytes,
         showTikTokPill,
-        visualPreferencesVersion: 1,
+    visualPreferencesVersion: 3,
         hoverAutoplay,
         showDemoVideos,
         keepInTrayOnClose,

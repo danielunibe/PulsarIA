@@ -71,6 +71,10 @@ pub struct LocalLlmRequest {
     pub max_output_tokens: u32,
     #[serde(default)]
     pub analysis_depth: Option<String>,
+    #[serde(default)]
+    pub response_format: Option<serde_json::Value>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -78,6 +82,11 @@ pub struct LocalLlmRequest {
 pub struct LocalLlmResponse {
     pub text: String,
     pub model_id: String,
+    /// Tokens reales reportados por el sidecar (`usage`). `None` = N/A.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -304,7 +313,77 @@ impl LocalLlmManager {
         Ok(LocalLlmResponse {
             text,
             model_id: self.manifest.model_id.clone(),
+            prompt_tokens: payload.usage.as_ref().and_then(|u| u.prompt_tokens),
+            completion_tokens: payload.usage.as_ref().and_then(|u| u.completion_tokens),
         })
+    }
+
+    /// Ejecuta una solicitud directamente contra el sidecar local ya levantado (para tareas estructuradas).
+    pub async fn generate_sidecar_request(
+        &self,
+        request: LocalLlmRequest,
+    ) -> Result<LocalLlmResponse, String> {
+        validate_request(&request)?;
+        let server = self.ensure_server().await?;
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(180))
+            .build()
+            .map_err(|_| "local_llm_client_unavailable".to_string())?;
+        let mut payload = json!({
+            "model": self.manifest.model_id,
+            "messages": [{
+                "role": "user",
+                "content": request.context.trim()
+            }],
+            "max_tokens": request.max_output_tokens,
+            "temperature": request.temperature.unwrap_or(0.1),
+            "stream": false
+        });
+        if let Some(format) = request.response_format {
+            payload["response_format"] = format;
+        }
+        let response = client
+            .post(format!("{}/v1/chat/completions", server.base_url))
+            .bearer_auth(&server.api_key)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|_| "local_llm_generation_failed".to_string())?;
+        if !response.status().is_success() {
+            if response.status() == StatusCode::UNAUTHORIZED {
+                self.shutdown().await;
+            }
+            return Err("local_llm_generation_rejected".to_string());
+        }
+        let payload = response
+            .json::<CompletionResponse>()
+            .await
+            .map_err(|_| "local_llm_response_invalid".to_string())?;
+        let text = payload
+            .choices
+            .into_iter()
+            .next()
+            .and_then(|choice| choice.message)
+            .map(|message| message.content.trim().to_string())
+            .filter(|text| !text.is_empty())
+            .ok_or_else(|| "local_llm_response_empty".to_string())?;
+        Ok(LocalLlmResponse {
+            text,
+            model_id: self.manifest.model_id.clone(),
+            prompt_tokens: payload.usage.as_ref().and_then(|u| u.prompt_tokens),
+            completion_tokens: payload.usage.as_ref().and_then(|u| u.completion_tokens),
+        })
+    }
+
+    /// Retorna los metadatos auditables del modelo activo en el runtime local.
+    pub fn model_metadata(&self) -> crate::domain::semantic::ModelMetadata {
+        crate::domain::semantic::ModelMetadata {
+            model_id: self.manifest.model_id.clone(),
+            model_provider: "llama.cpp".to_string(),
+            model_revision: self.manifest.model_revision.clone(),
+            prompt_version: "2.0.0".to_string(),
+        }
     }
 
     pub async fn shutdown(&self) {
@@ -633,6 +712,16 @@ struct ServerInfo {
 #[derive(Debug, Deserialize)]
 struct CompletionResponse {
     choices: Vec<CompletionChoice>,
+    #[serde(default)]
+    usage: Option<CompletionUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompletionUsage {
+    #[serde(default)]
+    prompt_tokens: Option<u32>,
+    #[serde(default)]
+    completion_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -795,6 +884,8 @@ mod tests {
             context: " ".into(),
             max_output_tokens: 32,
             analysis_depth: None,
+            response_format: None,
+            temperature: None,
         };
         assert_eq!(
             validate_request(&empty).unwrap_err(),
@@ -805,6 +896,8 @@ mod tests {
             context: "x".repeat(120_001),
             max_output_tokens: 32,
             analysis_depth: None,
+            response_format: None,
+            temperature: None,
         };
         assert_eq!(
             validate_request(&oversized).unwrap_err(),

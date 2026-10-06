@@ -1,13 +1,14 @@
 'use client';
 import { useState, useEffect, useCallback, useRef, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import dynamic from 'next/dynamic';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { VideoCard } from '@/components/VideoCard';
 import type { JobRecord as SharedJobRecord } from '@/hooks/use-jobs';
 import type { PlaylistContentView, SourceContentView } from '@/hooks/usePlaylists';
 import type { CinemaVideo, VideoData } from '@/types';
 import { apiFetch } from '@/lib/api-client';
 import { useI18n } from '@/lib/i18n';
+import { StateDisplay } from '@/components/ui/StateDisplay';
 import { useDemoMedia } from '@/hooks/use-demo-media';
 /** Preferred grid density for decorative slots around actual visible content. */
 const INACTIVE_SLOTS_COUNT = 12;
@@ -82,8 +83,8 @@ interface VideoGridProps {
 }
 
 // Gap y padding exterior idénticos — espaciado simétrico en todas las direcciones
-const SPACING = 32;        // px — más separación entre cards
-const CARD_MIN_WIDTH = 200; // Ancho mínimo para que no se encojan
+const SPACING = 20;        // px — densidad compacta (design.md)
+const CARD_MIN_WIDTH = 180; // Ancho mínimo para que no se encojan
 
 interface ProgressEvent {
     job: number;
@@ -625,7 +626,7 @@ export function VideoGrid({
                 zIndex: 1,
                 width: '100%',
                 minHeight: 'max-content',
-                padding: `${SPACING}px 32px 160px`,
+                padding: '20px 20px 48px',
                 overflow: 'visible',
             }}
             initial={{ opacity: 0, y: 24 }}
@@ -643,7 +644,7 @@ export function VideoGrid({
                         ? undefined
                         : `repeat(${currentColumns}, minmax(${layout === 'compact' ? 160 : CARD_MIN_WIDTH}px, 1fr))`,
                     flexDirection: layout === 'list' ? 'column' : undefined,
-                    gap: containerWidth < 800 ? '16px' : `${SPACING}px`,
+                    gap: containerWidth < 800 ? '12px' : `${SPACING}px`,
 
                     justifyContent: 'center',
                     alignItems: 'start',
@@ -654,22 +655,24 @@ export function VideoGrid({
                 }}
             >
                 {(confirmedEmptyLibrary || waitingForFirstLibraryItem || noVisibleLibraryItems) && (
-                    <section className="pulsaria-library-context pulsaria-library-context--empty" role="status">
-                        <h2>
-                            {confirmedEmptyLibrary
+                    <StateDisplay
+                        variant="empty"
+                        title={
+                            confirmedEmptyLibrary
                                 ? t('libraryEmptyTitle')
                                 : waitingForFirstLibraryItem
                                     ? t('libraryWaitingTitle')
-                                    : t('libraryFilteredTitle')}
-                        </h2>
-                        <p>
-                            {confirmedEmptyLibrary
+                                    : t('libraryFilteredTitle')
+                        }
+                        description={
+                            confirmedEmptyLibrary
                                 ? t('libraryEmptyDescription')
                                 : waitingForFirstLibraryItem
                                     ? t('libraryWaitingDescription')
-                                    : t('libraryFilteredDescription')}
-                        </p>
-                    </section>
+                                    : t('libraryFilteredDescription')
+                        }
+                        className="col-span-full mx-auto my-8 max-w-md"
+                    />
                 )}
                 {demoVideos.length > 0 && (
                     <aside className="pulsaria-library-context pulsaria-library-context--demo" role="note">
@@ -691,6 +694,7 @@ export function VideoGrid({
                         return (
                             <motion.div
                                 key={job.id}
+                                layoutId={`video-card-${job.id}`}
                                 initial={{ opacity: 0, y: 16 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{
@@ -715,6 +719,7 @@ export function VideoGrid({
 
                         <motion.div
                             key={job.id}
+                            layoutId={`video-card-${job.id}`}
                             initial={{ opacity: 0, y: 16 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{
@@ -774,6 +779,7 @@ export function VideoGrid({
             </div>
 
             {/* -- Modal expandido -- */}
+            <AnimatePresence initial={false}>
             {activeVideoId !== null && (() => {
                 const allAvailableJobs = collectionSelected ? [...playlistJobs, ...jobs] : jobs;
                 const activeJob = allAvailableJobs.find(j => j.id === activeVideoId);
@@ -810,6 +816,7 @@ export function VideoGrid({
                     />
                 );
             })()}
+            </AnimatePresence>
             {activeDemoDetail && (
                 <DemoVideoDetailModal
                     video={activeDemoDetail}
@@ -820,3 +827,5 @@ export function VideoGrid({
         </motion.div>
     );
 }
+
+

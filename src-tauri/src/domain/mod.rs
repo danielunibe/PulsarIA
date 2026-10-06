@@ -1,2 +1,10 @@
+pub mod ai_task;
+pub mod benchmark;
+pub mod capabilities;
+pub mod editorial;
+pub mod model_registry;
 pub mod models;
 pub mod ports;
+pub mod recipe;
+pub mod routing;
+pub mod semantic;

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
@@ -17,8 +18,8 @@ import { SpotlightSearch } from '@/components/SpotlightSearch';
 import { LibraryBackdrop } from '@/components/LibraryBackdrop';
 
 import { VideoGrid } from '@/components/VideoGrid';
+import { StateDisplay } from '@/components/ui/StateDisplay';
 import { toast } from 'sonner';
-import { useScrollParallax } from '@/hooks/useScrollParallax';
 import { FaMagnifyingGlass, FaArrowLeft, FaBrain } from '@/components/icon-library';
 
 import { useSettings } from '@/lib/settings-context';
@@ -121,6 +122,13 @@ export default function Page() {
         setRuntimeResolved(true);
     }, []);
     const nativeShell = runtimeResolved && isTauriRuntime();
+    // La ventana nativa es transparente (esquinas redondeadas reales): se
+    // marca el documento para que el CSS aplique fondo transparente solo
+    // en el shell Tauri; el preview web conserva su fondo sólido.
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+        document.documentElement.dataset.native = nativeShell ? 'true' : 'false';
+    }, [nativeShell]);
     const legalGateReady = !nativeShell || legalConsent.accepted;
     const [welcomeAnimationVisible, setWelcomeAnimationVisible] = useState(false);
     const activeTheme = settings.theme || 'chromatic';
@@ -220,7 +228,6 @@ export default function Page() {
     const [playlistPickerTarget, setPlaylistPickerTarget] = useState<{ jobId?: number; contentId?: number } | null>(null);
 
     const searchRequestRef = useRef(0);
-    const scrollY = useScrollParallax(0.2);
 
     useEffect(() => {
         try {
@@ -765,7 +772,7 @@ export default function Page() {
     return (
 
         <div
-            className="pulsaria-window-frame flex h-screen w-full flex-col font-sans overflow-hidden relative rounded-[18px] border border-white/[0.08] shadow-[0_20px_50px_rgba(0,0,0,0.8)]"
+            className="pulsaria-window-frame flex h-screen w-full flex-col font-sans overflow-hidden relative rounded-[22px]"
             style={{ 
                 color: 'var(--text-strong)',
                 // Keep the composition usable at the native Tauri minimum;
@@ -812,6 +819,19 @@ export default function Page() {
                     onContextMenu={(event) => openContextMenu(event, 'shell')}
                 />
 
+                {/* Transición premium entre pantallas: fundido + elevación leve. */}
+                <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                        key={isSearching ? 'searching' : (searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null) ? 'search' : activeSection}
+                        className="flex min-h-0 min-w-0 flex-1 flex-col"
+                        initial={{ opacity: 0, y: 16, scale: 0.992 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -10, scale: 0.996 }}
+                        transition={{
+                            duration: typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0.01 : 0.32,
+                            ease: [0.22, 1, 0.36, 1],
+                        }}
+                    >
                 {isSearching ? (
                     <div className="w-full h-full flex items-center justify-center p-8">
                         <div className="p-8 rounded-3xl bg-[#141416]/80 backdrop-blur-2xl border border-white/10 flex items-center gap-4 shadow-2xl">
@@ -824,7 +844,7 @@ export default function Page() {
                                 </div>
                 ) : (searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null) ? (
 
-                    <div className="px-8 py-4 flex flex-col gap-5">
+                    <div className="px-5 py-3 flex flex-col gap-4">
                         {/* Search View Header */}
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
@@ -1004,30 +1024,34 @@ export default function Page() {
                             ))}
 
                             {searchResults && searchResults.length === 0 && !searchError && !aiAnswer && !aiError && (
-                                <div className="flex flex-col items-center gap-3 rounded-3xl border border-white/5 bg-black/30 py-20 text-center text-white/40">
-                                    <FaMagnifyingGlass size={32} className="text-white/20" />
-                                    <span>No se encontraron recuerdos con esos criterios.</span>
-                                    <button type="button" onClick={handleClearSearch} className="text-xs text-[#25f4ee] hover:underline">
-                                        Limpiar búsqueda
-                                    </button>
-                                </div>
+                                <StateDisplay
+                                    variant="empty"
+                                    title="No se encontraron recuerdos"
+                                    description="Prueba con otros criterios de búsqueda."
+                                    actionLabel="Limpiar búsqueda"
+                                    onAction={handleClearSearch}
+                                    className="col-span-full mx-auto my-8 max-w-md"
+                                />
                             )}
                         </div>
-                        {resolvedSearchVideo && (
-                            <ExpandedVideoModal
-                                key={`search-expanded-video-modal-${resolvedSearchVideo.id}`}
-                                video={resolvedSearchVideo}
-                                initialTime={searchStartTime ?? undefined}
-                                onClose={() => setActiveVideoId(null)}
-                            />
-                        )}
+                        <AnimatePresence initial={false}>
+                            {resolvedSearchVideo && (
+                                <ExpandedVideoModal
+                                    key={`search-expanded-video-modal-${resolvedSearchVideo.id}`}
+                                    video={resolvedSearchVideo}
+                                    initialTime={searchStartTime ?? undefined}
+                                    sourceLayout={false}
+                                    onClose={() => setActiveVideoId(null)}
+                                />
+                            )}
+                        </AnimatePresence>
                     </div>
                 ) : activeSection === 'magazines' ? (
                     <div className="flex-1 w-full min-h-0 overflow-hidden flex flex-col">
                         <MagazinesBookshelf />
                     </div>
                 ) : activeSection === 'settings' ? (
-                    <div className="flex-1 w-full min-h-0 overflow-y-auto custom-scrollbar p-6 lg:p-8 bg-black/40">
+                    <div className="flex-1 w-full min-h-0 overflow-y-auto custom-scrollbar p-4 lg:p-6 bg-black/40">
                         <div className="w-full max-w-5xl mx-auto">
                             <SettingsPanel
                                 embedded
@@ -1175,7 +1199,7 @@ export default function Page() {
                                 </div>
                             )}
                             <div className="pulsaria-library-card-field">
-                            {backgroundVisible && <LibraryBackdrop theme={activeTheme} scrollY={scrollY} />}
+                            {backgroundVisible && <LibraryBackdrop theme={activeTheme} />}
                             <LocalizedErrorBoundary>
                                 <VideoGrid
                                     activeVideoId={activeVideoId}
@@ -1215,6 +1239,8 @@ export default function Page() {
                         </section>
                     </div>
                 )}
+                    </motion.div>
+                </AnimatePresence>
 
                 </main>
             </div>
