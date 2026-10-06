@@ -129,7 +129,7 @@ export interface MagazineRecipeLabels {
 
 function parseStructuredContent(
   raw: string,
-  labels?: MagazineRecipeLabels,
+  labels: MagazineRecipeLabels,
 ): { blocks: ContentBlock[]; rawFallback: string | null } {
   let parsed: unknown;
   try {
@@ -159,7 +159,7 @@ function parseStructuredContent(
     ([key]) => !['yield', 'servings', 'ingredients', 'steps'].includes(key),
   );
   const yieldText = asString(root.yield) ?? asString(root.servings);
-  const recipeLabels = labels ?? { yieldTitle: 'Rinde', ingredientsTitle: 'Ingredientes', stepsTitle: 'Preparación' };
+  const recipeLabels = labels;
   if (yieldText) blocks.push({ kind: 'data', title: recipeLabels.yieldTitle, text: yieldText });
   if (Array.isArray(root.ingredients)) {
     blocks.push({ kind: 'ingredients', title: recipeLabels.ingredientsTitle, items: root.ingredients as unknown[] });

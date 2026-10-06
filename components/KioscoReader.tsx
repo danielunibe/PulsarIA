@@ -132,7 +132,7 @@ export interface KioscoRecipeLabels {
   stepsTitle: string;
 }
 
-function parseBlocks(raw: string, labels?: KioscoRecipeLabels): KioscoBlock[] {
+function parseBlocks(raw: string, labels: KioscoRecipeLabels): KioscoBlock[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
@@ -152,7 +152,7 @@ function parseBlocks(raw: string, labels?: KioscoRecipeLabels): KioscoBlock[] {
       .filter((block): block is KioscoBlock => block !== null);
   }
   const blocks: KioscoBlock[] = [];
-  const recipeLabels = labels ?? { ingredientsTitle: 'Ingredientes', stepsTitle: 'Preparación' };
+  const recipeLabels = labels;
   if (Array.isArray(root.ingredients)) {
     blocks.push({ kind: 'ingredients', title: recipeLabels.ingredientsTitle, items: root.ingredients as unknown[] });
   }

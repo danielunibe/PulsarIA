@@ -22,7 +22,7 @@ const defaultTitles = {
 const defaultDescriptions = {
   loading: { 'es-MX': 'Espera un momento mientras preparamos todo.', 'en-US': 'Please wait while we prepare everything.' },
   empty: { 'es-MX': 'No hay elementos para mostrar.', 'en-US': 'There are no items to display.' },
-  error: { 'es-MX': 'Ocurrio un problema inesperado.', 'en-US': 'An unexpected problem occurred.' },
+  error: { 'es-MX': 'Ocurrió un problema inesperado.', 'en-US': 'An unexpected problem occurred.' },
 };
 
 const defaultIcons = {
@@ -90,7 +90,7 @@ export function StateDisplay({
   icon,
   className = '',
 }: StateDisplayProps) {
-  const { t, locale } = useI18n();
+  const { locale } = useI18n();
 
   const resolvedTitle = title || defaultTitles[variant][locale as keyof typeof defaultTitles.loading] || defaultTitles[variant]['es-MX'];
   const resolvedDescription = description || defaultDescriptions[variant][locale as keyof typeof defaultDescriptions.loading] || defaultDescriptions[variant]['es-MX'];
