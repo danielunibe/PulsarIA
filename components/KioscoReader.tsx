@@ -198,6 +198,12 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
 
   const seed = useMemo(() => hashSeed(articleId), [articleId]);
   const hue = useMemo(() => seed % 360, [seed]);
+  const coverSvg = useMemo(() => coverArtSVG(seed, hue), [seed, hue]);
+  const colophonSvg = useMemo(() => softArtSVG(seed + 7, hue), [seed, hue]);
+  const coverBg = useMemo(
+    () => `linear-gradient(168deg, hsl(${hue} 34% 22%), hsl(${hue} 26% 12%) 62%, hsl(${hue} 30% 16%))`,
+    [hue],
+  );
   const recipeLabels = useMemo<RecipeBlockLabels>(
     () => ({
       yieldTitle: t('magazineYield'),
@@ -445,8 +451,8 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
     if (pageIndex === -1 || page?.kind === 'cover') {
       return (
         <div className={styles.coverface}>
-          <div className={styles.cvBg} style={{ background: `linear-gradient(168deg, hsl(${hue} 34% 22%), hsl(${hue} 26% 12%) 62%, hsl(${hue} 30% 16%))` }} />
-          <div className={styles.cvArt} style={{ opacity: 0.62 }} dangerouslySetInnerHTML={{ __html: coverArtSVG(seed, hue) }} />
+          <div className={styles.cvBg} style={{ background: coverBg }} />
+          <div className={styles.cvArt} style={{ opacity: 0.62 }} dangerouslySetInnerHTML={{ __html: coverSvg }} />
           <div className={styles.cvVeil} />
           <div className={styles.cvTop}>
             <span className={styles.cvLive}><i />{t('kioscoCoverLive')}</span>
@@ -600,12 +606,12 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
               {volume.volumeNumber} · v{details.article.active_version} · {presentEditorialState(details.article.editorial_state, locale)}
             </p>
             <figure style={{ margin: '1em 0 0', height: '7em', overflow: 'hidden', borderRadius: 2 }} aria-hidden="true">
-              <span dangerouslySetInnerHTML={{ __html: softArtSVG(seed + 7, hue) }} style={{ display: 'block', height: '100%' }} />
+              <span dangerouslySetInnerHTML={{ __html: colophonSvg }} style={{ display: 'block', height: '100%' }} />
             </figure>
           </>,
         );
     }
-  }, [details, hue, seed, volume, t, locale]);
+  }, [details, volume, coverSvg, colophonSvg, coverBg, t, locale]);
 
   const total = pages.length;
   const counter = total === 0

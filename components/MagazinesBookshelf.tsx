@@ -470,6 +470,18 @@ export function MagazinesBookshelf() {
         [volumes],
     );
 
+    // Arte procedural por tomo: se memoiza por volumen para no regenerar
+    // SVG en cada hover (cada hover re-renderiza todas las tarjetas).
+    const coverArtByVolume = useMemo(() => {
+        const cache = new Map<string, { seed: number; hue: number; svg: string }>();
+        for (const volume of volumes) {
+            const seed = hashSeed(volume.id);
+            const hue = hexToHue(volume.color);
+            cache.set(volume.id, { seed, hue, svg: coverArtSVG(seed, hue) });
+        }
+        return cache;
+    }, [volumes]);
+
     const modalLatest = !selectedVolume || isPreview
         ? null
         : latestCompilation(compilationsByVolume[selectedVolume.id] ?? []);
@@ -657,8 +669,10 @@ export function MagazinesBookshelf() {
                                         text: 'text-white/35',
                                         label: isPreview ? t('shelfPreviewBadge') : t('shelfNoCompilations'),
                                     };
-                                const coverHue = hexToHue(volume.color);
-                                const coverSeed = hashSeed(volume.id);
+                                const cachedCover = coverArtByVolume.get(volume.id);
+                                const coverHue = cachedCover?.hue ?? hexToHue(volume.color);
+                                const coverSeed = cachedCover?.seed ?? hashSeed(volume.id);
+                                const coverSvg = cachedCover?.svg ?? coverArtSVG(coverSeed, coverHue);
                                 return (
                                 <motion.div
                                     key={volume.id}
@@ -709,7 +723,7 @@ export function MagazinesBookshelf() {
                                             <div
                                                 aria-hidden="true"
                                                 className="absolute inset-0 opacity-45 group-hover:opacity-60 transition-opacity duration-300 will-change-[opacity] pointer-events-none [&>svg]:h-full [&>svg]:w-full"
-                                                dangerouslySetInnerHTML={{ __html: coverArtSVG(coverSeed, coverHue) }}
+                                                dangerouslySetInnerHTML={{ __html: coverSvg }}
                                             />
                                             <div
                                                 aria-hidden="true"
