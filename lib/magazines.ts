@@ -546,6 +546,7 @@ export async function fetchMagazineChapters(
 /** Lee el detalle agregado de un artículo (artículo+fuentes+evidencia+versiones+conflictos). */
 export async function fetchMagazineArticleDetails(
   articleId: string,
+  locale: 'es-MX' | 'en-US' = 'es-MX',
 ): Promise<MagazineArticleDetails> {
   const { isNativeShell } = await import('@/lib/api-client');
   if (!isNativeShell()) {
@@ -556,7 +557,11 @@ export async function fetchMagazineArticleDetails(
     articleId,
   });
   if (!details) {
-    throw new Error(`El artículo ${articleId} ya no existe en la biblioteca local.`);
+    throw new Error(
+      locale === 'en-US'
+        ? `Article ${articleId} no longer exists in the local library.`
+        : `El artículo ${articleId} ya no existe en la biblioteca local.`,
+    );
   }
   return details;
 }
@@ -571,5 +576,161 @@ export async function fetchMagazineSourceMedia(
   }
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<MagazineSourceMedia | null>('get_magazine_source_media', { jobId });
+}
+
+/* ---------------- Contenido estructurado (parser único) ---------------- */
+
+/** Bloque de contenido normalizado (fuente única para MagazineReader y KioscoReader). */
+export interface StructuredContentBlock {
+  kind: string;
+  text?: string;
+  title?: string;
+  items?: unknown[];
+  steps?: unknown[];
+  language?: string;
+  code?: string;
+  rows?: unknown[];
+  path?: string;
+  timestamp?: number;
+  level?: number;
+  [key: string]: unknown;
+}
+
+/** Etiquetas localizadas para la forma plana de receta. */
+export interface RecipeBlockLabels {
+  yieldTitle: string;
+  ingredientsTitle: string;
+  stepsTitle: string;
+}
+
+export function contentAsString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+export function contentAsRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+export function contentItemText(item: unknown): string {
+  if (typeof item === 'string') return item;
+  const record = contentAsRecord(item);
+  if (!record) return '';
+  for (const key of ['instruction', 'text', 'name', 'label', 'title', 'fact', 'value']) {
+    const text = contentAsString(record[key]);
+    if (text) {
+      const amount = contentAsString(record.amount) ?? contentAsString(record.quantity);
+      return amount ? `${text} — ${amount}` : text;
+    }
+  }
+  return '';
+}
+
+export function contentItemTime(item: unknown): string | null {
+  const record = contentAsRecord(item);
+  if (!record) return null;
+  for (const key of ['tc', 'timestamp', 'time', 'range']) {
+    const text = contentAsString(record[key]);
+    if (text) return text;
+    if (typeof record[key] === 'number' && Number.isFinite(record[key])) {
+      return formatTimestamp(record[key] as number);
+    }
+  }
+  const start = typeof record.start === 'number' ? formatTimestamp(record.start) : null;
+  const end = typeof record.end === 'number' ? formatTimestamp(record.end) : null;
+  if (start && end) return `${start} — ${end}`;
+  return start;
+}
+
+export function normalizeContentBlock(value: unknown, fallbackKind: string): StructuredContentBlock | null {
+  if (typeof value === 'string') {
+    return value.trim() ? { kind: 'text', text: value } : null;
+  }
+  const record = contentAsRecord(value);
+  if (!record) return null;
+  const kind = (contentAsString(record.kind) ?? contentAsString(record.type) ?? fallbackKind).toLowerCase();
+  const block: StructuredContentBlock = { kind };
+  for (const [key, entry] of Object.entries(record)) {
+    if (key === 'kind' || key === 'type') continue;
+    if (key === 'text' || key === 'title' || key === 'language' || key === 'code' || key === 'path') {
+      const text = contentAsString(entry);
+      if (text) block[key] = text;
+    } else if (key === 'items' || key === 'steps' || key === 'rows' || key === 'blocks') {
+      if (Array.isArray(entry)) block[key] = entry;
+    } else if (key === 'timestamp' && typeof entry === 'number') {
+      block.timestamp = entry;
+    } else if (typeof entry === 'string' || typeof entry === 'number') {
+      block[key] = entry;
+    }
+  }
+  return block;
+}
+
+export interface ParsedStructuredContent {
+  blocks: StructuredContentBlock[];
+  rawFallback: string | null;
+}
+
+/**
+ * Normaliza `structured_content_json` en bloques. Cubre: arreglo plano,
+ * `{ blocks[] }` y receta plana `{ yield, ingredients[], steps[] }` con
+ * títulos localizados. Con `textFallback`, un texto no-JSON se conserva
+ * como bloque (comportamiento del kiosco); si no, va a `rawFallback`.
+ */
+export function parseStructuredBlocks(
+  raw: string,
+  labels: RecipeBlockLabels,
+  options?: { textFallback?: boolean },
+): ParsedStructuredContent {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    if (options?.textFallback) {
+      return { blocks: raw.trim() ? [{ kind: 'text', text: raw }] : [], rawFallback: null };
+    }
+    return { blocks: [], rawFallback: raw };
+  }
+  if (typeof parsed === 'string') {
+    return { blocks: [{ kind: 'text', text: parsed }], rawFallback: null };
+  }
+  if (Array.isArray(parsed)) {
+    const blocks = parsed
+      .map((item) => normalizeContentBlock(item, 'text'))
+      .filter((block): block is StructuredContentBlock => block !== null);
+    return { blocks, rawFallback: blocks.length === 0 ? raw : null };
+  }
+  const root = contentAsRecord(parsed);
+  if (!root) {
+    return { blocks: [], rawFallback: raw };
+  }
+  if (Array.isArray(root.blocks)) {
+    const blocks = (root.blocks as unknown[])
+      .map((item) => normalizeContentBlock(item, 'text'))
+      .filter((block): block is StructuredContentBlock => block !== null);
+    return { blocks, rawFallback: blocks.length === 0 ? raw : null };
+  }
+  // Forma plana de receta: { yield, ingredients[], steps[] }.
+  const blocks: StructuredContentBlock[] = [];
+  const extraEntries = Object.entries(root).filter(
+    ([key]) => !['yield', 'servings', 'ingredients', 'steps'].includes(key),
+  );
+  const yieldText = contentAsString(root.yield) ?? contentAsString(root.servings);
+  if (yieldText) blocks.push({ kind: 'data', title: labels.yieldTitle, text: yieldText });
+  if (Array.isArray(root.ingredients)) {
+    blocks.push({ kind: 'ingredients', title: labels.ingredientsTitle, items: root.ingredients as unknown[] });
+  }
+  if (Array.isArray(root.steps)) {
+    blocks.push({ kind: 'steps', title: labels.stepsTitle, steps: root.steps as unknown[] });
+  }
+  for (const [key, entry] of extraEntries) {
+    const block = normalizeContentBlock(entry, 'text');
+    if (block) {
+      if (!block.title) block.title = key;
+      blocks.push(block);
+    }
+  }
+  return { blocks, rawFallback: blocks.length === 0 ? raw : null };
 }
 

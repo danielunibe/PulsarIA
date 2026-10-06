@@ -15,6 +15,9 @@ import { useI18n } from '@/lib/i18n';
 import {
   fetchMagazineArticleDetails,
   formatTimestamp,
+  contentItemText,
+  contentItemTime,
+  parseStructuredBlocks,
   presentArticleType,
   presentEditorialState,
   presentEvidenceKind,
@@ -23,6 +26,8 @@ import {
   type MagazineEvidenceRecord,
   type MagazineEvidenceTarget,
   type MagazineVolumeView,
+  type RecipeBlockLabels,
+  type StructuredContentBlock as ContentBlock,
 } from '@/lib/magazines';
 
 /**
@@ -40,142 +45,7 @@ interface MagazineReaderProps {
   onBack: () => void;
 }
 
-/* ---------------- Contenido estructurado ---------------- */
-
-interface ContentBlock {
-  kind: string;
-  text?: string;
-  title?: string;
-  items?: unknown[];
-  steps?: unknown[];
-  language?: string;
-  code?: string;
-  rows?: unknown[];
-  path?: string;
-  timestamp?: number;
-  level?: number;
-  [key: string]: unknown;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value : null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function itemText(item: unknown): string {
-  if (typeof item === 'string') return item;
-  const record = asRecord(item);
-  if (!record) return '';
-  for (const key of ['instruction', 'text', 'name', 'label', 'title', 'fact', 'value']) {
-    const text = asString(record[key]);
-    if (text) {
-      const amount = asString(record.amount) ?? asString(record.quantity);
-      return amount ? `${text} — ${amount}` : text;
-    }
-  }
-  return '';
-}
-
-function itemTime(item: unknown): string | null {
-  const record = asRecord(item);
-  if (!record) return null;
-  for (const key of ['tc', 'timestamp', 'time', 'range']) {
-    const text = asString(record[key]);
-    if (text) return text;
-    if (typeof record[key] === 'number' && Number.isFinite(record[key])) {
-      return formatTimestamp(record[key] as number);
-    }
-  }
-  const start = typeof record.start === 'number' ? formatTimestamp(record.start) : null;
-  const end = typeof record.end === 'number' ? formatTimestamp(record.end) : null;
-  if (start && end) return `${start} — ${end}`;
-  return start;
-}
-
-function normalizeBlock(value: unknown, fallbackKind: string): ContentBlock | null {
-  if (typeof value === 'string') {
-    return value.trim() ? { kind: 'text', text: value } : null;
-  }
-  const record = asRecord(value);
-  if (!record) return null;
-  const kind = (asString(record.kind) ?? asString(record.type) ?? fallbackKind).toLowerCase();
-  const block: ContentBlock = { kind };
-  for (const [key, entry] of Object.entries(record)) {
-    if (key === 'kind' || key === 'type') continue;
-    if (key === 'text' || key === 'title' || key === 'language' || key === 'code' || key === 'path') {
-      const text = asString(entry);
-      if (text) (block as Record<string, unknown>)[key] = text;
-    } else if (key === 'items' || key === 'steps' || key === 'rows' || key === 'blocks') {
-      if (Array.isArray(entry)) (block as Record<string, unknown>)[key] = entry;
-    } else if (key === 'timestamp' && typeof entry === 'number') {
-      block.timestamp = entry;
-    } else if (typeof entry === 'string' || typeof entry === 'number') {
-      (block as Record<string, unknown>)[key] = entry;
-    }
-  }
-  return block;
-}
-
-export interface MagazineRecipeLabels {
-  yieldTitle: string;
-  ingredientsTitle: string;
-  stepsTitle: string;
-}
-
-function parseStructuredContent(
-  raw: string,
-  labels: MagazineRecipeLabels,
-): { blocks: ContentBlock[]; rawFallback: string | null } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    return { blocks: [], rawFallback: raw };
-  }
-  if (Array.isArray(parsed)) {
-    const blocks = parsed
-      .map((item) => normalizeBlock(item, 'text'))
-      .filter((block): block is ContentBlock => block !== null);
-    return { blocks, rawFallback: blocks.length === 0 ? raw : null };
-  }
-  const root = asRecord(parsed);
-  if (!root) {
-    return { blocks: typeof parsed === 'string' ? [{ kind: 'text', text: parsed }] : [], rawFallback: raw };
-  }
-  if (Array.isArray(root.blocks)) {
-    const blocks = (root.blocks as unknown[])
-      .map((item) => normalizeBlock(item, 'text'))
-      .filter((block): block is ContentBlock => block !== null);
-    return { blocks, rawFallback: blocks.length === 0 ? raw : null };
-  }
-  // Forma plana de receta: { yield, ingredients[], steps[] }.
-  const blocks: ContentBlock[] = [];
-  const extraEntries = Object.entries(root).filter(
-    ([key]) => !['yield', 'servings', 'ingredients', 'steps'].includes(key),
-  );
-  const yieldText = asString(root.yield) ?? asString(root.servings);
-  const recipeLabels = labels;
-  if (yieldText) blocks.push({ kind: 'data', title: recipeLabels.yieldTitle, text: yieldText });
-  if (Array.isArray(root.ingredients)) {
-    blocks.push({ kind: 'ingredients', title: recipeLabels.ingredientsTitle, items: root.ingredients as unknown[] });
-  }
-  if (Array.isArray(root.steps)) {
-    blocks.push({ kind: 'steps', title: recipeLabels.stepsTitle, steps: root.steps as unknown[] });
-  }
-  for (const [key, entry] of extraEntries) {
-    const block = normalizeBlock(entry, 'text');
-    if (block) {
-      if (!block.title) block.title = key;
-      blocks.push(block);
-    }
-  }
-  return { blocks, rawFallback: blocks.length === 0 ? raw : null };
-}
+/* Contenido estructurado: parser único en `@/lib/magazines` (parseStructuredBlocks). */
 
 function BlockFigure({ block }: { block: ContentBlock }) {
   const { t } = useI18n();
@@ -226,7 +96,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
     case 'items':
     case 'bullets':
     case 'materials': {
-      const items = (block.items ?? []).map(itemText).filter(Boolean);
+      const items = (block.items ?? []).map(contentItemText).filter(Boolean);
       if (items.length === 0) return null;
       return (
         <div className="my-3">
@@ -256,8 +126,8 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
           )}
           <ol className="flex flex-col gap-2">
             {steps.map((step, index) => {
-              const text = itemText(step) || t('magazineStepFallback', { index: index + 1 });
-              const time = itemTime(step);
+              const text = contentItemText(step) || t('magazineStepFallback', { index: index + 1 });
+              const time = contentItemTime(step);
               return (
                 <li
                   key={index}
@@ -323,7 +193,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
     case 'metadata': {
       const rows = block.rows ?? block.items ?? [];
       const entries = rows.length > 0
-        ? rows.map(itemText).filter(Boolean)
+        ? rows.map(contentItemText).filter(Boolean)
         : [block.text ?? ''].filter(Boolean);
       if (entries.length === 0 && !block.title) return null;
       return (
@@ -403,7 +273,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
   const { t, locale } = useI18n();
   const [inspectorEvidence, setInspectorEvidence] = useState<MagazineEvidenceRecord | null>(null);
   const [highlightId, setHighlightId] = useState<number | null>(initialTarget?.evidenceId ?? null);
-  const recipeLabels = useMemo<MagazineRecipeLabels>(
+  const recipeLabels = useMemo<RecipeBlockLabels>(
     () => ({
       yieldTitle: t('magazineYield'),
       ingredientsTitle: t('magazineIngredients'),
@@ -418,7 +288,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
     setLoadError(null);
     setDetails(null);
     setInspectorEvidence(null);
-    fetchMagazineArticleDetails(articleId)
+    fetchMagazineArticleDetails(articleId, locale)
       .then((loaded) => {
         if (live) setDetails(loaded);
       })
@@ -431,7 +301,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
     return () => {
       live = false;
     };
-  }, [articleId, t]);
+  }, [articleId, locale, t]);
 
   useEffect(() => {
     if (highlightId !== null && details) {
@@ -454,7 +324,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
   };
 
   const parsedContent = useMemo(
-    () => (details ? parseStructuredContent(details.article.structured_content_json, recipeLabels) : null),
+    () => (details ? parseStructuredBlocks(details.article.structured_content_json, recipeLabels) : null),
     [details, recipeLabels],
   );
 

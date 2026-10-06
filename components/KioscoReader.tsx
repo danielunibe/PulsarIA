@@ -12,6 +12,8 @@ import { useI18n } from '@/lib/i18n';
 import {
   fetchMagazineArticleDetails,
   formatTimestamp,
+  contentItemText,
+  parseStructuredBlocks,
   presentArticleType,
   presentEditorialState,
   presentEvidenceKind,
@@ -19,6 +21,7 @@ import {
   type MagazineEvidenceRecord,
   type MagazineEvidenceTarget,
   type MagazineVolumeView,
+  type RecipeBlockLabels,
 } from '@/lib/magazines';
 import {
   coverArtSVG,
@@ -79,96 +82,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value : null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function itemText(item: unknown): string {
-  if (typeof item === 'string') return item;
-  const record = asRecord(item);
-  if (!record) return '';
-  for (const key of ['instruction', 'text', 'name', 'label', 'title', 'fact', 'value']) {
-    const text = asString(record[key]);
-    if (text) {
-      const amount = asString(record.amount) ?? asString(record.quantity);
-      return amount ? `${text} — ${amount}` : text;
-    }
-  }
-  return '';
-}
-
-function normalizeBlock(value: unknown): KioscoBlock | null {
-  if (typeof value === 'string') {
-    return value.trim() ? { kind: 'text', text: value } : null;
-  }
-  const record = asRecord(value);
-  if (!record) return null;
-  const kind = (asString(record.kind) ?? asString(record.type) ?? 'text').toLowerCase();
-  const block: KioscoBlock = { kind };
-  for (const [key, entry] of Object.entries(record)) {
-    if (key === 'kind' || key === 'type') continue;
-    if (key === 'text' || key === 'title' || key === 'language' || key === 'code' || key === 'path') {
-      const text = asString(entry);
-      if (text) (block as Record<string, unknown>)[key] = text;
-    } else if (key === 'items' || key === 'steps' || key === 'rows' || key === 'blocks') {
-      if (Array.isArray(entry)) (block as Record<string, unknown>)[key] = entry;
-    } else if (key === 'timestamp' && typeof entry === 'number') {
-      block.timestamp = entry;
-    } else if (typeof entry === 'string' || typeof entry === 'number') {
-      (block as Record<string, unknown>)[key] = entry;
-    }
-  }
-  return block;
-}
-
-export interface KioscoRecipeLabels {
-  ingredientsTitle: string;
-  stepsTitle: string;
-}
-
-function parseBlocks(raw: string, labels: KioscoRecipeLabels): KioscoBlock[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    return raw.trim() ? [{ kind: 'text', text: raw }] : [];
-  }
-  if (Array.isArray(parsed)) {
-    return parsed
-      .map((item) => normalizeBlock(item))
-      .filter((block): block is KioscoBlock => block !== null);
-  }
-  const root = asRecord(parsed);
-  if (!root) return [];
-  if (Array.isArray(root.blocks)) {
-    return (root.blocks as unknown[])
-      .map((item) => normalizeBlock(item))
-      .filter((block): block is KioscoBlock => block !== null);
-  }
-  const blocks: KioscoBlock[] = [];
-  const recipeLabels = labels;
-  if (Array.isArray(root.ingredients)) {
-    blocks.push({ kind: 'ingredients', title: recipeLabels.ingredientsTitle, items: root.ingredients as unknown[] });
-  }
-  if (Array.isArray(root.steps)) {
-    blocks.push({ kind: 'steps', title: recipeLabels.stepsTitle, steps: root.steps as unknown[] });
-  }
-  for (const [key, entry] of Object.entries(root)) {
-    if (['yield', 'servings', 'ingredients', 'steps'].includes(key)) continue;
-    const block = normalizeBlock(entry);
-    if (block) {
-      if (!block.title) block.title = key;
-      blocks.push(block);
-    }
-  }
-  return blocks;
-}
+/* Contenido estructurado: parser único en `@/lib/magazines` (parseStructuredBlocks). */
 
 function BlockView({ block }: { block: KioscoBlock }) {
   const { t } = useI18n();
@@ -182,7 +96,7 @@ function BlockView({ block }: { block: KioscoBlock }) {
     case 'items':
     case 'bullets':
     case 'materials': {
-      const items = (block.items ?? []).map(itemText).filter(Boolean);
+      const items = (block.items ?? []).map(contentItemText).filter(Boolean);
       if (items.length === 0) return null;
       return (
         <div>
@@ -205,7 +119,7 @@ function BlockView({ block }: { block: KioscoBlock }) {
           {block.title && <p className={styles.ki}>{block.title}</p>}
           <div className={styles.body}>
             {steps.map((step, index) => (
-              <p key={index}><strong>{index + 1}. </strong>{itemText(step) || t('magazineStepFallback', { index: index + 1 })}</p>
+              <p key={index}><strong>{index + 1}. </strong>{contentItemText(step) || t('magazineStepFallback', { index: index + 1 })}</p>
             ))}
           </div>
         </div>
@@ -234,7 +148,7 @@ function BlockView({ block }: { block: KioscoBlock }) {
     case 'metadata': {
       const rows = block.rows ?? block.items ?? [];
       const entries = rows.length > 0
-        ? rows.map(itemText).filter(Boolean)
+        ? rows.map(contentItemText).filter(Boolean)
         : [block.text ?? ''].filter(Boolean);
       if (entries.length === 0 && !block.title) return null;
       return (
@@ -284,8 +198,9 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
 
   const seed = useMemo(() => hashSeed(articleId), [articleId]);
   const hue = useMemo(() => seed % 360, [seed]);
-  const recipeLabels = useMemo<KioscoRecipeLabels>(
+  const recipeLabels = useMemo<RecipeBlockLabels>(
     () => ({
+      yieldTitle: t('magazineYield'),
       ingredientsTitle: t('magazineIngredients'),
       stepsTitle: t('magazineSteps'),
     }),
@@ -308,7 +223,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
     setLoadError(null);
     setDetails(null);
     setIdx(0);
-    fetchMagazineArticleDetails(articleId)
+    fetchMagazineArticleDetails(articleId, locale)
       .then((loaded) => {
         if (live) setDetails(loaded);
       })
@@ -321,7 +236,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
     return () => {
       live = false;
     };
-  }, [articleId, t]);
+  }, [articleId, locale, t]);
 
   /* Páginas desde el contenido real. */
   const pages = useMemo<KioscoPage[]>(() => {
@@ -347,7 +262,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
       }
     };
     const list: KioscoPage[] = [{ kind: 'cover', section: sectionLabel('cover') }];
-    const blocks = parseBlocks(details.article.structured_content_json, recipeLabels);
+    const blocks = parseStructuredBlocks(details.article.structured_content_json, recipeLabels, { textFallback: true }).blocks;
     const contentPages = paginateBlocks(blocks);
     list.push({ kind: 'index', section: sectionLabel('index') });
     contentPages.forEach((group, groupIndex) => {
