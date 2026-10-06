@@ -116,12 +116,12 @@ export function GeneralTab({
 
             {/* Barra superior */}
             <SectionCard className="flex flex-col gap-3">
-                <SectionTitle icon={FaEye} label="Barra superior" />
+                <SectionTitle icon={FaEye} label={t('cfgTopbar')} />
                 <div className="flex flex-col gap-2 rounded-[14px] bg-black/30 p-2.5 shadow-inner">
                     {[
-                        { label: 'Píldora de TikToks', description: 'Muestra solo el conteo real de la biblioteca.', value: showTikTokPill, setValue: setShowTikTokPill },
-                        { label: 'Autoplay al pasar el cursor', description: 'Reproduce videos reales al mantener el cursor encima.', value: hoverAutoplay, setValue: setHoverAutoplay },
-                        { label: 'Mostrar ejemplos DEMO', description: 'Activa previews temporales fuera de SQLite.', value: showDemoVideos, setValue: setShowDemoVideos },
+                        { label: t('cfgPill'), description: t('cfgPillDesc'), value: showTikTokPill, setValue: setShowTikTokPill },
+                        { label: t('cfgHover'), description: t('cfgHoverDesc'), value: hoverAutoplay, setValue: setHoverAutoplay },
+                        { label: t('cfgDemo'), description: t('cfgDemoDesc'), value: showDemoVideos, setValue: setShowDemoVideos },
                     ].map((option) => (
                         <label key={option.label} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl px-2.5 py-2 transition-colors hover:bg-white/[.04]">
                             <span className="min-w-0">
@@ -144,10 +144,10 @@ export function GeneralTab({
                         className="flex items-center justify-between gap-3 rounded-[14px] border border-white/[0.08] bg-white/[0.035] px-3.5 py-3 text-left transition-colors hover:border-[#25f4ee]/35 hover:bg-[#25f4ee]/[0.06]"
                     >
                         <span>
-                            <span className="block text-xs font-bold text-white/85">Revisar consentimiento</span>
-                            <span className="mt-0.5 block text-[10px] text-white/40">Consulta nuevamente los documentos y derechos de contenido.</span>
+                            <span className="block text-xs font-bold text-white/85">{t('cfgConsent')}</span>
+                            <span className="mt-0.5 block text-[10px] text-white/40">{t('cfgConsentDesc')}</span>
                         </span>
-                        <span aria-hidden="true" className="text-[10px] font-black uppercase tracking-wider text-[#25f4ee]">Abrir</span>
+                        <span aria-hidden="true" className="text-[10px] font-black uppercase tracking-wider text-[#25f4ee]">{t('cfgOpen')}</span>
                     </button>
                 )}
             </SectionCard>
@@ -155,19 +155,19 @@ export function GeneralTab({
             {pageConfig && onPageConfigChange && (
                 <div className="flex flex-col gap-3">
                     <SectionCard className="flex flex-col gap-2.5">
-                        <SectionTitle icon={FaLayerGroup} label="Biblioteca y búsqueda" />
+                        <SectionTitle icon={FaLayerGroup} label={t('cfgLibrary')} />
                         <p className="text-[10px] leading-relaxed text-white/40">
-                            La disposición, el orden y los filtros de la biblioteca viven aquí. La barra superior queda reservada para acciones directas.
+                            {t('cfgLibraryDesc')}
                         </p>
                     </SectionCard>
                     <PagePanel config={pageConfig} onChange={onPageConfigChange} />
                     <SectionCard className="flex flex-col gap-3">
-                        <SectionTitle icon={FaMagnifyingGlass} label="Modo de búsqueda" />
+                        <SectionTitle icon={FaMagnifyingGlass} label={t('cfgSearchMode')} />
                         <div className="grid grid-cols-3 gap-2">
                             {([
-                                { id: 'smart' as SearchMode, label: 'Smart', description: 'Todos los canales', Icon: FaBrain },
-                                { id: 'exact' as SearchMode, label: 'Exacta', description: 'Texto y filtros', Icon: FaMagnifyingGlass },
-                                { id: 'conceptual' as SearchMode, label: 'Conceptual', description: 'Por significado', Icon: FaBrain },
+                                { id: 'smart' as SearchMode, label: t('cfgSmart'), description: t('cfgSmartDesc'), Icon: FaBrain },
+                                { id: 'exact' as SearchMode, label: t('cfgExact'), description: t('cfgExactDesc'), Icon: FaMagnifyingGlass },
+                                { id: 'conceptual' as SearchMode, label: t('cfgConceptual'), description: t('cfgConceptualDesc'), Icon: FaBrain },
                             ]).map((option) => {
                                 const Icon = option.Icon;
                                 const selected = searchMode === option.id;
@@ -209,12 +209,12 @@ export function GeneralTab({
                             <FaPalette className="w-3.5 h-3.5 text-neutral-300" />
                         </div>
                         <h2 className="text-xs font-bold tracking-[0.14em] uppercase text-neutral-300 font-mono">
-                            TEMA DE FONDO
+                            {t('cfgTheme')}
                         </h2>
                     </div>
 
                     <span className="text-[11px] font-mono font-semibold tracking-wider text-neutral-400 bg-white/[0.05] border border-white/10 px-2.5 py-1 rounded-full uppercase">
-                        {THEME_OPTIONS.length} OPCIONES
+                        {t('cfgThemeOptions', { count: THEME_OPTIONS.length })}
                     </span>
                 </div>
 
@@ -222,7 +222,7 @@ export function GeneralTab({
                 <div
                     className="grid grid-cols-2 sm:grid-cols-3 gap-3 relative z-10"
                     role="radiogroup"
-                    aria-label="Temas de fondo"
+                    aria-label={t('cfgThemeGroup')}
                 >
                     {THEME_OPTIONS.map((theme) => {
                         const isSelected = selectedTheme === theme.id;
@@ -272,7 +272,7 @@ export function GeneralTab({
                                 <div className="relative z-10 w-full mt-auto">
                                     <div className="backdrop-blur-md bg-black/45 border border-white/10 rounded-xl px-2.5 py-1.5 flex items-center justify-center text-center shadow-md">
                                         <h3 className="font-semibold text-xs tracking-tight text-white drop-shadow-sm truncate">
-                                            {theme.name}
+                                            {t(`settingsThemeName_${theme.id}`)}
                                         </h3>
                                     </div>
                                 </div>
@@ -284,10 +284,11 @@ export function GeneralTab({
 
             {/* Formatos de Descarga */}
             <SectionCard className="flex flex-col gap-5">
-                <SectionTitle icon={FaDownload} label="Formatos de Descarga" />
+                <SectionTitle icon={FaDownload} label={t('cfgFormats')} />
 
                 {FORMAT_CATEGORIES.map(category => {
                     const CategoryIcon = category.icon;
+                    const categoryKey = category.title === 'Texto' ? 'text' : category.title.toLowerCase();
                     return (
                         <div key={category.title} className="flex flex-col gap-2.5">
                             <div className="flex items-center justify-between px-1">
@@ -303,10 +304,10 @@ export function GeneralTab({
                                         <CategoryIcon size={11} />
                                     </div>
                                     <span className="font-black tracking-[0.2em] uppercase text-[10px] text-white/50">
-                                        {category.title}
+                                        {t(`settingsFormatTitle_${categoryKey}`)}
                                     </span>
                                 </div>
-                                <span className="text-[9px] font-bold opacity-30 tracking-widest uppercase">{category.options.length} opciones</span>
+                                <span className="text-[9px] font-bold opacity-30 tracking-widest uppercase">{t('cfgFormatOptions', { count: category.options.length })}</span>
                             </div>
 
                             <div className="grid grid-cols-2 gap-2">
@@ -346,7 +347,7 @@ export function GeneralTab({
                                                 </div>
                                             </div>
                                             <span className="block font-bold text-[10px] text-left text-white/80">
-                                                {fmt.desc}
+                                                {t(`settingsFormatDesc_${fmt.id}`)}
                                             </span>
                                         </button>
                                     );
@@ -359,7 +360,7 @@ export function GeneralTab({
 
             {/* Ajuste de Video */}
             <SectionCard className="flex flex-col gap-3">
-                <SectionTitle icon={FaPalette} label="Visualización de Video" />
+                <SectionTitle icon={FaPalette} label={t('cfgVideo')} />
                 <div className="grid grid-cols-2 gap-2">
                     <button
                         type="button"
@@ -371,7 +372,7 @@ export function GeneralTab({
                                 : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06]'
                         }`}
                     >
-                        Rellenar video (Cover)
+                        {t('cfgCover')}
                     </button>
                     <button
                         type="button"
@@ -383,27 +384,27 @@ export function GeneralTab({
                                 : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06]'
                         }`}
                     >
-                        Mostrar completo (Contain)
+                        {t('cfgContain')}
                     </button>
                 </div>
                 <p className="text-[10px] leading-relaxed text-white/40">
-                    La ventana de detalle siempre adapta el video completo sin recortes. Este ajuste solo cambia cómo rellena Cinema.
+                    {t('cfgVideoNote')}
                 </p>
             </SectionCard>
 
             <SectionCard className="flex flex-col gap-3">
-                <SectionTitle icon={FaEye} label="Cinema · reproducción" />
+                <SectionTitle icon={FaEye} label={t('cfgCinema')} />
                 <label className="flex items-center justify-between gap-3 rounded-[14px] bg-black/30 p-3.5">
-                    <span><span className="block text-xs font-bold text-white/90">Subtítulos sincronizados</span><span className="mt-0.5 block text-[10px] text-white/40">Usa la transcripción local cuando el video la tenga.</span></span>
+                    <span><span className="block text-xs font-bold text-white/90">{t('cfgSubs')}</span><span className="mt-0.5 block text-[10px] text-white/40">{t('cfgSubsDesc')}</span></span>
                     <input type="checkbox" checked={subtitleEnabled} onChange={(event) => setSubtitleEnabled(event.target.checked)} className="h-4 w-4 accent-[#25f4ee]" />
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                    {(['auto', 'karaoke', 'minimal', 'cinematic'] as SubtitleStyle[]).map((style) => <button key={style} type="button" aria-pressed={subtitleStyle === style} onClick={() => setSubtitleStyle(style)} className={`rounded-xl px-3 py-2 text-[10px] font-bold ${subtitleStyle === style ? 'bg-[#25f4ee]/15 text-[#25f4ee]' : 'bg-white/[0.03] text-white/50'}`}>{style === 'auto' ? 'Automático' : style[0].toUpperCase() + style.slice(1)}</button>)}
+                    {(['auto', 'karaoke', 'minimal', 'cinematic'] as SubtitleStyle[]).map((style) => <button key={style} type="button" aria-pressed={subtitleStyle === style} onClick={() => setSubtitleStyle(style)} className={`rounded-xl px-3 py-2 text-[10px] font-bold ${subtitleStyle === style ? 'bg-[#25f4ee]/15 text-[#25f4ee]' : 'bg-white/[0.03] text-white/50'}`}>{style === 'auto' ? t('cfgStyleAuto') : style[0].toUpperCase() + style.slice(1)}</button>)}
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                    {(['efficient', 'intelligent', 'maximum'] as PlaybackProfile[]).map((profile) => <button key={profile} type="button" aria-pressed={playbackProfile === profile} onClick={() => setPlaybackProfile(profile)} className={`rounded-xl px-2 py-2 text-[9px] font-bold ${playbackProfile === profile ? 'bg-white/10 text-white' : 'bg-white/[0.03] text-white/50'}`}>{profile === 'efficient' ? 'Eficiente' : profile === 'maximum' ? 'Máxima calidad' : 'Inteligente'}</button>)}
+                    {(['efficient', 'intelligent', 'maximum'] as PlaybackProfile[]).map((profile) => <button key={profile} type="button" aria-pressed={playbackProfile === profile} onClick={() => setPlaybackProfile(profile)} className={`rounded-xl px-2 py-2 text-[9px] font-bold ${playbackProfile === profile ? 'bg-white/10 text-white' : 'bg-white/[0.03] text-white/50'}`}>{profile === 'efficient' ? t('cfgProfileEfficient') : profile === 'maximum' ? t('cfgProfileMax') : t('cfgProfileSmart')}</button>)}
                 </div>
-                <p className="rounded-[14px] bg-black/30 p-3.5 text-[10px] leading-relaxed text-white/40">La presencia de WebGL o NVIDIA no se etiqueta como RTX. Las pruebas reales de Whisper, FFmpeg y LLM están en Ajustes → Rendimiento.</p>
+                <p className="rounded-[14px] bg-black/30 p-3.5 text-[10px] leading-relaxed text-white/40">{t('cfgWebglNote')} {t('settings')} → {t('settingsTabPerformance')}.</p>
             </SectionCard>
 
             {/* Carpeta de Descargas */}
@@ -427,7 +428,7 @@ export function GeneralTab({
                                 }}
                                 className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-[#25f4ee] hover:bg-[#25f4ee]/15 hover:border-[#25f4ee]/30 transition-all cursor-pointer"
                             >
-                                Examinar…
+                                {t('cfgBrowse')}
                             </button>
                             <button
                                 type="button"
@@ -442,7 +443,7 @@ export function GeneralTab({
                                 }}
                                 className="rounded-xl border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-white/70 hover:bg-white/10 hover:text-white transition-all cursor-pointer"
                             >
-                                Abrir
+                                {t('cfgOpen')}
                             </button>
                         </div>
                     )}
@@ -460,7 +461,7 @@ export function GeneralTab({
                     />
                 </div>
                 <p className="text-[10px] text-white/40 leading-relaxed">
-                    Los videos y medios procesados se almacenan automáticamente en este directorio.
+                    {t('cfgFolderDesc')}
                 </p>
             </SectionCard>
 
@@ -468,8 +469,8 @@ export function GeneralTab({
             <SectionCard className="flex flex-col gap-3">
                 <label className="flex items-center justify-between gap-3 rounded-[14px] bg-black/30 p-3.5 shadow-inner cursor-pointer">
                     <div>
-                        <span className="block font-bold text-xs text-white/90">Mantener en la bandeja al cerrar</span>
-                        <span className="block text-[10px] text-white/40 mt-0.5">Las descargas y sincronizaciones continúan aunque ocultes la ventana.</span>
+                        <span className="block font-bold text-xs text-white/90">{t('cfgTray')}</span>
+                        <span className="block text-[10px] text-white/40 mt-0.5">{t('cfgTrayDesc')}</span>
                     </div>
                     <input
                         type="checkbox"
@@ -481,8 +482,8 @@ export function GeneralTab({
                 </label>
                 <label className="flex items-center justify-between gap-3 rounded-[14px] bg-black/30 p-3.5 shadow-inner cursor-pointer">
                     <div>
-                        <span className="block font-bold text-xs text-white/90">Iniciar con Windows</span>
-                        <span className="block text-[10px] text-white/40 mt-0.5">Pulsaria se mantiene en segundo plano en la bandeja del sistema.</span>
+                        <span className="block font-bold text-xs text-white/90">{t('cfgAutostart')}</span>
+                        <span className="block text-[10px] text-white/40 mt-0.5">{t('cfgAutostartDesc')}</span>
                     </div>
                     <input
                         type="checkbox"
@@ -496,20 +497,20 @@ export function GeneralTab({
 
             {/* Documentos Legales */}
             <SectionCard className="flex flex-col gap-3">
-                <SectionTitle icon={FaShieldHalved} label="Documentos Legales" />
+                <SectionTitle icon={FaShieldHalved} label={t('cfgLegal')} />
                 <p className="text-[10px] leading-relaxed text-white/45">
-                    Consulta las condiciones del beta, privacidad, contenido autorizado, seguridad y avisos antes de distribuir o utilizar Pulsaria.
+                    {t('cfgLegalDesc')}
                 </p>
                 <div className="flex flex-wrap gap-2 pt-1">
                     {[
-                        { label: 'EULA', url: 'https://github.com/danielunibe/PulsarIA/blob/main/EULA.es.md' },
-                        { label: 'Privacidad', url: 'https://github.com/danielunibe/PulsarIA/blob/main/PRIVACY.es.md' },
-                        { label: 'Contenido', url: 'https://github.com/danielunibe/PulsarIA/blob/main/CONTENT_POLICY.es.md' },
-                        { label: 'Seguridad', url: 'https://github.com/danielunibe/PulsarIA/blob/main/SECURITY.md' },
+                        { label: 'EULA', url: 'https://github.com/danielunibe/PulsarIA/blob/main/EULA.es.md', urlEn: 'https://github.com/danielunibe/PulsarIA/blob/main/EULA.en.md' },
+                        { label: t('cfgLegalPrivacy'), url: 'https://github.com/danielunibe/PulsarIA/blob/main/PRIVACY.es.md', urlEn: 'https://github.com/danielunibe/PulsarIA/blob/main/PRIVACY.en.md' },
+                        { label: t('cfgLegalContent'), url: 'https://github.com/danielunibe/PulsarIA/blob/main/CONTENT_POLICY.es.md', urlEn: 'https://github.com/danielunibe/PulsarIA/blob/main/CONTENT_POLICY.en.md' },
+                        { label: t('cfgLegalSecurity'), url: 'https://github.com/danielunibe/PulsarIA/blob/main/SECURITY.md', urlEn: 'https://github.com/danielunibe/PulsarIA/blob/main/SECURITY.md' },
                     ].map(doc => (
                         <a
                             key={doc.label}
-                            href={doc.url}
+                            href={locale === 'en-US' ? doc.urlEn : doc.url}
                             target="_blank"
                             rel="noreferrer"
                             className="rounded-[10px] bg-white/[0.04] hover:bg-white/[0.08] px-3 py-1.5 text-[10px] font-bold text-[#25f4ee] transition-colors shadow-sm"

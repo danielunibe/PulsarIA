@@ -73,9 +73,9 @@ export function AiTab({
             const status = await invoke<boolean>('get_gemini_status');
             setGeminiActive(status);
             setApiKeyInput('');
-            toast.success(status ? 'Clave de Gemini configurada en memoria para esta sesión' : 'Clave de Gemini eliminada de la sesión');
+            toast.success(status ? t('aiKeySet') : t('aiKeyUnset'));
         } catch (error) {
-            toast.error(`Error al actualizar clave: ${error}`);
+            toast.error(t('aiKeyError', { error: error instanceof Error ? error.message : String(error) }));
         } finally {
             setIsSavingKey(false);
         }
@@ -85,23 +85,23 @@ export function AiTab({
             {/* IA Local llama.cpp */}
             <SectionCard className="flex flex-col gap-3">
                 <div className="flex items-start justify-between gap-3">
-                    <SectionTitle icon={FaBrain} label="IA Local Privada" />
+                    <SectionTitle icon={FaBrain} label={t('aiLocal')} />
                     <span className="rounded-full bg-[#8a5cff]/15 px-2.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-[#c4b5fd]">
-                        Modelo local
+                        {t('aiLocalModel')}
                     </span>
                 </div>
                 <p className="text-[10px] leading-relaxed text-white/50">
-                    El asistente y la síntesis de esta sección usan un modelo local de llama.cpp, que se descarga solo tras tu confirmación. Si solicitas la síntesis opcional con Gemini desde una búsqueda, hasta cinco fragmentos relevantes se envían a Google.
+                    {t('aiLocalDesc')}
                 </p>
 
                 <div className="flex items-center justify-between gap-3 rounded-[14px] bg-black/35 px-3.5 py-2.5 text-[9px] shadow-inner">
-                    <span className="text-white/40">Estado del motor local</span>
-                    <span className="font-mono font-bold text-[#c4b5fd]">{localLlmStatus?.state || 'comprobando…'}</span>
+                    <span className="text-white/40">{t('aiEngineState')}</span>
+                    <span className="font-mono font-bold text-[#c4b5fd]">{localLlmStatus?.state || t('aiChecking')}</span>
                 </div>
 
                 {localLlmStatus && localLlmStatus.totalBytes > 0 && localLlmStatus.state === 'downloading' && (
                     <div className="rounded-[14px] bg-black/35 p-3 text-[9px] text-white/60 shadow-inner">
-                        Descargando {formatStorageBytes(localLlmStatus.bytesDownloaded, locale)} de {formatStorageBytes(localLlmStatus.totalBytes, locale)}
+                        {t('aiDownloading', { done: formatStorageBytes(localLlmStatus.bytesDownloaded, locale), total: formatStorageBytes(localLlmStatus.totalBytes, locale) })}
                         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
                             <div
                                 className="h-full rounded-full bg-[#8a5cff] transition-all"
@@ -112,7 +112,7 @@ export function AiTab({
                 )}
 
                 {localLlmMessage && <p role="status" className="text-[9px] leading-relaxed text-[#25f4ee]/80">{localLlmMessage}</p>}
-                {localLlmStatus?.errorCode && <p role="alert" className="text-[9px] leading-relaxed text-amber-200/80">Código de estado: {localLlmStatus.errorCode}</p>}
+                {localLlmStatus?.errorCode && <p role="alert" className="text-[9px] leading-relaxed text-amber-200/80">{t('aiStatusCode', { code: localLlmStatus.errorCode })}</p>}
 
                 <div className="flex flex-wrap gap-2 pt-1">
                     <button
@@ -121,7 +121,7 @@ export function AiTab({
                         onClick={() => void prepareLocalLlm()}
                         className="rounded-[12px] bg-[#8a5cff]/20 hover:bg-[#8a5cff]/30 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[#c4b5fd] transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-35"
                     >
-                        {localLlmBusy ? 'Preparando…' : localLlmStatus?.state === 'ready' ? 'Modelo listo' : 'Preparar modelo local'}
+                        {localLlmBusy ? t('aiPreparing') : localLlmStatus?.state === 'ready' ? t('aiModelReady') : t('aiPrepare')}
                     </button>
                     {localLlmStatus?.state === 'downloading' && (
                         <button
@@ -129,7 +129,7 @@ export function AiTab({
                             onClick={() => void cancelLocalLlm()}
                             className="rounded-[12px] bg-amber-300/15 hover:bg-amber-300/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-amber-200 transition-colors"
                         >
-                            Cancelar descarga
+                            {t('aiCancelDownload')}
                         </button>
                     )}
                 </div>
@@ -138,24 +138,24 @@ export function AiTab({
             {/* Síntesis Nube Gemini */}
             <SectionCard className="flex flex-col gap-3">
                 <div className="flex items-start justify-between gap-3">
-                    <SectionTitle icon={FaWandMagicSparkles} label="Síntesis Nube Opcional (Gemini)" />
+                    <SectionTitle icon={FaWandMagicSparkles} label={t('aiGemini')} />
                     <span className={`rounded-full px-2.5 py-0.5 text-[8px] font-black uppercase tracking-wider ${
                         geminiActive
                             ? 'bg-emerald-500/15 text-emerald-400'
                             : 'bg-white/10 text-white/40'
                     }`}>
-                        {geminiActive ? 'Activa en memoria' : 'No configurada'}
+                        {geminiActive ? t('aiActiveMemory') : t('aiNotConfigured')}
                     </span>
                 </div>
                 <p className="text-[10px] leading-relaxed text-white/50">
-                    Opcional y manual. Si configuras una clave para tu sesión o mediante la variable de entorno <code className="font-mono text-white/80 bg-black/40 px-1 py-0.5 rounded">PULSAR_GOOGLE_API_KEY</code>, podrás solicitar respuestas avanzadas de Gemini desde el buscador Spotlight.
+                    {t('aiGeminiDesc')} <code className="font-mono text-white/80 bg-black/40 px-1 py-0.5 rounded">PULSAR_GOOGLE_API_KEY</code>{t('aiGeminiDesc2')}
                 </p>
                 <div className="flex items-center gap-2 rounded-[14px] bg-black/35 p-2 shadow-inner">
                     <input
                         type="password"
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
-                        placeholder={geminiActive ? '•••••••••••••••• (configurada)' : 'Ingresa clave para esta sesión…'}
+                        placeholder={geminiActive ? t('aiKeyPlaceholderOn') : t('aiKeyPlaceholderOff')}
                         className="flex-1 bg-transparent px-2 text-xs font-mono text-white outline-none placeholder:text-white/25"
                     />
                     <button
@@ -164,7 +164,7 @@ export function AiTab({
                         disabled={isSavingKey || !apiKeyInput.trim()}
                         className="rounded-xl bg-white/10 hover:bg-white/15 px-3 py-1.5 text-[9px] font-bold text-white transition-all cursor-pointer disabled:opacity-40"
                     >
-                        {isSavingKey ? 'Guardando…' : 'Establecer'}
+                        {isSavingKey ? t('aiSaving') : t('aiSet')}
                     </button>
                     {geminiActive && (
                         <button
@@ -176,58 +176,58 @@ export function AiTab({
                                     const { invoke } = await import('@tauri-apps/api/core');
                                     await invoke('set_gemini_api_key', { apiKey: '' });
                                     setGeminiActive(false);
-                                    toast.success('Clave eliminada de la sesión');
+                                    toast.success(t('aiKeyRemoved'));
                                 } catch (error) {
-                                    toast.error(`Error al actualizar clave: ${error instanceof Error ? error.message : String(error)}`);
+                                    toast.error(t('aiKeyError', { error: error instanceof Error ? error.message : String(error) }));
                                 }
                             }}
                             className="rounded-xl bg-rose-500/10 hover:bg-rose-500/20 px-2.5 py-1.5 text-[9px] font-bold text-rose-400 transition-all cursor-pointer"
                         >
-                            Quitar
+                            {t('aiRemove')}
                         </button>
                     )}
                 </div>
                 <div className="flex items-center gap-2 text-[9px] text-white/40">
                     <FaShieldHalved size={10} className="text-[#25f4ee]" />
-                    <span>La clave nunca se persiste en disco ni se incluye en backups o telemetría.</span>
+                    <span>{t('aiKeyPrivacy')}</span>
                 </div>
             </SectionCard>
 
             {/* Clustering Semántico & Grafos */}
             <SectionCard className="flex flex-col gap-4">
                 <div className="flex items-center justify-between">
-                    <SectionTitle icon={FaBrain} label="Clustering & Grafos IA" />
+                    <SectionTitle icon={FaBrain} label={t('aiClustering')} />
                     <button
                         type="button"
-                        aria-label="Ejecutar clustering"
+                        aria-label={t('aiRunAria')}
                         onClick={runClustering}
                         disabled={clusteringLoading}
                         className="px-3.5 py-1.5 rounded-[12px] bg-[#8a5cff]/20 hover:bg-[#8a5cff]/30 text-[#8a5cff] text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 shadow-sm"
                     >
                         <FaPlay size={8} />
-                        {clusteringLoading ? 'Agrupando…' : 'Ejecutar'}
+                        {clusteringLoading ? t('aiRunning') : t('aiRun')}
                     </button>
                 </div>
 
                 <p className="text-[11px] text-white/50 leading-relaxed">
-                    Organiza automáticamente colecciones temáticas por cercanía semántica entre transcripciones o especificando un criterio directo.
+                    {t('aiClusteringDesc')}
                 </p>
 
                 {clusteringError && (
                     <div role="alert" className="rounded-[12px] bg-[#fe2c55]/15 px-3 py-2 text-[10px] text-[#fe2c55]">
-                        No se pudo ejecutar el clustering: {clusteringError}
+                        {t('aiClusteringFailed', { error: clusteringError })}
                     </div>
                 )}
 
                 {/* Afinidad Slider */}
                 <div className="p-3.5 rounded-[16px] bg-black/35 shadow-inner flex flex-col gap-2.5">
                     <div className="flex items-center justify-between">
-                        <span className="text-[10px] uppercase font-bold tracking-wider text-white/60">Afinidad Mínima del Cluster</span>
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-white/60">{t('aiAffinity')}</span>
                         <span className="text-xs font-mono font-bold text-[#8a5cff]">{(clusterThreshold * 100).toFixed(0)}%</span>
                     </div>
                     <input
                         type="range"
-                        aria-label="Afinidad mínima del cluster"
+                        aria-label={t('aiAffinityAria')}
                         min="0.5"
                         max="0.95"
                         step="0.05"
@@ -239,10 +239,10 @@ export function AiTab({
 
                 {/* Tamaño Mínimo */}
                 <label className="flex items-center justify-between gap-3 p-3.5 rounded-[16px] bg-black/35 shadow-inner text-[10px] uppercase font-bold tracking-wider text-white/60 cursor-pointer">
-                    <span>Tamaño mínimo del cluster</span>
+                    <span>{t('aiMinSize')}</span>
                     <input
                         type="number"
-                        aria-label="Tamaño mínimo del cluster"
+                        aria-label={t('aiMinSize')}
                         min="2"
                         max="50"
                         value={clusterMinSize}
@@ -253,13 +253,13 @@ export function AiTab({
 
                 {/* Condición Opcional */}
                 <label className="flex flex-col gap-2 p-3.5 rounded-[16px] bg-black/35 shadow-inner text-[10px] uppercase font-bold tracking-wider text-white/60 cursor-pointer">
-                    <span>Condición opcional de agrupación</span>
+                    <span>{t('aiCondition')}</span>
                     <input
                         type="text"
-                        aria-label="Condición para organizar videos"
+                        aria-label={t('aiConditionAria')}
                         value={organizationCondition}
                         onChange={(e) => setOrganizationCondition(e.target.value)}
-                        placeholder="Ej. videos sobre tecnología y diseño"
+                        placeholder={t('aiConditionPh')}
                         className="rounded-xl bg-black/50 px-3 py-2 text-[11px] font-medium normal-case tracking-normal text-white outline-none focus:bg-black/70 placeholder:text-white/20 shadow-inner"
                     />
                 </label>
@@ -267,7 +267,7 @@ export function AiTab({
                 {/* Clusters List */}
                 <div className="flex flex-col gap-2 pt-1">
                     <span className="text-[9px] uppercase font-bold tracking-widest text-white/40">
-                        Grupos Semánticos Detectados ({clustersList.length})
+                        {t('aiGroupsFound', { count: clustersList.length })}
                     </span>
                     {clustersList.length > 0 ? (
                         clustersList.map((group, idx) => (
@@ -279,7 +279,7 @@ export function AiTab({
                                     <span className="text-xs font-bold text-white truncate">{group.name}</span>
                                 </div>
                                 <div className="flex shrink-0 items-center gap-2">
-                                    <span className="text-[10px] font-mono text-[#8a5cff] font-bold">{group.count} videos</span>
+                                    <span className="text-[10px] font-mono text-[#8a5cff] font-bold">{group.count} {t('aiVideos')}</span>
                                     {group.playlistId && (
                                         <button
                                             type="button"
@@ -289,7 +289,7 @@ export function AiTab({
                                             }}
                                             className="rounded-[8px] bg-[#25f4ee]/15 hover:bg-[#25f4ee]/25 px-2.5 py-1 text-[8px] font-black uppercase tracking-wider text-[#25f4ee] transition-colors cursor-pointer"
                                         >
-                                            Ver
+                                            {t('aiView')}
                                         </button>
                                     )}
                                 </div>
@@ -297,7 +297,7 @@ export function AiTab({
                         ))
                     ) : (
                         <div className="p-4 rounded-[14px] bg-black/20 text-center text-[10px] text-white/40 shadow-inner">
-                            Presiona «Ejecutar» para descubrir agrupaciones temáticas basadas en tus transcripciones.
+                            {t('aiRunHint')}
                         </div>
                     )}
                 </div>
