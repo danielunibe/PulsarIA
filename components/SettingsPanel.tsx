@@ -456,6 +456,24 @@ export function SettingsPanel({
     const updaterChannel = process.env.NEXT_PUBLIC_PULSARIA_UPDATE_CHANNEL === 'rc' ? 'RC' : 'estable';
 
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+    const tablistRef = useRef<HTMLDivElement | null>(null);
+
+    // Navegación por teclado del tablist (patrón WAI-ARIA: flechas + Home/End).
+    const handleTablistKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        const order: SettingsTab[] = ['general', 'engine', 'ai', 'performance', 'stats'];
+        const current = order.indexOf(activeTab);
+        let next: number | null = null;
+        if (event.key === 'ArrowRight') next = (current + 1) % order.length;
+        else if (event.key === 'ArrowLeft') next = (current - 1 + order.length) % order.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = order.length - 1;
+        if (next === null) return;
+        event.preventDefault();
+        setActiveTab(order[next]);
+        tablistRef.current
+            ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+            [next]?.focus();
+    };
     const [formats, setFormats] = useState<string[]>(settings.formats);
     const [folder, setFolder] = useState(settings.folder);
     const [selectedTheme, setSelectedTheme] = useState<AppTheme>(settings.theme || 'chromatic');
@@ -1252,7 +1270,7 @@ export function SettingsPanel({
 
     return (
         <div
-            className={embedded ? "pulsaria-settings-shell flex-1 flex flex-col font-sans min-h-0 relative overflow-hidden" : "pulsaria-settings-shell absolute inset-0 z-50 flex flex-col font-sans"}
+            className={embedded ? "pulsaria-settings-shell flex-1 flex flex-col font-sans min-h-0 relative overflow-hidden mx-auto w-full max-w-5xl" : "pulsaria-settings-shell absolute inset-0 z-50 flex flex-col font-sans"}
             style={{ background: embedded ? 'transparent' : '#0e1017' }}
         >
             {/* Header */}
@@ -1260,11 +1278,14 @@ export function SettingsPanel({
                 <h2 className="text-base font-black tracking-tight leading-tight text-white">
                     {t('settings')}
                 </h2>
+                <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-white/30">
+                    {t('local')}
+                </span>
             </div>
 
             {/* Sub-Navigation Tabs */}
             <div className={`pulsaria-settings-nav ${embedded ? "px-4 pb-2" : "px-5 pb-3"}`}>
-                <div role="tablist" aria-label="Secciones de ajustes" className="pulsaria-settings-seg grid grid-cols-5 gap-1 p-1 rounded-xl bg-black/40 border border-white/[0.04]" data-active={activeTab}>
+                <div ref={tablistRef} role="tablist" aria-label="Secciones de ajustes" onKeyDown={handleTablistKeyDown} className="pulsaria-settings-seg grid grid-cols-5 gap-1 p-1 rounded-xl bg-black/40 border border-white/[0.04]" data-active={activeTab}>
                     <button
                         type="button"
                         role="tab"
@@ -1272,7 +1293,7 @@ export function SettingsPanel({
                         onClick={() => setActiveTab('general')}
                         className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'general'
-                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                ? 'bg-transparent text-white border border-transparent'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
@@ -1286,7 +1307,7 @@ export function SettingsPanel({
                         onClick={() => setActiveTab('engine')}
                         className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'engine'
-                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                ? 'bg-transparent text-white border border-transparent'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
@@ -1300,7 +1321,7 @@ export function SettingsPanel({
                         onClick={() => setActiveTab('ai')}
                         className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'ai'
-                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                ? 'bg-transparent text-white border border-transparent'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
@@ -1314,7 +1335,7 @@ export function SettingsPanel({
                         onClick={() => setActiveTab('performance')}
                         className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'performance'
-                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                ? 'bg-transparent text-white border border-transparent'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
@@ -1328,7 +1349,7 @@ export function SettingsPanel({
                         onClick={() => setActiveTab('stats')}
                         className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                             activeTab === 'stats'
-                                ? 'bg-white/12 text-white shadow-sm border border-white/15'
+                                ? 'bg-transparent text-white border border-transparent'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
@@ -1342,7 +1363,7 @@ export function SettingsPanel({
             <div className={`pulsaria-settings-divider ${embedded ? 'mx-4' : 'mx-5'} h-px bg-white/[0.04]`} />
 
             {/* Scrollable content */}
-            <div className={`pulsaria-settings-content flex-1 overflow-y-auto ${embedded ? 'px-4 py-3' : 'px-5 py-4'} flex flex-col gap-4 custom-scrollbar`}>
+            <div role="tabpanel" aria-label={`Ajustes · ${activeTab}`} className={`pulsaria-settings-content flex-1 overflow-y-auto ${embedded ? 'px-4 py-3' : 'px-5 py-4'} flex flex-col gap-3 custom-scrollbar`}>
 
                 {activeTab === 'general' && (
                     <GeneralTab

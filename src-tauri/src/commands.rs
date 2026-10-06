@@ -3557,11 +3557,7 @@ pub async fn add_job(
 
     state
         .queue
-        .dispatch_with_browser(
-            job_id,
-            url,
-            (!browser.is_empty()).then_some(browser),
-        )
+        .dispatch_with_browser(job_id, url, (!browser.is_empty()).then_some(browser))
         .await?;
 
     Ok(job_id)
@@ -3731,8 +3727,8 @@ pub async fn set_profile_auto_enqueue(
         .db
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
-    let source = db::get_collection_source(&connection, source_id)
-        .map_err(|error| error.to_string())?;
+    let source =
+        db::get_collection_source(&connection, source_id).map_err(|error| error.to_string())?;
     let mut rules: crate::application::collection_service::SourceRules =
         serde_json::from_str(&source.rules_json).unwrap_or_default();
     rules.auto_enqueue = auto_enqueue;
@@ -5411,6 +5407,917 @@ pub async fn export_library_json(state: State<'_, AppState>) -> Result<String, S
         .map_err(|_| "Database mutex poisoned".to_string())?;
     let jobs = db::get_all_jobs(&db).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&jobs).map_err(|e| e.to_string())
+}
+
+// ========================================================================
+// MAGAZINES & REVISTAS IPC COMMANDS
+// ========================================================================
+
+#[tauri::command]
+pub async fn get_magazine_volumes(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::domain::editorial::MagazineVolumeRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::list_magazine_volumes(&db).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_magazine_volume_details(
+    volume_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::domain::editorial::MagazineVolumeRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::get_magazine_volume(&db, &volume_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_magazine_articles(
+    volume_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::domain::editorial::MagazineArticleRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::list_magazine_articles(&db, &volume_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_magazine_article_details(
+    article_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::domain::editorial::MagazineArticleDetails>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::get_magazine_article_details(&db, &article_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_magazine_volume(
+    volume: crate::domain::editorial::MagazineVolumeRecord,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::create_magazine_volume(&db, &volume)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_magazine_article(
+    volume_id: String,
+    chapter_id: Option<i64>,
+    payload: crate::domain::editorial::EditorialArticlePayload,
+    hero_frame_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::editorial::MagazineArticleDetails, String> {
+    let mut db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::create_article_from_contract(
+        &mut db,
+        &volume_id,
+        chapter_id,
+        &payload,
+        hero_frame_path,
+    )
+}
+
+#[tauri::command]
+pub async fn resolve_magazine_conflict(
+    conflict_id: i64,
+    resolution_state: String,
+    resolution_notes: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let parsed_state = resolution_state
+        .parse::<crate::domain::editorial::ConflictResolutionState>()
+        .map_err(|e| e.to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::resolve_magazine_conflict(
+        &db,
+        conflict_id,
+        parsed_state,
+        resolution_notes.as_deref(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn validate_magazine_article_contract(
+    payload: crate::domain::editorial::EditorialArticlePayload,
+) -> Result<(), String> {
+    crate::domain::editorial::validate_editorial_contract(&payload).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_magazine_chapters(
+    volume_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::domain::editorial::MagazineChapterRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::list_magazine_chapters(&db, &volume_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_magazine_chapter(
+    volume_id: String,
+    title: String,
+    description: Option<String>,
+    ordinal: Option<i32>,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::editorial::MagazineChapterRecord, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::create_magazine_chapter(
+        &db,
+        &volume_id,
+        &title,
+        description.as_deref(),
+        ordinal,
+    )
+}
+
+#[tauri::command]
+pub async fn add_magazine_article_version(
+    article_id: String,
+    title: String,
+    summary: String,
+    structured_content_json: String,
+    editorial_notes_json: Option<String>,
+    change_summary: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::editorial::MagazineArticleVersionRecord, String> {
+    let mut db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::add_article_version(
+        &mut db,
+        &article_id,
+        &title,
+        &summary,
+        &structured_content_json,
+        editorial_notes_json.as_deref(),
+        change_summary.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub async fn update_magazine_article_state(
+    article_id: String,
+    editorial_state: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let next = editorial_state
+        .parse::<crate::domain::editorial::EditorialState>()
+        .map_err(|e| e.to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::update_magazine_article_state(&db, &article_id, next)
+}
+
+#[tauri::command]
+pub async fn update_magazine_volume_state(
+    volume_id: String,
+    editorial_state: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let next = editorial_state
+        .parse::<crate::domain::editorial::EditorialState>()
+        .map_err(|e| e.to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::update_magazine_volume_state(&db, &volume_id, next)
+}
+
+#[tauri::command]
+pub async fn create_magazine_compilation(
+    volume_id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::editorial::MagazineCompilationRecord, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::create_magazine_compilation(&db, &volume_id)
+}
+
+#[tauri::command]
+pub async fn get_magazine_compilations(
+    volume_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::domain::editorial::MagazineCompilationRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::list_magazine_compilations(&db, &volume_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_magazine_compilation(
+    compilation_id: i64,
+    status: String,
+    progress: i32,
+    message: Option<String>,
+    error_message: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::editorial::MagazineCompilationRecord, String> {
+    let parsed = status
+        .parse::<crate::domain::editorial::CompilationTaskState>()
+        .map_err(|e| e.to_string())?;
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::update_magazine_compilation(
+        &db,
+        compilation_id,
+        parsed,
+        progress,
+        message.as_deref(),
+        error_message.as_deref(),
+    )
+}
+
+// ========================================================================
+// MOTOR EDITORIAL (Fase 2): Evidence Package → Proveedor → Validación → Store
+// ------------------------------------------------------------------------
+// El frontend solo orquesta compilaciones: nunca ve la evidencia cruda ni
+// habla con Gemini. El proveedor real falla cerrado sin API key configurada
+// en el proceso nativo (mensaje accionable, sin secretos en el error).
+// ========================================================================
+
+/// Compila un job de la biblioteca hacia un tomo usando el proveedor
+/// editorial real (Gemini). `update_article_id` reserva la compilación para
+/// una nueva versión en lugar de un artículo nuevo.
+#[tauri::command]
+pub async fn compile_magazine_source(
+    job_id: i64,
+    volume_id: String,
+    chapter_id: Option<i64>,
+    update_article_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::application::editorial_compiler::CompilationOutcome, String> {
+    let max_output_tokens = crate::application::editorial_compiler::DEFAULT_MAX_OUTPUT_TOKENS;
+    let provider =
+        crate::application::editorial_provider::EditorialProvider::gemini(max_output_tokens);
+    let params = crate::application::editorial_compiler::CompileParams {
+        job_id,
+        volume_id,
+        chapter_id,
+        update_article_id,
+        max_output_tokens,
+    };
+    crate::application::editorial_compiler::compile_magazine_source(&state.db, &provider, params)
+        .await
+}
+
+/// Compila múltiples jobs de la biblioteca hacia un tomo usando el proveedor
+/// editorial real (Gemini) o resuelve la propuesta multi-fuente.
+#[tauri::command]
+pub async fn compile_multi_source_editorial(
+    job_ids: Vec<i64>,
+    volume_id: String,
+    chapter_id: Option<i64>,
+    update_article_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<crate::application::editorial_compiler::CompilationOutcome, String> {
+    let max_output_tokens = crate::application::editorial_compiler::DEFAULT_MAX_OUTPUT_TOKENS;
+    let provider =
+        crate::application::editorial_provider::EditorialProvider::gemini(max_output_tokens);
+    let params = crate::application::editorial_compiler::MultiSourceCompileParams {
+        job_ids,
+        volume_id,
+        chapter_id,
+        update_article_id,
+        max_output_tokens,
+    };
+    crate::application::editorial_compiler::compile_multi_source_editorial(
+        &state.db, &provider, params,
+    )
+    .await
+}
+
+/// Recupera la propuesta de NewVolumeCandidate asociada a una compilación (si existe).
+#[tauri::command]
+pub async fn get_magazine_compilation_candidate(
+    compilation_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::domain::editorial::NewVolumeCandidate>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::get_compilation_candidate(&db, compilation_id)
+}
+
+/// Resuelve el medio original de un job para el inspector de fuentes del
+/// Reader (Fase 3). El frontend reproduce con `convertFileSrc(video_path)`
+/// o declara honestamente que no hay reproducción disponible.
+#[tauri::command]
+pub async fn get_magazine_source_media(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::domain::editorial::MagazineSourceMedia>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::resolve_source_media(&db, job_id)
+}
+
+/// Lee una compilación por id (base del polling honesto de la UI).
+#[tauri::command]
+pub async fn get_magazine_compilation(
+    compilation_id: i64,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::editorial::MagazineCompilationRecord, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::magazine_service::get_magazine_compilation(&db, compilation_id)
+}
+
+/// Reejecuta una compilación no exitosa con sus parámetros guardados.
+/// Las compilaciones `completed` o en curso se rechazan.
+#[tauri::command]
+pub async fn retry_magazine_compilation(
+    compilation_id: i64,
+    state: State<'_, AppState>,
+) -> Result<crate::application::editorial_compiler::CompilationOutcome, String> {
+    let max_output_tokens = crate::application::editorial_compiler::DEFAULT_MAX_OUTPUT_TOKENS;
+    let provider =
+        crate::application::editorial_provider::EditorialProvider::gemini(max_output_tokens);
+    crate::application::editorial_compiler::retry_magazine_compilation(
+        &state.db,
+        &provider,
+        compilation_id,
+        max_output_tokens,
+    )
+    .await
+}
+
+// ========================================================================
+// PULSARIA INTELLIGENCE PLATFORM — IPC COMMANDS
+// ========================================================================
+
+/// Detecta el dominio y tipo de contenido para un job específico.
+/// Consulta primero la persistencia SQLite en `knowledge_domain_classifications`.
+/// Si no existe, genera la clasificación mediante heurísticas o el proveedor Local AI,
+/// valida el contrato determinista y persiste el resultado.
+#[tauri::command]
+pub async fn detect_job_domain(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::semantic::DomainClassification, String> {
+    let model_meta = state.local_llm.model_metadata();
+
+    // 1. Construir paquete de evidencia
+    let package = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        crate::application::editorial_evidence::build_evidence_package(&db, job_id)
+            .map_err(|err| format!("Error building evidence package: {err}"))?
+    };
+
+    let canonical_hash = package.compute_canonical_hash();
+
+    // 2. Verificar idempotencia en SQLite
+    {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        if let Ok(Some(_)) = crate::application::knowledge_service::find_completed_ai_task_execution(
+            &db,
+            job_id,
+            "domain_detection",
+            &model_meta.model_id,
+            &model_meta.prompt_version,
+            "1.0.0",
+            &canonical_hash,
+        ) {
+            if let Ok(Some(existing)) =
+                crate::application::knowledge_service::get_domain_classification(&db, job_id)
+            {
+                return Ok(existing);
+            }
+        }
+    }
+
+    // 3. Registrar ciclo de vida de tarea AI: RUNNING
+    let task_id = format!(
+        "task-domain-{}-{}",
+        job_id,
+        chrono::Utc::now().timestamp_millis()
+    );
+    let mut task = crate::domain::ai_task::AiTaskExecution::new(
+        &task_id,
+        crate::domain::ai_task::AiTaskType::DomainDetection,
+        job_id,
+        model_meta.clone(),
+        chrono::Utc::now().to_rfc3339(),
+    )
+    .with_hashes(&canonical_hash, "1.0.0");
+    task.mark_running(chrono::Utc::now().to_rfc3339());
+    {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        let _ = crate::application::knowledge_service::save_ai_task_execution(&db, &task);
+    }
+
+    // 4. Ejecutar detector de dominio
+    let start_time = std::time::Instant::now();
+    let provider =
+        crate::application::local_ai_provider::LocalAiProvider::Sidecar(state.local_llm.clone());
+    let classification = match crate::application::domain_detector::DomainDetector::detect(
+        &package, &provider,
+    )
+    .await
+    {
+        Ok(c) => c,
+        Err(err) => {
+            let elapsed_ms = start_time.elapsed().as_millis() as u64;
+            task.mark_failed(
+                "domain_detection_error",
+                err.to_string(),
+                elapsed_ms,
+                chrono::Utc::now().to_rfc3339(),
+            );
+            if let Ok(db) = state.db.lock() {
+                let _ = crate::application::knowledge_service::save_ai_task_execution(&db, &task);
+            }
+            return Err(format!("Domain detection failed: {err}"));
+        }
+    };
+
+    let elapsed_ms = start_time.elapsed().as_millis() as u64;
+    let out_hash = format!(
+        "{:x}",
+        Sha256::digest(
+            serde_json::to_string(&classification)
+                .unwrap_or_default()
+                .as_bytes()
+        )
+    );
+    task.mark_completed(
+        Some(out_hash),
+        elapsed_ms,
+        None,
+        chrono::Utc::now().to_rfc3339(),
+    );
+
+    // 5. Persistir resultado y tarea completada
+    {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        crate::application::knowledge_service::save_domain_classification(
+            &db,
+            job_id,
+            &classification,
+            &model_meta,
+            &canonical_hash,
+        )
+        .map_err(|err| format!("Failed to persist domain classification: {err}"))?;
+        let _ = crate::application::knowledge_service::save_ai_task_execution(&db, &task);
+    }
+
+    Ok(classification)
+}
+
+/// Extrae y valida la receta estructurada de un job culinario.
+/// Si ya está persistida, la retorna directamente.
+/// En caso contrario, transforma la evidencia mediante [`RecipeTransformer`],
+/// valida deterministamente ingredientes, cantidades, unidades y marcas temporales,
+/// y persiste la receta y sus entidades semánticas.
+#[tauri::command]
+pub async fn extract_job_recipe(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<crate::domain::recipe::StructuredRecipe, String> {
+    let model_meta = state.local_llm.model_metadata();
+
+    // 1. Construir paquete de evidencia
+    let package = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        crate::application::editorial_evidence::build_evidence_package(&db, job_id)
+            .map_err(|err| format!("Error building evidence package: {err}"))?
+    };
+
+    let canonical_hash = package.compute_canonical_hash();
+
+    // 2. Verificar idempotencia en SQLite
+    {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        if let Ok(Some(_)) = crate::application::knowledge_service::find_completed_ai_task_execution(
+            &db,
+            job_id,
+            "recipe_transformation",
+            &model_meta.model_id,
+            &model_meta.prompt_version,
+            crate::domain::recipe::RECIPE_SCHEMA_VERSION,
+            &canonical_hash,
+        ) {
+            if let Ok(Some(existing)) =
+                crate::application::knowledge_service::get_structured_recipe(&db, job_id)
+            {
+                return Ok(existing);
+            }
+        }
+    }
+
+    // 3. Registrar ciclo de vida de tarea AI: RUNNING
+    let task_id = format!(
+        "task-recipe-{}-{}",
+        job_id,
+        chrono::Utc::now().timestamp_millis()
+    );
+    let mut task = crate::domain::ai_task::AiTaskExecution::new(
+        &task_id,
+        crate::domain::ai_task::AiTaskType::RecipeTransformation,
+        job_id,
+        model_meta.clone(),
+        chrono::Utc::now().to_rfc3339(),
+    )
+    .with_hashes(
+        &canonical_hash,
+        crate::domain::recipe::RECIPE_SCHEMA_VERSION,
+    );
+    task.mark_running(chrono::Utc::now().to_rfc3339());
+    {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        let _ = crate::application::knowledge_service::save_ai_task_execution(&db, &task);
+    }
+
+    // 4. Ejecutar RecipeTransformer con Local AI
+    let start_time = std::time::Instant::now();
+    let provider =
+        crate::application::local_ai_provider::LocalAiProvider::Sidecar(state.local_llm.clone());
+    let transformer = crate::application::transformers::recipe::RecipeTransformer::new();
+    let recipe = match transformer.transform(&package, &provider).await {
+        Ok(r) => r,
+        Err(err) => {
+            let elapsed_ms = start_time.elapsed().as_millis() as u64;
+            task.mark_failed(
+                "recipe_transformation_error",
+                err.to_string(),
+                elapsed_ms,
+                chrono::Utc::now().to_rfc3339(),
+            );
+            if let Ok(db) = state.db.lock() {
+                let _ = crate::application::knowledge_service::save_ai_task_execution(&db, &task);
+            }
+            return Err(format!("Recipe transformation failed: {err}"));
+        }
+    };
+
+    let elapsed_ms = start_time.elapsed().as_millis() as u64;
+    let out_hash = format!(
+        "{:x}",
+        Sha256::digest(
+            serde_json::to_string(&recipe)
+                .unwrap_or_default()
+                .as_bytes()
+        )
+    );
+
+    let status = if recipe.conflicts.is_empty() {
+        task.mark_completed(
+            Some(out_hash),
+            elapsed_ms,
+            None,
+            chrono::Utc::now().to_rfc3339(),
+        );
+        "completed"
+    } else {
+        task.mark_requires_review(
+            "Recipe contains conflicting ingredient quantities",
+            elapsed_ms,
+            chrono::Utc::now().to_rfc3339(),
+        );
+        "requires_review"
+    };
+
+    // 5. Persistir receta estructurada (con dual-save genérico y proyección de entidades)
+    {
+        let mut db = state
+            .db
+            .lock()
+            .map_err(|_| "Database mutex poisoned".to_string())?;
+        crate::application::knowledge_service::save_structured_recipe(
+            &mut db,
+            job_id,
+            &recipe,
+            status,
+            &[],
+            &model_meta,
+            &canonical_hash,
+        )
+        .map_err(|err| format!("Failed to persist structured recipe: {err}"))?;
+        let _ = crate::application::knowledge_service::save_ai_task_execution(&db, &task);
+    }
+
+    Ok(recipe)
+}
+
+/// Obtiene el historial de tareas de IA ejecutadas para un job.
+#[tauri::command]
+pub async fn get_job_ai_tasks(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::domain::ai_task::AiTaskExecution>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::knowledge_service::get_ai_task_executions_for_job(&db, job_id)
+        .map_err(|err| format!("Failed to query AI tasks: {err}"))
+}
+
+/// Obtiene los documentos estructurados canónicos persistidos para un job.
+#[tauri::command]
+pub async fn get_job_structured_documents(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::application::knowledge_service::StructuredDocumentRecord>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::knowledge_service::get_structured_documents_for_job(&db, job_id)
+        .map_err(|err| format!("Failed to query structured documents: {err}"))
+}
+
+/// Obtiene la receta estructurada persistida para un job, si existe.
+#[tauri::command]
+pub async fn get_job_recipe(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::domain::recipe::StructuredRecipe>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::knowledge_service::get_structured_recipe(&db, job_id)
+        .map_err(|err| format!("Failed to query recipe: {err}"))
+}
+
+/// Obtiene la clasificación de dominio persistida para un job, si existe.
+#[tauri::command]
+pub async fn get_job_domain(
+    job_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::domain::semantic::DomainClassification>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::knowledge_service::get_domain_classification(&db, job_id)
+        .map_err(|err| format!("Failed to query domain: {err}"))
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct RecipeSearchHit {
+    pub job_id: i64,
+    pub recipe_title: String,
+    pub matched_ingredient: String,
+}
+
+/// Búsqueda de recetas por ingrediente indexado en SQLite.
+#[tauri::command]
+pub async fn search_recipes_by_ingredient(
+    ingredient: String,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<RecipeSearchHit>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    let raw = crate::application::knowledge_service::search_recipes_by_ingredient(
+        &db,
+        &ingredient,
+        limit.unwrap_or(20),
+    )
+    .map_err(|err| format!("Ingredient search failed: {err}"))?;
+    Ok(raw
+        .into_iter()
+        .map(
+            |(job_id, recipe_title, matched_ingredient)| RecipeSearchHit {
+                job_id,
+                recipe_title,
+                matched_ingredient,
+            },
+        )
+        .collect())
+}
+
+// ============================================================================
+// MODEL BENCHMARK & INTELLIGENCE SELECTION (Fase 04)
+// Engine reutilizable: registry + dataset + runner + metricas + reporte.
+// No toca el path E2E de recetas; solo anade comandos de benchmark.
+// ============================================================================
+
+/// Lista modelos TextLLM evaluables del registro con su factibilidad hardware.
+#[tauri::command]
+pub async fn benchmark_list_models() -> Result<Vec<serde_json::Value>, String> {
+    use crate::domain::benchmark::ModelKind;
+    use crate::domain::model_registry::{HardwareConstraints, ModelRegistry};
+    let registry = ModelRegistry::default();
+    let hw = HardwareConstraints::default();
+    let models: Vec<serde_json::Value> = registry
+        .list_by_kind(ModelKind::TextLlm)
+        .into_iter()
+        .map(|m| {
+            serde_json::json!({
+                "model_id": m.id,
+                "display_name": m.display_name_or_id(),
+                "provider": m.provider,
+                "family": m.family,
+                "parameter_count": m.parameter_count,
+                "quantization": m.quantization,
+                "format": m.format,
+                "file_size_bytes": m.file_size_bytes,
+                "context_window": m.context_length,
+                "chat_capable": m.chat_capable,
+                "structured_output": m.structured_output,
+                "json_capable": m.json_capable,
+                "tool_capable": m.tool_capable,
+                "vision_capable": m.vision_capable,
+                "language_support": m.languages,
+                "license_metadata": m.license_metadata,
+                "runtime": m.runtime,
+                "hardware_requirements": m.hardware_requirements,
+                "architecture": m.architecture,
+                "selection_status": m.selection_status.as_str(),
+                "last_benchmark": m.last_benchmark,
+                "observed": m.observed,
+                "feasibility": m.feasibility(&hw).as_str(),
+            })
+        })
+        .collect();
+    Ok(models)
+}
+
+/// Perfil de hardware real detectado (sin hardcodear).
+#[tauri::command]
+pub async fn benchmark_hardware_profile(
+) -> Result<crate::domain::benchmark::HardwareProfile, String> {
+    Ok(crate::infrastructure::hardware_probe::detect_hardware_profile())
+}
+
+/// Ejecuta el benchmark offline determinista (mock ideal) sin GPU/sidecar.
+/// level: "SMOKE" | "STANDARD" | "FULL". Guarda JSON en data/benchmarks.
+#[tauri::command]
+pub async fn benchmark_run_offline(
+    level: Option<String>,
+    repeats: Option<u32>,
+) -> Result<Vec<crate::domain::benchmark::ModelBenchmarkResult>, String> {
+    use crate::application::benchmark_dataset::dataset_for_level;
+    use crate::application::benchmark_runner::{
+        assign_pareto, load_candidate_models, rank_models, MockExecutor,
+    };
+    use crate::domain::benchmark::{
+        BenchmarkLevel, BenchmarkMode, BenchmarkRunConfig, RuntimeConfig,
+    };
+    let lvl = BenchmarkLevel::from_str_canonical(level.as_deref().unwrap_or("SMOKE"));
+    let cases = dataset_for_level(lvl);
+    let config = BenchmarkRunConfig {
+        level: lvl,
+        mode: BenchmarkMode::Deterministic,
+        repeats: repeats.unwrap_or(1).clamp(1, 5),
+        runtime: RuntimeConfig::default(),
+        model_ids: vec![],
+        task_filter: vec![],
+    };
+    let hardware = crate::infrastructure::hardware_probe::detect_hardware_profile();
+    let cfg_path = crate::db::data_dir_path().join("benchmark-models.json");
+    let cfg_str = cfg_path.to_string_lossy().to_string();
+    let cfg_opt = if cfg_path.is_file() {
+        Some(cfg_str.as_str())
+    } else {
+        Some("data/benchmark-models.json")
+    };
+    let models = load_candidate_models(cfg_opt);
+    let executor = MockExecutor::ideal();
+    let mut results = Vec::new();
+    for m in &models {
+        results.push(
+            crate::application::benchmark_runner::run_model_benchmark(
+                m, &cases, &config, &hardware, &executor,
+            )
+            .await,
+        );
+    }
+    assign_pareto(&mut results);
+    rank_models(&mut results);
+    let dir = crate::db::data_dir_path().join("benchmarks");
+    let _ = crate::application::benchmark_report::persist_results(&results, &dir);
+    Ok(results)
+}
+
+/// Snapshot de memoria GPU/sistema con metodo declarado (Fase 05).
+/// Nunca estima: sin profiler disponible devuelve `UNAVAILABLE`.
+#[tauri::command]
+pub async fn benchmark_memory_snapshot() -> Result<crate::domain::benchmark::MemoryMetrics, String>
+{
+    let before = crate::infrastructure::vram_probe::snapshot_vram();
+    Ok(crate::infrastructure::vram_probe::memory_metrics_from_snapshots(&before, None, &None))
+}
+
+/// Info del dataset (versiones, conteos, hash) para trazabilidad §22.
+#[tauri::command]
+pub async fn benchmark_dataset_info() -> Result<serde_json::Value, String> {
+    use crate::application::benchmark_dataset::{
+        build_dataset_v1, dataset_for_level, dataset_hash, dataset_version,
+    };
+    use crate::domain::benchmark::BenchmarkLevel;
+    let all = build_dataset_v1();
+    Ok(serde_json::json!({
+        "dataset_version": dataset_version(),
+        "dataset_hash": dataset_hash(&all),
+        "benchmark_version": crate::domain::benchmark::BENCHMARK_VERSION,
+        "smoke_cases": dataset_for_level(BenchmarkLevel::Smoke).len(),
+        "standard_cases": dataset_for_level(BenchmarkLevel::Standard).len(),
+        "full_cases": dataset_for_level(BenchmarkLevel::Full).len(),
+        "prompt_minimal": "bench-prompt-minimal-v1.0.0",
+        "prompt_production": "bench-prompt-production-v1.0.0",
+    }))
+}
+
+/// Encamina una tarea hacia el modelo local optimo segun requerimientos y evidencia de benchmark.
+#[tauri::command]
+pub async fn route_task(
+    reqs: crate::domain::routing::TaskRequirements,
+) -> Result<crate::domain::routing::RoutingDecision, String> {
+    let router = crate::application::capability_router::CapabilityRouter::new();
+    router.route_task(&reqs).map_err(|e| e.to_string())
+}
+
+/// Genera la explicacion detallada y auditable de una decision de routing.
+#[tauri::command]
+pub async fn explain_routing(
+    reqs: crate::domain::routing::TaskRequirements,
+) -> Result<String, String> {
+    let router = crate::application::capability_router::CapabilityRouter::new();
+    router
+        .explain(&reqs)
+        .map(|exp| exp.formatted_explanation)
+        .map_err(|e| e.to_string())
+}
+
+/// Retorna los perfiles de capacidades respaldados por benchmark de todos los modelos registrados.
+#[tauri::command]
+pub async fn get_model_capability_profiles(
+) -> Result<Vec<crate::domain::routing::ModelCapabilityProfile>, String> {
+    let router = crate::application::capability_router::CapabilityRouter::new();
+    Ok(router.get_profiles())
 }
 
 #[cfg(test)]

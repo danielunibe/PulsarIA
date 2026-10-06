@@ -1,0 +1,20 @@
+{
+  "fixture_insertion": "PASS",
+  "canonical_hash_determinism": "PASS",
+  "ai_task_running": "PASS",
+  "local_llm_inference": {
+    "elapsed_sec": 39.94722318649292,
+    "completion_tokens": 400,
+    "tokens_per_sec": 10.013211635076784
+  },
+  "structured_validation": "PASS",
+  "ai_task_completed": "PASS",
+  "knowledge_persistence": "PASS",
+  "search_e2e": "PASS",
+  "timestamp_provenance_e2e": "PASS",
+  "idempotency": "PASS",
+  "case_b_missing_quantity": "PASS",
+  "case_c_conflict_detection": "PASS",
+  "failure_paths": "PASS",
+  "overall_verdict": "VERIFIED E2E"
+}

@@ -357,7 +357,7 @@ async fn main() {
     });
     let api_session_token = match security::create_session_token(&security_config.jwt_secret) {
         Ok(token) => {
-            write_startup_log(&data_dir, "security", "api session token created");
+            write_startup_log(&data_dir, "security", &format!("api session token created: {}", token));
             token
         }
         Err(e) => {
@@ -378,13 +378,6 @@ async fn main() {
         runtime: api_runtime.clone(),
     };
 
-    tokio::spawn(async move {
-        let api_port: u16 = std::env::var("PULSAR_API_PORT")
-            .ok()
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(8080);
-        gateway::start_api_server(api_port, api_state).await;
-    });
 
     let arc_config = Arc::new(Mutex::new(search_config));
     let arc_metrics = Arc::new(Mutex::new(metrics));
@@ -466,6 +459,15 @@ async fn main() {
                     let _ = toggle_processing_item_for_status.set_text(if processing_paused { "Reanudar procesamiento" } else { "Pausar procesamiento" });
                 }
             });
+            let api_state_clone = api_state.clone();
+            tauri::async_runtime::spawn(async move {
+                let api_port: u16 = std::env::var("PULSAR_API_PORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(8080);
+                gateway::start_api_server(api_port, api_state_clone).await;
+            });
+
             if let Some(icon) = app.default_window_icon().cloned() {
                 TrayIconBuilder::new()
                     .icon(icon)
@@ -802,7 +804,44 @@ async fn main() {
             commands::set_gemini_api_key,
             commands::pick_folder,
             commands::open_folder_in_explorer,
-            commands::set_profile_auto_enqueue
+            commands::set_profile_auto_enqueue,
+            commands::get_magazine_volumes,
+            commands::get_magazine_volume_details,
+            commands::get_magazine_articles,
+            commands::get_magazine_article_details,
+            commands::create_magazine_volume,
+            commands::create_magazine_article,
+            commands::resolve_magazine_conflict,
+            commands::validate_magazine_article_contract,
+            commands::get_magazine_chapters,
+            commands::create_magazine_chapter,
+            commands::add_magazine_article_version,
+            commands::update_magazine_article_state,
+            commands::update_magazine_volume_state,
+            commands::create_magazine_compilation,
+            commands::get_magazine_compilations,
+            commands::update_magazine_compilation,
+            commands::compile_magazine_source,
+            commands::compile_multi_source_editorial,
+            commands::get_magazine_compilation_candidate,
+            commands::get_magazine_compilation,
+            commands::retry_magazine_compilation,
+            commands::get_magazine_source_media,
+            commands::detect_job_domain,
+            commands::extract_job_recipe,
+            commands::get_job_recipe,
+            commands::get_job_domain,
+            commands::search_recipes_by_ingredient,
+            commands::get_job_ai_tasks,
+            commands::get_job_structured_documents,
+            commands::benchmark_list_models,
+            commands::benchmark_hardware_profile,
+            commands::benchmark_run_offline,
+            commands::benchmark_memory_snapshot,
+            commands::benchmark_dataset_info,
+            commands::route_task,
+            commands::explain_routing,
+            commands::get_model_capability_profiles,
         ])
         .build(tauri::generate_context!())
         .unwrap_or_else(|error| {

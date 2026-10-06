@@ -37,11 +37,22 @@ export const PulsariaIcon = ({ size = 28, className = '' }: { size?: number; cla
 );
 
 const WindowGlyph = ({ kind }: { kind: 'minimize' | 'maximize' | 'restore' | 'close' }) => (
-    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        {kind === 'minimize' && <path d="M4 10h12" />}
-        {kind === 'maximize' && <rect x="4.5" y="4.5" width="11" height="11" rx="1.5" />}
-        {kind === 'restore' && <path d="M7 5h8v8M5 8v7h8" />}
-        {kind === 'close' && <path d="m5 5 10 10M15 5 5 15" />}
+    <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {kind === 'minimize' && (
+            <>
+                <path d="M4.5 10h11" />
+                <circle cx="10" cy="10" r="0.4" fill="currentColor" stroke="none" />
+            </>
+        )}
+        {kind === 'maximize' && <rect x="4.5" y="4.5" width="11" height="11" rx="2.5" />}
+        {kind === 'restore' && (
+            <>
+                <rect x="7" y="4.5" width="8.5" height="8.5" rx="2" opacity="0.95" />
+                <path d="M7 8.5v-1a2 2 0 0 1 2-2h6.5" opacity="0.6" />
+                <path d="M4.5 11.5v3a2 2 0 0 0 2 2h4" opacity="0.6" />
+            </>
+        )}
+        {kind === 'close' && <path d="m5.5 5.5 9 9M14.5 5.5l-9 9" />}
     </svg>
 );
 
@@ -99,6 +110,7 @@ export function useWindowControls(onClose?: () => Promise<void> | void): WindowC
 
     const maximize = async () => {
         markWindowAction('maximize');
+        playWindowZoom();
         try {
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             const currentWindow = getCurrentWindow();
@@ -111,6 +123,11 @@ export function useWindowControls(onClose?: () => Promise<void> | void): WindowC
 
     const close = async () => {
         markWindowAction('close');
+        const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (typeof document !== 'undefined' && !reduced) {
+            document.documentElement.dataset.leaving = 'true';
+            await new Promise((resolve) => window.setTimeout(resolve, 300));
+        }
         try {
             if (onClose) {
                 await onClose();
@@ -119,6 +136,7 @@ export function useWindowControls(onClose?: () => Promise<void> | void): WindowC
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             await getCurrentWindow().close();
         } catch (error) {
+            if (typeof document !== 'undefined') delete document.documentElement.dataset.leaving;
             reportWindowError('cerrar', error);
         }
     };
@@ -194,12 +212,25 @@ export function WindowControls({ controls }: { controls: WindowControlsApi }) {
                 transition={{ duration: 0.28 }}
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.95 }}
-                className="pulsaria-window-control flex items-center justify-center text-white/55 transition-colors hover:text-rose-200 cursor-pointer app-no-drag"
+                className="pulsaria-window-control pulsaria-window-control--close flex items-center justify-center text-white/55 transition-colors hover:text-rose-200 cursor-pointer app-no-drag"
             >
                 <WindowGlyph kind="close" />
             </motion.button>
         </div>
     );
+}
+
+/** Pulso de zoom al maximizar/restaurar: la ventana nativa cambia al instante,
+    esta animación viste la transición. */
+function playWindowZoom() {
+    if (typeof document === 'undefined') return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const frame = document.querySelector('.pulsaria-window-frame');
+    if (!(frame instanceof HTMLElement)) return;
+    frame.classList.remove('is-zooming');
+    void frame.offsetWidth;
+    frame.classList.add('is-zooming');
+    window.setTimeout(() => frame.classList.remove('is-zooming'), 320);
 }
 
 function startWindowDrag(event: ReactMouseEvent<HTMLElement>) {
@@ -285,11 +316,9 @@ export function Header({
             <div aria-hidden="true" className="pulsaria-window-header__wash absolute inset-x-0 top-0 pointer-events-none select-none overflow-hidden" style={{ zIndex: 0 }} />
 
             <div className="pulsaria-window-header__topbar w-full min-w-0 relative z-10 self-start pointer-events-none">
-                <div className="pulsaria-window-header__brand min-w-0 flex items-center gap-2.5 overflow-visible pointer-events-auto">
-                    <div className="flex items-center gap-2.5" aria-label="Pulsaria">
-                        <span className="text-sm font-black tracking-[0.18em] text-white/90">Pulsaria</span>
-                    </div>
-                </div>
+                {/* La marca vive en el sidebar; el header reserva la zona
+                    izquierda como espacio de arrastre sin duplicarla. */}
+                <div className="pulsaria-window-header__brand-spacer min-w-0 pointer-events-auto" aria-hidden="true" />
 
                 <div className="pulsaria-window-header__center-tools app-no-drag" ref={headerToolsRef}>
                     <div className="pulsaria-header-tool-buttons">
@@ -313,7 +342,7 @@ export function Header({
                             aria-controls="pulsaria-filter-popover"
                             onClick={() => setOpenHeaderPanel((current) => current === 'filters' ? null : 'filters')}
                         >
-                            <FaFilter size={15} />
+                            <FaFilter size={16} />
                         </button>
                     </div>
                     {showTikTokPill && (

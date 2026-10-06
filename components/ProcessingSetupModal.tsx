@@ -89,6 +89,24 @@ const SETUP_STEP_LABELS: Array<{ id: Exclude<SetupStep, 'runtime' | 'success'>; 
   { id: 'model', label: 'onboardingStageModel' },
 ];
 
+// El primer arranque se separa en tiempos: cada paso pertenece a una fase.
+// Fase 1 · Primer arranque (welcome/hardware/language), Fase 2 · Preferencias
+// (intent/storage), Fase 3 · Plan de preparación (model).
+const SETUP_STEP_PHASES: Record<Exclude<SetupStep, 'runtime' | 'success'>, 0 | 1 | 2> = {
+  welcome: 0,
+  hardware: 0,
+  language: 0,
+  intent: 1,
+  storage: 1,
+  model: 2,
+};
+
+const SETUP_PHASE_LABELS = [
+  'onboardingPhaseBoot',
+  'onboardingPhasePreferences',
+  'onboardingPhasePreparation',
+] as const satisfies ReadonlyArray<TranslationKey>;
+
 function formatMemory(bytes: number | null | undefined) {
   if (!bytes) return 'No disponible';
   const value = bytes / GIB;
@@ -353,6 +371,9 @@ export function ProcessingSetupModal({
       ? !localeSelected ? 'welcome' : processing?.configured ? 'model' : 'welcome'
       : step;
   const stepIndex = Math.max(0, setupSteps.findIndex((item) => item.id === effectiveStep));
+  const activePhase: 0 | 1 | 2 = effectiveStep === 'runtime' || effectiveStep === 'success'
+    ? 0
+    : SETUP_STEP_PHASES[effectiveStep];
   const suggestedIntent = deriveIntent(answers);
 
   useEffect(() => {
@@ -795,6 +816,21 @@ export function ProcessingSetupModal({
                 <strong>{Math.max(1, stepIndex + 1).toString().padStart(2, '0')}</strong>
                 <small>/ {setupSteps.length.toString().padStart(2, '0')}</small>
               </div>
+              <ol className={styles.phaseTimeline} aria-label={t('onboardingPhaseTimeline')} data-active-phase={activePhase + 1}>
+                {SETUP_PHASE_LABELS.map((phaseKey, phaseIndex) => (
+                  <li
+                    key={phaseKey}
+                    className={styles.phaseItem}
+                    data-active={phaseIndex <= activePhase}
+                    data-current={phaseIndex === activePhase}
+                    data-phase={phaseIndex === 2 ? 'preparation' : phaseIndex === 1 ? 'preferences' : 'boot'}
+                    aria-current={phaseIndex === activePhase ? 'step' : undefined}
+                  >
+                    <span className={styles.phaseDot} aria-hidden="true">{phaseIndex < activePhase ? <FaCheck size={8} /> : phaseIndex + 1}</span>
+                    <span className={styles.phaseLabel}>{t(phaseKey)}</span>
+                  </li>
+                ))}
+              </ol>
               <ol className={styles.stepRail} aria-label={t('onboardingProgress')}>
                 {setupSteps.map((item, index) => (
                   <li key={item.id} className={styles.stepItem} data-active={index <= stepIndex} data-current={index === stepIndex} aria-current={index === stepIndex ? 'step' : undefined}>
@@ -863,7 +899,7 @@ export function ProcessingSetupModal({
           )}
 
           {effectiveStep !== 'runtime' && effectiveStep !== 'success' && (
-            <div className={styles.layout}>
+            <div className={styles.layout} data-onboarding-phase={activePhase === 2 ? 'preparation' : activePhase === 1 ? 'preferences' : 'boot'}>
               <div className={styles.controls}>
                 {effectiveStep === 'welcome' && (
                   <div className={styles.welcomeStep}>
@@ -1098,7 +1134,10 @@ export function ProcessingSetupModal({
                 )}
 
                 {effectiveStep === 'model' && (
-                  <div className={styles.stepContent}>
+                  <div className={styles.stepContent} data-onboarding-phase="preparation">
+                    <div className={styles.phaseBanner} data-onboarding-phase="preparation">
+                      <span className={styles.phaseBannerChip}>Fase 3 · {t('onboardingPhasePreparation')}</span>
+                    </div>
                     <p className={styles.sectionEyebrow}>{t('onboardingStageModel')}</p>
                     <h3 data-setup-step-heading="true" tabIndex={-1} className={styles.controlTitle}>Elige tu nivel de análisis</h3>
                     <p className={styles.controlDescription}>Whisper tiny viene incluido para arrancar offline. Small y medium son opcionales y se preparan solo cuando confirmas.</p>

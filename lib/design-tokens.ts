@@ -64,10 +64,17 @@ export const SIZE = {
 
 // ── Border Radius ─────────────────────────────────────────────
 export const RADIUS = {
-    sm: '8px',
-    md: '14px',
-    lg: '20px',
-    xl: '28px',
+    xs: '4px',
+    sm: '6px',
+    md: '8px',
+    DEFAULT: '10px',
+    lg: '12px',
+    xl: '14px',
+    xl2: '16px',
+    xl3: '18px',
+    xxl: '20px',
+    xxxl: '22px',
+    button: '999px',
     card: '24px',
 } as const;
 

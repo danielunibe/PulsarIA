@@ -36,12 +36,12 @@ interface ActivityCenterProps {
 }
 
 const TONE_CLASS = {
-  accent: 'text-[#fe2c55] border-[#fe2c55]/35 bg-[#fe2c55]/[.08]',
-  cyan: 'text-[#65e6e0] border-[#65e6e0]/30 bg-[#65e6e0]/[.07]',
+  accent: 'text-[var(--color-status-accent)] border-[var(--color-status-accent)]/35 bg-[var(--color-status-accent)]/[.08]',
+  cyan: 'text-[var(--color-status-cyan)] border-[var(--color-status-cyan)]/30 bg-[var(--color-status-cyan)]/[.07]',
   muted: 'text-white/55 border-white/10 bg-white/[.035]',
-  success: 'text-[#9ee6bd] border-[#9ee6bd]/25 bg-[#9ee6bd]/[.07]',
-  error: 'text-[#ff8299] border-[#fe2c55]/35 bg-[#fe2c55]/[.09]',
-  warning: 'text-[#ffd27d] border-[#ffd27d]/25 bg-[#ffd27d]/[.07]',
+  success: 'text-[var(--color-status-success)] border-[var(--color-status-success)]/25 bg-[var(--color-status-success)]/[.07]',
+  error: 'text-[var(--color-status-error)] border-[var(--color-status-error)]/35 bg-[var(--color-status-error)]/[.09]',
+  warning: 'text-[var(--color-status-warning)] border-[var(--color-status-warning)]/25 bg-[var(--color-status-warning)]/[.07]',
 } as const;
 
 const FILTERS: Array<{ id: ActivityFilter; label: string }> = [
@@ -108,16 +108,16 @@ function ActivityRow({
           </span>
           {hasProgress && !isPending && (
             <span className="mt-2 block h-1 overflow-hidden rounded-full bg-white/[.08]" aria-label={`${progress}%`}>
-              <span className={`block h-full rounded-full ${presentation.tone === 'accent' ? 'bg-[#fe2c55]' : 'bg-[#65e6e0]'}`} style={{ width: `${progress}%` }} />
+              <span className={`block h-full rounded-full ${presentation.tone === 'accent' ? 'bg-[var(--color-status-accent)]' : 'bg-[var(--color-status-cyan)]'}`} style={{ width: `${progress}%` }} />
             </span>
           )}
           {!isPending && isActivityError(job.status) && job.error_message && (
-            <span className="mt-2 block truncate text-[10px] text-[#ff8299]/75">{job.error_message}</span>
+            <span className="mt-2 block truncate text-[10px] text-[var(--color-status-error)]/75">{job.error_message}</span>
           )}
           {isPending && job.status === 'retryable' && (
-            <span className="mt-2 flex items-center justify-between gap-2 text-[10px] text-[#ff8299]/75">
+            <span className="mt-2 flex items-center justify-between gap-2 text-[10px] text-[var(--color-status-error)]/75">
               <span className="truncate">No se pudo enviar el enlace.</span>
-              {onRetry && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); onRetry(); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.stopPropagation(); onRetry(); } }} className="shrink-0 font-black uppercase tracking-wider text-[#ff8299]">Reintentar</span>}
+              {onRetry && <span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); onRetry(); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.stopPropagation(); onRetry(); } }} className="shrink-0 font-black uppercase tracking-wider text-[var(--color-status-error)]">Reintentar</span>}
             </span>
           )}
         </span>
@@ -175,9 +175,9 @@ function Inspector({
             const reached = isComplete || (presentation.stage > 0 && index < presentation.stage);
             const current = !isComplete && !isError && index === presentation.stage;
             return <div key={stage} className="flex items-center gap-2 text-[10px]">
-              <span className={`h-1.5 w-1.5 rounded-full ${reached ? 'bg-[#9ee6bd]' : current ? 'bg-[#65e6e0] shadow-[0_0_8px_rgba(101,230,224,.8)]' : 'bg-white/15'}`} />
+              <span className={`h-1.5 w-1.5 rounded-full ${reached ? 'bg-[var(--color-status-success)]' : current ? 'bg-[var(--color-status-cyan)] shadow-[0_0_8px_rgba(101,230,224,.8)]' : 'bg-white/15'}`} />
               <span className={reached || current ? 'text-white/75' : 'text-white/30'}>{stage}</span>
-              {current && <span className="ml-auto text-[9px] uppercase tracking-wider text-[#65e6e0]">actual</span>}
+              {current && <span className="ml-auto text-[9px] uppercase tracking-wider text-[var(--color-status-cyan)]">actual</span>}
             </div>;
           })}
         </div>
@@ -185,8 +185,8 @@ function Inspector({
 
       {isError && (
         <div className="border-b border-white/[.08] py-4">
-          <p className="text-[10px] font-semibold text-[#ff8299]">{job.error_message || 'Pulsaria no pudo completar este trabajo.'}</p>
-          <button type="button" onClick={onRetry} className="mt-3 rounded-lg border border-[#fe2c55]/35 bg-[#fe2c55]/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[#ff8299] hover:bg-[#fe2c55]/20">Reintentar</button>
+          <p className="text-[10px] font-semibold text-[var(--color-status-error)]">{job.error_message || 'Pulsaria no pudo completar este trabajo.'}</p>
+          <button type="button" onClick={onRetry} className="mt-3 rounded-lg border border-[var(--color-status-accent)]/35 bg-[var(--color-status-accent)]/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[var(--color-status-error)] hover:bg-[var(--color-status-accent)]/20">Reintentar</button>
         </div>
       )}
       {isComplete && (
@@ -199,9 +199,9 @@ function Inspector({
           {loading && <span className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white" />}
         </div>
         {error ? (
-          <div role="alert" className="text-[10px] leading-relaxed text-[#ff8299]">
+          <div role="alert" className="text-[10px] leading-relaxed text-[var(--color-status-error)]">
             <p>{error}</p>
-            <button type="button" onClick={onRetryEvents} className="mt-2 rounded-md bg-[#fe2c55]/10 px-2.5 py-1.5 font-bold text-[#ff9bad] hover:bg-[#fe2c55]/20">Reintentar historial</button>
+            <button type="button" onClick={onRetryEvents} className="mt-2 rounded-md bg-[var(--color-status-accent)]/10 px-2.5 py-1.5 font-bold text-[var(--color-status-error)] hover:bg-[var(--color-status-accent)]/20">Reintentar historial</button>
           </div>
         ) : events.length === 0 && !loading ? (
           <p className="text-[10px] leading-relaxed text-white/35">Este trabajo no tiene transiciones históricas persistidas. Se muestra únicamente el estado actual del registro.</p>
@@ -212,7 +212,7 @@ function Inspector({
                 <span className="absolute left-0 top-1.5 h-1.5 w-1.5 rounded-full bg-white/45" />
                 <p className="text-[10px] text-white/70">{eventLabel(event)}{event.progress > 0 ? ` · ${event.progress}%` : ''}</p>
                 <p className="mt-0.5 font-mono text-[9px] text-white/30">{event.created_at}</p>
-                {event.error_code && <p className="mt-1 font-mono text-[9px] text-[#ff8299]/75">{event.error_code}</p>}
+                {event.error_code && <p className="mt-1 font-mono text-[9px] text-[var(--color-status-error)]/75">{event.error_code}</p>}
               </div>
             ))}
           </div>
@@ -272,9 +272,9 @@ export function ActivityCenter({ jobs, pending, loading, ready, error, globalPro
           <div className="text-right"><p className="font-mono text-[12px] text-white/75">{ready ? `${globalProgress}%` : '—'}</p><p className="text-[8px] uppercase tracking-[.12em] text-white/30">promedio activo</p></div>
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2 border-y border-white/[.08] py-2.5">
-          <div><p className="font-mono text-[15px] text-[#65e6e0]">{ready ? processingCount : '—'}</p><p className="text-[8px] uppercase tracking-wider text-white/30">Procesando</p></div>
+          <div><p className="font-mono text-[15px] text-[var(--color-status-cyan)]">{ready ? processingCount : '—'}</p><p className="text-[8px] uppercase tracking-wider text-white/30">Procesando</p></div>
           <div><p className="font-mono text-[15px] text-white/70">{ready ? queuedCount : '—'}</p><p className="text-[8px] uppercase tracking-wider text-white/30">En cola</p></div>
-          <div><p className="font-mono text-[15px] text-[#9ee6bd]">{ready ? completedCount : '—'}</p><p className="text-[8px] uppercase tracking-wider text-white/30">Completados</p></div>
+          <div><p className="font-mono text-[15px] text-[var(--color-status-success)]">{ready ? completedCount : '—'}</p><p className="text-[8px] uppercase tracking-wider text-white/30">Completados</p></div>
         </div>
       </div>
       <div className="flex gap-1 overflow-x-auto px-1 pb-1 custom-scrollbar" role="tablist" aria-label="Filtrar actividad">
@@ -282,7 +282,7 @@ export function ActivityCenter({ jobs, pending, loading, ready, error, globalPro
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-1 pb-1 custom-scrollbar">
         {loading && !ready && <p role="status" className="py-2 text-center text-[10px] text-white/45">Conectando con la actividad local…</p>}
-        {!loading && !ready && <div role="alert" className="rounded-xl bg-[#fe2c55]/10 px-3 py-3 text-[10px] leading-relaxed text-[#ff9bad]">
+        {!loading && !ready && <div role="alert" className="rounded-xl bg-[var(--color-status-accent)]/10 px-3 py-3 text-[10px] leading-relaxed text-[var(--color-status-error)]">
           <p>{error || 'No pudimos consultar la actividad local.'}</p>
           <button type="button" onClick={onRefresh} className="mt-2 rounded-md bg-white/[.07] px-2.5 py-1.5 font-bold text-white/75 hover:bg-white/10">Reintentar conexión</button>
         </div>}

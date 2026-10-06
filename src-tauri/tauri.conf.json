@@ -97,7 +97,7 @@
                 "fullscreen": false,
                 "decorations": false,
                 "shadow": false,
-                "transparent": false,
+                "transparent": true,
                 "center": true,
                 "visible": true,
                 "focus": true
