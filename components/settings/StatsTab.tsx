@@ -1,5 +1,6 @@
 import React from 'react';
 import { SectionCard, SectionTitle, StorageStatusUi, PurgeCandidateUi, PurgePreviewUi, formatStorageBytes, BYTES_PER_GIB } from './types';
+import { useI18n } from '@/lib/i18n';
 import { FaChartSimple, FaHardDrive, FaTrashCan, FaArrowRotateLeft, FaStar, FaThumbtack, FaCheck } from '@/components/icon-library';
 import { RetentionPolicy, StorageIntent } from '@/lib/settings-context';
 
@@ -88,6 +89,7 @@ export function StatsTab({
     isTauri,
     t,
 }: StatsTabProps) {
+    const { locale } = useI18n();
     return (
         <div className="flex flex-col gap-4">
             {/* Métricas de la Biblioteca */}
@@ -132,22 +134,22 @@ export function StatsTab({
                 <div className="grid grid-cols-2 gap-2 text-[10px]">
                     <div className="rounded-[14px] bg-black/35 p-3 shadow-inner">
                         <span className="block text-[9px] text-white/35">Espacio libre</span>
-                        <span className="font-mono text-sm font-bold text-white">{formatStorageBytes(storageStatus?.freeBytes)}</span>
-                        <span className="block text-[8px] text-white/25">de {formatStorageBytes(storageStatus?.totalBytes)}</span>
+                        <span className="font-mono text-sm font-bold text-white">{formatStorageBytes(storageStatus?.freeBytes, locale)}</span>
+                        <span className="block text-[8px] text-white/25">de {formatStorageBytes(storageStatus?.totalBytes, locale)}</span>
                     </div>
                     <div className="rounded-[14px] bg-black/35 p-3 shadow-inner">
                         <span className="block text-[9px] text-white/35">Uso de medios</span>
-                        <span className="font-mono text-sm font-bold text-white">{formatStorageBytes(storageStatus?.usedMediaBytes)}</span>
-                        <span className="block text-[8px] text-white/25">cuota: {formatStorageBytes(storageStatus?.quotaBytes)}</span>
+                        <span className="font-mono text-sm font-bold text-white">{formatStorageBytes(storageStatus?.usedMediaBytes, locale)}</span>
+                        <span className="block text-[8px] text-white/25">cuota: {formatStorageBytes(storageStatus?.quotaBytes, locale)}</span>
                     </div>
                     <div className="rounded-[14px] bg-black/35 p-3 shadow-inner">
                         <span className="block text-[9px] text-white/35">Reserva mínima</span>
-                        <span className="font-mono text-sm font-bold text-white">{formatStorageBytes(storageStatus?.reserveBytes)}</span>
+                        <span className="font-mono text-sm font-bold text-white">{formatStorageBytes(storageStatus?.reserveBytes, locale)}</span>
                         <span className="block text-[8px] text-white/25">margen libre para el SO</span>
                     </div>
                     <div className="rounded-[14px] bg-black/35 p-3 shadow-inner">
                         <span className="block text-[9px] text-white/35">Papelera reversible</span>
-                        <span className="font-mono text-sm font-bold text-white">{formatStorageBytes(storageStatus?.trashBytes)}</span>
+                        <span className="font-mono text-sm font-bold text-white">{formatStorageBytes(storageStatus?.trashBytes, locale)}</span>
                         <span className="block text-[8px] text-white/25">recuperable antes de vaciar</span>
                     </div>
                 </div>
@@ -330,7 +332,7 @@ export function StatsTab({
                             onClick={() => setTrashConfirming(true)}
                             className="rounded-[12px] bg-[#fe2c55]/15 hover:bg-[#fe2c55]/25 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[#fe2c55] transition-colors disabled:opacity-40 cursor-pointer"
                         >
-                            Vaciar papelera ({formatStorageBytes(storageStatus?.trashBytes)})
+                            Vaciar papelera ({formatStorageBytes(storageStatus?.trashBytes, locale)})
                         </button>
                     )}
 
@@ -364,7 +366,7 @@ export function StatsTab({
                                     {storageCandidates.length} archivos evaluados
                                 </span>
                                 <span className="block text-[9px] text-white/40">
-                                    {purgeSelection.length} seleccionados para purga ({formatStorageBytes(selectedPurgeBytes)})
+                                    {purgeSelection.length} seleccionados para purga ({formatStorageBytes(selectedPurgeBytes, locale)})
                                 </span>
                             </div>
                             <div className="flex gap-2">
@@ -433,7 +435,7 @@ export function StatsTab({
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-2 text-[8px] text-white/40 mt-0.5">
-                                                <span className="font-mono text-white/60">{formatStorageBytes(candidate.mediaBytes)}</span>
+                                                <span className="font-mono text-white/60">{formatStorageBytes(candidate.mediaBytes, locale)}</span>
                                                 {candidate.reasons.length > 0 && (
                                                     <span>· {candidate.reasons.join(', ')}</span>
                                                 )}
@@ -452,7 +454,7 @@ export function StatsTab({
                                 onClick={() => setPurgeConfirming(true)}
                                 className="w-full rounded-[12px] bg-amber-400/20 hover:bg-amber-400/30 py-2.5 text-[10px] font-black uppercase tracking-wider text-amber-200 transition-colors cursor-pointer"
                             >
-                                Mover {purgeSelection.length} videos a la papelera ({formatStorageBytes(selectedPurgeBytes)})
+                                Mover {purgeSelection.length} videos a la papelera ({formatStorageBytes(selectedPurgeBytes, locale)})
                             </button>
                         )}
 

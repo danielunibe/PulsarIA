@@ -667,7 +667,7 @@ export function SettingsPanel({
             setLastPurgeId(null);
             setTrashConfirming(false);
             setStorageMessage(Number.isFinite(freedBytes) && freedBytes > 0
-                ? `Papelera vaciada: ${formatStorageBytes(freedBytes)} liberados. El transcript, embeddings, metadata y artifacts permanecen intactos.`
+                ? `Papelera vaciada: ${formatStorageBytes(freedBytes, locale)} liberados. El transcript, embeddings, metadata y artifacts permanecen intactos.`
                 : 'La papelera interna ya estaba vacía. No se modificó el conocimiento local.');
             await refreshStorageStatus();
         } catch (error) {
@@ -1000,7 +1000,7 @@ export function SettingsPanel({
                 performanceProfileVersion: settings.performanceProfileVersion,
                 lastVerifiedAccelerators,
             });
-            toast.success(locale === 'en-US' ? 'Settings saved successfully' : 'Configuración guardada correctamente');
+            toast.success(t('settingsSaveSuccess'));
             onClose();
         } catch (error) {
             setSettingsError(error instanceof Error ? error.message : String(error));
@@ -1012,16 +1012,16 @@ export function SettingsPanel({
         .filter((candidate) => purgeSelection.includes(candidate.jobId))
         .reduce((total, candidate) => total + Math.max(0, candidate.mediaBytes), 0);
     const storageStateLabel = storageStatus?.state === 'quota-exceeded'
-        ? 'Cuota excedida'
+        ? t('settingsQuotaExceeded')
         : storageStatus?.state === 'quota-near'
-            ? 'Cerca de la cuota'
+            ? t('settingsQuotaNear')
             : storageStatus?.state === 'disk-low'
-                ? 'Disco bajo'
+                ? t('settingsDiskLow')
                 : storageStatus?.state === 'path-error'
-                    ? 'Ruta no disponible'
+                    ? t('settingsPathError')
                     : storageStatus
-                        ? 'Dentro de la cuota'
-                        : 'Medición pendiente';
+                        ? t('settingsWithinQuota')
+                        : t('settingsMeasurePending');
     const storageStateClass = storageStatus?.state === 'ok'
         ? 'text-emerald-400'
         : storageStatus?.state === 'quota-near' || storageStatus?.state === 'disk-low'
@@ -1352,12 +1352,12 @@ export function SettingsPanel({
                             >
                                 <div className="flex w-full max-w-sm flex-col gap-4 rounded-2xl border border-white/10 bg-[#0e1017] p-6 shadow-2xl">
                                     <div>
-                                        <h3 id="confirm-source-delete-title" className="text-sm font-bold text-white">¿Eliminar esta fuente?</h3>
+                                        <h3 id="confirm-source-delete-title" className="text-sm font-bold text-white">{t('settingsDeleteSource')}</h3>
                                         <p className="mt-2 break-words text-xs leading-relaxed text-white/45">
                                             {pendingSourceDelete.url}
                                         </p>
                                         <p className="mt-2 text-xs leading-relaxed text-white/55">
-                                            Los videos existentes se conservarán; solo se detendrá la sincronización de esta fuente.
+                                            {t('settingsDeleteSourceDesc')}
                                         </p>
                                     </div>
                                     <div className="flex gap-3">
@@ -1381,7 +1381,7 @@ export function SettingsPanel({
                                             }}
                                             className="flex-1 rounded-xl bg-[#fe2c55]/80 py-2 text-xs font-bold text-white transition-colors hover:bg-[#fe2c55] disabled:opacity-40"
                                         >
-                                            Eliminar
+                                            {t('settingsDelete')}
                                         </button>
                                     </div>
                                 </div>
@@ -1392,7 +1392,7 @@ export function SettingsPanel({
             <div className="px-5 py-4 border-t border-white/10">
                 {settingsError && (
                     <div role="alert" className="mb-3 rounded-xl border border-[#fe2c55]/30 bg-[#fe2c55]/10 px-3 py-2 text-[10px] leading-relaxed text-[#fe2c55]">
-                        No se pudo guardar la configuración: {settingsError}
+                        {t('settingsSaveError', { error: settingsError })}
                     </div>
                 )}
 
@@ -1400,10 +1400,10 @@ export function SettingsPanel({
                     <div className="mb-2.5 flex items-center justify-between px-1">
                         <span className="text-[10px] font-mono text-[#25f4ee] font-bold flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-[#25f4ee] animate-pulse" />
-                            {locale === 'en-US' ? 'Unsaved changes' : 'Cambios sin guardar'}
+                            {t('settingsUnsaved')}
                         </span>
                         <span className="text-[9px] text-white/40">
-                            {locale === 'en-US' ? 'Press Save to apply' : 'Pulsa Guardar para aplicar'}
+                            {t('settingsPressSave')}
                         </span>
                     </div>
                 )}

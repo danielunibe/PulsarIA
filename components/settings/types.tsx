@@ -6,8 +6,8 @@ import { FaFilm, FaMusic, FaFileLines } from '@/components/icon-library';
 
 export const BYTES_PER_GIB = 1024 ** 3;
 
-export function formatStorageBytes(bytes: number | null | undefined) {
-    if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return 'No medido';
+export function formatStorageBytes(bytes: number | null | undefined, locale: 'es-MX' | 'en-US' = 'es-MX') {
+    if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return locale === 'en-US' ? 'Not measured' : 'No medido';
     if (bytes >= BYTES_PER_GIB) return `${(bytes / BYTES_PER_GIB).toFixed(bytes >= 10 * BYTES_PER_GIB ? 0 : 1)} GiB`;
     return `${Math.max(0, Math.round(bytes / 1024 / 1024))} MiB`;
 }

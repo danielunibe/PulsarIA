@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { SectionCard, SectionTitle, formatStorageBytes } from './types';
+import { useI18n } from '@/lib/i18n';
 import { FaBrain, FaPlay, FaShieldHalved, FaWandMagicSparkles } from '@/components/icon-library';
 import { JobRecord } from '@/hooks/use-jobs';
 import { LocalLlmStatus } from '@/lib/local-llm';
@@ -46,6 +47,7 @@ export function AiTab({
     onPlaylistSelect,
     onClose,
 }: AiTabProps) {
+    const { t, locale } = useI18n();
     const [geminiActive, setGeminiActive] = useState<boolean | null>(null);
     const [apiKeyInput, setApiKeyInput] = useState('');
     const [isSavingKey, setIsSavingKey] = useState(false);
@@ -99,7 +101,7 @@ export function AiTab({
 
                 {localLlmStatus && localLlmStatus.totalBytes > 0 && localLlmStatus.state === 'downloading' && (
                     <div className="rounded-[14px] bg-black/35 p-3 text-[9px] text-white/60 shadow-inner">
-                        Descargando {formatStorageBytes(localLlmStatus.bytesDownloaded)} de {formatStorageBytes(localLlmStatus.totalBytes)}
+                        Descargando {formatStorageBytes(localLlmStatus.bytesDownloaded, locale)} de {formatStorageBytes(localLlmStatus.totalBytes, locale)}
                         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
                             <div
                                 className="h-full rounded-full bg-[#8a5cff] transition-all"
