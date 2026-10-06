@@ -38,6 +38,7 @@ import {
     type MagazineEvidenceTarget,
     type MagazineVolumeView,
     type NewVolumeCandidate,
+    type CompilationOutcome,
 } from '@/lib/magazines';
 
 /**
@@ -148,6 +149,23 @@ function compilationBadge(compilation: MagazineCompilationRecord, locale: 'es-MX
     }
 }
 
+/** Fusión de propuesta editorial: reemplaza por compilation_id, conserva el resto. */
+function mergeCandidateProposal(
+    prev: Array<{ compilationId: number; volumeId: string; candidate: NewVolumeCandidate }>,
+    outcome: CompilationOutcome,
+    volumeId: string,
+): Array<{ compilationId: number; volumeId: string; candidate: NewVolumeCandidate }> {
+    if (!outcome.candidate) return prev;
+    return [
+        ...prev.filter((c) => c.compilationId !== outcome.compilation_id),
+        {
+            compilationId: outcome.compilation_id,
+            volumeId,
+            candidate: outcome.candidate,
+        },
+    ];
+}
+
 export function MagazinesBookshelf() {
     const { t, locale } = useI18n();
     const [volumes, setVolumes] = useState<MagazineVolumeView[]>([]);
@@ -181,6 +199,9 @@ export function MagazinesBookshelf() {
     const [candidates, setCandidates] = useState<
         Array<{ compilationId: number; volumeId: string; candidate: NewVolumeCandidate }>
     >([]);
+    // Token anti-stale: si el tomo cambia o se cierra el modal a mitad de
+    // compilación, el resultado tardío no escribe en un contexto obsoleto.
+    const compileSeqRef = useRef(0);
 
     const loadCompilations = useCallback(async (volumeIds: string[]) => {
         const entries = await Promise.all(
@@ -336,6 +357,9 @@ export function MagazinesBookshelf() {
 
     const handleCompile = useCallback(async () => {
         if (!selectedVolume || isCompiling) return;
+        const volumeId = selectedVolume.id;
+        const seq = (compileSeqRef.current += 1);
+        const alive = () => seq === compileSeqRef.current;
         const jobIds = compileJobId
             .split(/[,\s]+/)
             .map((s) => Number.parseInt(s.trim(), 10))
@@ -350,8 +374,9 @@ export function MagazinesBookshelf() {
         try {
             const outcome =
                 jobIds.length === 1
-                    ? await compileMagazineSource(jobIds[0], selectedVolume.id)
-                    : await compileMultiSourceEditorial(jobIds, selectedVolume.id);
+                    ? await compileMagazineSource(jobIds[0], volumeId)
+                    : await compileMultiSourceEditorial(jobIds, volumeId);
+            if (!alive()) return;
 
             const article = outcome.article_id ? ` · ${t('shelfOutcomeArticle', { id: outcome.article_id })}` : '';
             const version = outcome.version ? ` v${outcome.version}` : '';
@@ -365,57 +390,71 @@ export function MagazinesBookshelf() {
                 : '';
             const unchanged = outcome.unchanged ? ` ${t('shelfOutcomeUnchanged')}` : '';
 
-            if (outcome.candidate) {
-                setCandidates((prev) => {
-                    const filtered = prev.filter((c) => c.compilationId !== outcome.compilation_id);
-                    return [
-                        ...filtered,
-                        {
-                            compilationId: outcome.compilation_id,
-                            volumeId: selectedVolume.id,
-                            candidate: outcome.candidate!,
-                        },
-                    ];
-                });
-            }
+            setCandidates((prev) => mergeCandidateProposal(prev, outcome, volumeId));
 
             setCompileFeedback(
                 `${presentCompilationState(outcome.status, locale)}${unchanged}${article}${version}${conflicts}${candidateInfo}. ${outcome.message}`,
             );
             await refreshVolumeData(selectedVolume);
         } catch (error) {
+            if (!alive()) return;
             setCompileFeedback(
                 error instanceof Error ? error.message : t('shelfCompileFailed'),
             );
             try {
-                const compilations = await fetchMagazineCompilations(selectedVolume.id);
-                setCompilationsByVolume((prev) => ({ ...prev, [selectedVolume.id]: compilations }));
+                const compilations = await fetchMagazineCompilations(volumeId);
+                if (!alive()) return;
+                setCompilationsByVolume((prev) => ({ ...prev, [volumeId]: compilations }));
             } catch {
                 /* sin compilaciones legibles */
             }
         } finally {
-            setIsCompiling(false);
+            if (alive()) setIsCompiling(false);
         }
     }, [selectedVolume, isCompiling, compileJobId, refreshVolumeData, t, locale]);
 
     const handleRetry = useCallback(async (compilationId: number) => {
         if (!selectedVolume || isCompiling) return;
+        const volumeId = selectedVolume.id;
+        const seq = (compileSeqRef.current += 1);
+        const alive = () => seq === compileSeqRef.current;
         setIsCompiling(true);
         setCompileFeedback(null);
         try {
             const outcome = await retryMagazineCompilation(compilationId);
+            if (!alive()) return;
+            setCandidates((prev) => mergeCandidateProposal(prev, outcome, volumeId));
             setCompileFeedback(
                 `${presentCompilationState(outcome.status, locale)}. ${outcome.message}`,
             );
             await refreshVolumeData(selectedVolume);
         } catch (error) {
+            if (!alive()) return;
             setCompileFeedback(
                 error instanceof Error ? error.message : t('shelfRetryFailed'),
             );
         } finally {
-            setIsCompiling(false);
+            if (alive()) setIsCompiling(false);
         }
     }, [selectedVolume, isCompiling, refreshVolumeData, t, locale]);
+
+    // Progreso vivo: mientras compila, relee compilaciones del tomo para
+    // reflejar el % real en insignias y modal. Con limpieza al desmontar.
+    useEffect(() => {
+        if (!isCompiling || !selectedVolume || isPreview) return;
+        const volumeId = selectedVolume.id;
+        const timer = window.setInterval(() => {
+            void (async () => {
+                try {
+                    const rows = await fetchMagazineCompilations(volumeId);
+                    setCompilationsByVolume((prev) => ({ ...prev, [volumeId]: rows }));
+                } catch {
+                    /* reintento en el siguiente tick */
+                }
+            })();
+        }, 3000);
+        return () => window.clearInterval(timer);
+    }, [isCompiling, selectedVolume, isPreview]);
 
     const filteredVolumes = useMemo(
         () => filterMagazineVolumes(volumes, searchQuery),
