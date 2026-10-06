@@ -52,19 +52,22 @@ export function AiTab({
 
     useEffect(() => {
         if (!isTauri) return;
+        let live = true;
         import('@tauri-apps/api/core').then(({ invoke }) => {
             invoke<boolean>('get_gemini_status')
-                .then(setGeminiActive)
-                .catch(() => setGeminiActive(false));
+                .then((status) => { if (live) setGeminiActive(status); })
+                .catch(() => { if (live) setGeminiActive(false); });
         });
+        return () => { live = false; };
     }, [isTauri]);
 
     const handleSaveKey = async () => {
-        if (!isTauri) return;
+        const trimmedKey = apiKeyInput.trim();
+        if (!isTauri || !trimmedKey) return;
         setIsSavingKey(true);
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            await invoke('set_gemini_api_key', { apiKey: apiKeyInput });
+            await invoke('set_gemini_api_key', { apiKey: trimmedKey });
             const status = await invoke<boolean>('get_gemini_status');
             setGeminiActive(status);
             setApiKeyInput('');
@@ -165,11 +168,16 @@ export function AiTab({
                         <button
                             type="button"
                             onClick={async () => {
-                                setApiKeyInput('');
-                                const { invoke } = await import('@tauri-apps/api/core');
-                                await invoke('set_gemini_api_key', { apiKey: '' });
-                                setGeminiActive(false);
-                                toast.success('Clave eliminada de la sesión');
+                                if (!isTauri) return;
+                                try {
+                                    setApiKeyInput('');
+                                    const { invoke } = await import('@tauri-apps/api/core');
+                                    await invoke('set_gemini_api_key', { apiKey: '' });
+                                    setGeminiActive(false);
+                                    toast.success('Clave eliminada de la sesión');
+                                } catch (error) {
+                                    toast.error(`Error al actualizar clave: ${error instanceof Error ? error.message : String(error)}`);
+                                }
                             }}
                             className="rounded-xl bg-rose-500/10 hover:bg-rose-500/20 px-2.5 py-1.5 text-[9px] font-bold text-rose-400 transition-all cursor-pointer"
                         >

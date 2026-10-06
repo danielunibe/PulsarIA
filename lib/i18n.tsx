@@ -307,7 +307,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const value = useMemo<I18nContextValue>(() => ({
     locale,
     setLocale: (nextLocale) => updateSettings({ locale: nextLocale }),
-    t: (key, params) => interpolate(translations[locale][key] ?? translations['es-MX'][key], params),
+    t: (key, params) => {
+      const template = translations[locale][key] ?? translations['es-MX'][key];
+      return interpolate(typeof template === 'string' ? template : key, params);
+    },
   }), [locale, updateSettings]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

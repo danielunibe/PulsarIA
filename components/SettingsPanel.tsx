@@ -1,7 +1,5 @@
 import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 
-import { cn } from '@/lib/utils';
-import { SHADOW, SURFACE, ACCENT } from '@/lib/design-tokens';
 import { useSettings, AppTheme, RetentionPolicy, StorageIntent, PerformanceMode, AnalysisDepth } from '@/lib/settings-context';
 import { useI18n } from '@/lib/i18n';
 import { isTauriRuntime, useProcessingSettings } from '@/hooks/use-processing-settings';
@@ -16,14 +14,25 @@ import { PerformanceTab, type AccelerationStatusUi, type PerformancePolicyUi } f
 import type { PageConfig } from './PagePanel';
 import type { SearchMode } from './Header';
 import { toast } from 'sonner';
+import {
+    SectionCard,
+    SectionTitle,
+    BYTES_PER_GIB,
+    formatStorageBytes,
+    type SettingsTab,
+    type CollectionSource,
+    type HealthEventRecord,
+    type RuntimeHealth,
+    type StorageState,
+    type StorageStatusUi,
+    type PurgeCandidateUi,
+    type PurgePreviewUi,
+} from './settings/types';
 
 import { 
     FaDownload, 
     FaFolder, 
     FaCheck, 
-    FaFilm, 
-    FaMusic, 
-    FaFileLines, 
     FaPalette,
     FaChartSimple,
     FaMicrochip,
@@ -49,143 +58,6 @@ const SolidPaletteIcon = () => <FaPalette size={13} />;
 const SolidLanguageIcon = () => <FaLanguage size={13} />;
 const SolidCheckIcon = () => <FaCheck size={18} />;
 
-/**
- * Opciones de tema visual disponibles para la aplicación.
- * Cada tema define gradientes, colores de borde y acentos.
- */
-const THEME_OPTIONS: Array<{
-    id: AppTheme;
-    name: string;
-    badge?: string;
-    desc: string;
-    gradient: string;
-    borderColor: string;
-    accentColor: string;
-}> = [
-    {
-        id: 'carbon',
-        name: 'Gris Carbón',
-        badge: 'Predeterminado',
-        desc: 'Grafito oscuro mate de alta legibilidad y elegancia sobria',
-        gradient: 'radial-gradient(ellipse at top left, #1e2026 0%, #121316 70%, #0a0b0d 100%)',
-        borderColor: 'rgba(255,255,255,0.18)',
-        accentColor: '#94a3b8',
-    },
-    {
-        id: 'chromatic',
-        name: 'Pulsar Chromatic',
-        badge: 'Fondo Actual',
-        desc: 'Ondas WebGL multicromáticas vibrantes en tiempo real',
-        gradient: 'linear-gradient(135deg, rgba(254,44,85,0.7) 0%, rgba(138,92,255,0.7) 50%, rgba(37,244,238,0.7) 100%)',
-        borderColor: 'rgba(254,44,85,0.4)',
-        accentColor: '#fe2c55',
-    },
-    {
-        id: 'aurora',
-        name: 'Aurora Boreal',
-        badge: 'Luz Ambiental',
-        desc: 'Suaves estelas boreales TikTok con animación fluida',
-        gradient: 'radial-gradient(ellipse at 30% 30%, rgba(37,244,238,0.4) 0%, rgba(254,44,85,0.3) 60%, #06080f 100%)',
-        borderColor: 'rgba(37,244,238,0.4)',
-        accentColor: '#25f4ee',
-    },
-    {
-        id: 'oled',
-        name: 'Negro Puro (OLED)',
-        badge: 'Máximo Contraste',
-        desc: 'Negro absoluto ultra limpio optimizado para OLED',
-        gradient: 'linear-gradient(180deg, #09090b 0%, #000000 100%)',
-        borderColor: 'rgba(255,255,255,0.1)',
-        accentColor: '#ffffff',
-    },
-    {
-        id: 'cyberpunk',
-        name: 'Obsidiana Cyberpunk',
-        badge: 'Espacio Neón',
-        desc: 'Nebulosa violeta profunda con destellos galácticos',
-        gradient: 'linear-gradient(135deg, #240b36 0%, #0e051a 100%)',
-        borderColor: 'rgba(168,85,247,0.4)',
-        accentColor: '#c084fc',
-    },
-    {
-        id: 'solar',
-        name: 'Atardecer Ámbar',
-        badge: 'Cálido Solar',
-        desc: 'Gradiente solar profundo y discreto',
-        gradient: 'linear-gradient(135deg, #450a0a 0%, #ea580c 100%)',
-        borderColor: 'rgba(245,158,11,0.4)',
-        accentColor: '#f59e0b',
-    },
-];
-
-const FORMAT_CATEGORIES = [
-    {
-        title: 'Video',
-        icon: FaFilm,
-        options: [
-            { id: 'mp4', label: 'MP4', desc: 'Video standard', color: '#3b82f6' },
-            { id: 'mkv', label: 'MKV', desc: 'Matroska Video', color: '#3b82f6' },
-            { id: 'webm', label: 'WEBM', desc: 'Web Media', color: '#3b82f6' },
-            { id: 'mov', label: 'MOV', desc: 'QuickTime Movie', color: '#3b82f6' },
-        ]
-    },
-    {
-        title: 'Audio',
-        icon: FaMusic,
-        options: [
-            { id: 'wav', label: 'WAV', desc: 'Lossless Audio', color: '#f59e0b' },
-            { id: 'mp3', label: 'MP3', desc: 'Compressed Audio', color: '#f59e0b' },
-            { id: 'flac', label: 'FLAC', desc: 'Free Lossless', color: '#f59e0b' },
-            { id: 'ogg', label: 'OGG', desc: 'Ogg Vorbis', color: '#f59e0b' },
-            { id: 'm4a', label: 'M4A', desc: 'Apple Audio', color: '#f59e0b' },
-        ]
-    },
-    {
-        title: 'Text',
-        icon: FaFileLines,
-        options: [
-            { id: 'txt', label: 'TXT', desc: 'Plain Text', color: '#10b981' },
-            { id: 'srt', label: 'SRT', desc: 'Subtitles', color: '#10b981' },
-            { id: 'vtt', label: 'VTT', desc: 'Web Video Text', color: '#10b981' },
-            { id: 'json', label: 'JSON', desc: 'Data Format', color: '#10b981' },
-        ]
-    }
-];
-
-export function SectionCard({ children, className }: { children: React.ReactNode; className?: string }) {
-    return (
-        <div
-            className={cn('rounded-[20px] p-4 border-0 transition-all', className)}
-            style={{
-                border: 'none',
-                background: 'rgba(18, 20, 26, 0.75)',
-                backdropFilter: 'blur(20px)',
-                boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
-            }}
-        >
-            {children}
-        </div>
-    );
-}
-
-export function SectionTitle({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
-    return (
-        <div className="flex items-center gap-2 mb-3">
-            <div
-                className="w-5 h-5 rounded-[var(--radius-sm)] flex items-center justify-center text-[var(--accent-primary)]"
-                style={{ background: ACCENT.primary12, boxShadow: SHADOW.nmInset }}
-            >
-                <Icon />
-            </div>
-            <span className="font-black tracking-[0.2em] uppercase" style={{ fontSize: 'var(--text-micro)', color: 'var(--text-ghost)' }}>
-                {label}
-            </span>
-        </div>
-    );
-}
-
-type SettingsTab = 'general' | 'stats' | 'engine' | 'ai' | 'performance';
-
 export interface SettingsPanelProps {
     onClose: () => void;
     jobs?: JobRecord[];
@@ -200,86 +72,11 @@ export interface SettingsPanelProps {
     onResumeSetup?: () => void;
 }
 
-interface CollectionSource {
-    id: number;
-    url: string;
-    profile_url?: string;
-    platform?: string;
-    source_type: string;
-    username?: string | null;
-    display_name?: string | null;
-    status?: string;
-    active: boolean;
-    last_success_at?: string | null;
-    last_sync_at?: string | null;
-    next_sync_at?: string | null;
-    discovered_count: number;
-    consecutive_failures: number;
-    last_error?: string | null;
-}
-
-interface HealthEventRecord {
-    id: number;
-    created_at: string;
-    component: string;
-    severity: string;
-    diagnosis: string;
-    action?: string | null;
-    result?: string | null;
-}
-
-interface RuntimeHealth {
-    model: { model: string; ready: boolean; status: string; message?: string | null };
-    queue_depth: number;
-    backpressure_active: boolean;
-    worker_capacity: number;
-    idle_workers: number;
-    processing_paused?: boolean;
-    background_admission_paused?: boolean;
-    autostart_enabled: boolean;
-    api_ready: boolean;
-    api_error?: string | null;
-}
-
 type SavedProcessingSettings = {
     quality: number;
     profile: 'fast' | 'balanced' | 'high';
     video_fit: 'cover' | 'contain';
 };
-
-type StorageState = 'ok' | 'quota-near' | 'quota-exceeded' | 'disk-low' | 'path-error' | 'unknown';
-
-interface StorageStatusUi {
-    rootPath: string;
-    totalBytes: number | null;
-    freeBytes: number | null;
-    quotaBytes: number | null;
-    usedMediaBytes: number | null;
-    stagedBytes: number | null;
-    trashBytes: number | null;
-    reserveBytes: number | null;
-    state: StorageState;
-}
-
-interface PurgeCandidateUi {
-    jobId: number;
-    title: string;
-    mediaBytes: number;
-    interestScore: number;
-    reasons: string[];
-    protected: boolean;
-    favorite?: boolean;
-    pinned?: boolean;
-    transcriptAvailable?: boolean;
-    sourceState?: string;
-}
-
-interface PurgePreviewUi {
-    candidates: PurgeCandidateUi[];
-    purgeId?: string;
-    message?: string;
-    native: boolean;
-}
 
 type StorageAwareJob = JobRecord & {
     audio_path?: string;
@@ -297,14 +94,6 @@ type StorageAwareJob = JobRecord & {
     pinned?: boolean;
     protected?: boolean;
 };
-
-const BYTES_PER_GIB = 1024 ** 3;
-
-function formatStorageBytes(bytes: number | null | undefined) {
-    if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return 'No medido';
-    if (bytes >= BYTES_PER_GIB) return `${(bytes / BYTES_PER_GIB).toFixed(bytes >= 10 * BYTES_PER_GIB ? 0 : 1)} GiB`;
-    return `${Math.max(0, Math.round(bytes / 1024 / 1024))} MiB`;
-}
 
 function optionalJobNumber(job: StorageAwareJob, keys: Array<keyof StorageAwareJob>) {
     for (const key of keys) {
@@ -739,28 +528,37 @@ export function SettingsPanel({
 
     const refreshHealth = async () => {
         if (!isTauriRuntime()) return;
-        const { invoke } = await import('@tauri-apps/api/core');
-        const [nextSources, nextEvents, nextRuntime] = await Promise.all([
-            invoke<CollectionSource[]>('get_collection_sources'),
-            invoke<HealthEventRecord[]>('get_health_events', { limit: 50 }),
-            invoke<RuntimeHealth>('get_runtime_health'),
-        ]);
-        setSources(nextSources);
-        setHealthEvents(nextEvents);
-        setRuntimeHealth(nextRuntime);
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const [nextSources, nextEvents, nextRuntime] = await Promise.all([
+                invoke<CollectionSource[]>('get_collection_sources'),
+                invoke<HealthEventRecord[]>('get_health_events', { limit: 50 }),
+                invoke<RuntimeHealth>('get_runtime_health'),
+            ]);
+            setSources(nextSources);
+            setHealthEvents(nextEvents);
+            setRuntimeHealth(nextRuntime);
+        } catch (error) {
+            setSettingsError(error instanceof Error ? error.message : String(error));
+        }
     };
 
     const refreshStorageStatus = useCallback(async () => {
         if (!isTauriRuntime()) return;
-        const rawStatus = await invokeOptionalCommand<unknown>('get_storage_status', { path: folder });
-        const nextStatus = normalizeStorageStatus(rawStatus);
-        if (nextStatus) {
-            setStorageStatus(nextStatus);
-            setStorageError(null);
-            return;
+        try {
+            const rawStatus = await invokeOptionalCommand<unknown>('get_storage_status', { path: folder });
+            const nextStatus = normalizeStorageStatus(rawStatus);
+            if (nextStatus) {
+                setStorageStatus(nextStatus);
+                setStorageError(null);
+                return;
+            }
+            setStorageStatus(null);
+            setStorageMessage('El shell nativo actual todavía no expone la medición detallada de cuota; no se ha eliminado ningún archivo.');
+        } catch (error) {
+            setStorageStatus(null);
+            setStorageError(error instanceof Error ? error.message : String(error));
         }
-        setStorageStatus(null);
-        setStorageMessage('El shell nativo actual todavía no expone la medición detallada de cuota; no se ha eliminado ningún archivo.');
     }, [folder]);
 
     const handlePreviewPurge = async () => {
@@ -972,10 +770,11 @@ export function SettingsPanel({
     }, [jobs, now]);
 
     const formatDuration = (seconds: number) => {
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = seconds % 60;
-        if (h > 0) return `${h}h ${m}m`;
+        const total = Math.max(0, Math.floor(seconds));
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = total % 60;
+        if (h > 0) return `${h}h ${m}m ${s}s`;
         if (m > 0) return `${m}m ${s}s`;
         return `${s}s`;
     };

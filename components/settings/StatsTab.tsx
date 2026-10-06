@@ -250,8 +250,8 @@ export function StatsTab({
                             className="w-full rounded-xl bg-black/50 px-2.5 py-1.5 text-xs text-white outline-none cursor-pointer"
                         >
                             <option value="balanced">Equilibrado</option>
-                            <option value="knowledge-heavy">Conocimiento</option>
-                            <option value="archival">Archivo</option>
+                            <option value="knowledge">Conocimiento</option>
+                            <option value="archive">Archivo</option>
                         </select>
                     </div>
 

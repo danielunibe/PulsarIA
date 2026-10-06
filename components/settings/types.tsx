@@ -166,7 +166,7 @@ export function SectionTitle({ icon: Icon, label }: { icon: React.ElementType; l
     );
 }
 
-export type SettingsTab = 'general' | 'stats' | 'engine' | 'ai';
+export type SettingsTab = 'general' | 'stats' | 'engine' | 'ai' | 'performance';
 
 export interface CollectionSource {
     id: number;
