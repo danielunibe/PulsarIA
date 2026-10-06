@@ -357,7 +357,11 @@ async fn main() {
     });
     let api_session_token = match security::create_session_token(&security_config.jwt_secret) {
         Ok(token) => {
-            write_startup_log(&data_dir, "security", &format!("api session token created: {}", token));
+            write_startup_log(
+                &data_dir,
+                "security",
+                &format!("api session token created: {}", token),
+            );
             token
         }
         Err(e) => {
@@ -377,7 +381,6 @@ async fn main() {
         security: security_config.clone(),
         runtime: api_runtime.clone(),
     };
-
 
     let arc_config = Arc::new(Mutex::new(search_config));
     let arc_metrics = Arc::new(Mutex::new(metrics));
