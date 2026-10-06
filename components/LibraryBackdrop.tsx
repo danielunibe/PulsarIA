@@ -8,17 +8,18 @@ const ColorBends = dynamic(
     { ssr: false },
 );
 
-export function LibraryBackdrop({ theme, scrollY }: { theme: string; scrollY: number }) {
+export function LibraryBackdrop({ theme }: { theme: string }) {
     return (
         <div className="pulsaria-library-backdrop" aria-hidden="true">
             {theme === 'chromatic' && (
-                <div
-                    className="absolute inset-[-10%] h-[120%] w-[120%] bg-[#0a0a0a]"
-                    style={{
-                        transform: `translateY(${-scrollY}px) scale(1.1)`,
-                        transition: 'transform 0.2s cubic-bezier(0.22, 1, 0.36, 1)',
-                    }}
-                >
+                <div className="absolute inset-0 overflow-hidden bg-[#0a0a0a]">
+                    {/* Respaldo de identidad: si WebGL no pinta, Pulsaria nunca queda gris plano. */}
+                    <div
+                        className="absolute inset-0"
+                        style={{
+                            background: 'linear-gradient(135deg, rgba(254,44,85,0.16) 0%, rgba(138,92,255,0.13) 50%, rgba(37,244,238,0.12) 100%)',
+                        }}
+                    />
                     <ColorBends
                         colors={['#ff5c7a', '#8a5cff', '#00ffd1']}
                         rotation={0}

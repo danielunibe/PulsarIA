@@ -16,19 +16,19 @@ interface QueueSectionProps {
 }
 
 const FORMAT_META: Record<string, { label: string; color: string; step: number }> = {
-  mp4: { label: 'MP4', color: '#3b82f6', step: 1 },
-  mkv: { label: 'MKV', color: '#3b82f6', step: 1 },
-  webm: { label: 'WEBM', color: '#3b82f6', step: 1 },
-  mov: { label: 'MOV', color: '#3b82f6', step: 1 },
-  mp3: { label: 'MP3', color: '#f59e0b', step: 2 },
-  wav: { label: 'WAV', color: '#f59e0b', step: 2 },
-  flac: { label: 'FLAC', color: '#f59e0b', step: 2 },
-  ogg: { label: 'OGG', color: '#f59e0b', step: 2 },
-  m4a: { label: 'M4A', color: '#f59e0b', step: 2 },
-  txt: { label: 'TXT', color: '#10b981', step: 3 },
-  srt: { label: 'SRT', color: '#10b981', step: 3 },
-  vtt: { label: 'VTT', color: '#10b981', step: 3 },
-  json: { label: 'JSON', color: '#10b981', step: 3 },
+  mp4: { label: 'MP4', color: 'var(--color-format-video)', step: 1 },
+  mkv: { label: 'MKV', color: 'var(--color-format-video)', step: 1 },
+  webm: { label: 'WEBM', color: 'var(--color-format-video)', step: 1 },
+  mov: { label: 'MOV', color: 'var(--color-format-video)', step: 1 },
+  mp3: { label: 'MP3', color: 'var(--color-format-audio)', step: 2 },
+  wav: { label: 'WAV', color: 'var(--color-format-audio)', step: 2 },
+  flac: { label: 'FLAC', color: 'var(--color-format-audio)', step: 2 },
+  ogg: { label: 'OGG', color: 'var(--color-format-audio)', step: 2 },
+  m4a: { label: 'M4A', color: 'var(--color-format-audio)', step: 2 },
+  txt: { label: 'TXT', color: 'var(--color-format-text)', step: 3 },
+  srt: { label: 'SRT', color: 'var(--color-format-text)', step: 3 },
+  vtt: { label: 'VTT', color: 'var(--color-format-text)', step: 3 },
+  json: { label: 'JSON', color: 'var(--color-format-text)', step: 3 },
 };
 
 function GlobalProgress({ percentage }: { percentage: number }) {
@@ -122,7 +122,7 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
           {formats.map((format) => {
             const meta = FORMAT_META[format];
             if (!meta) return null;
-            return <span key={format} className="rounded-[5px] border px-1.5 py-0.5 text-[8px] font-black tracking-wider" style={{ color: meta.color, borderColor: `${meta.color}45`, background: `${meta.color}15` }}>{meta.label}</span>;
+            return <span key={format} className="rounded-[5px] border px-1.5 py-0.5 text-[8px] font-black tracking-wider" style={{ color: meta.color, borderColor: `color-mix(in srgb, ${meta.color} 45%, transparent)`, background: `color-mix(in srgb, ${meta.color} 15%, transparent)` }}>{meta.label}</span>;
           })}
         </div>}
 

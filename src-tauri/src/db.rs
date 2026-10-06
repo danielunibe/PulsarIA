@@ -1730,6 +1730,9 @@ fn init_db_core() -> Result<Connection> {
         [],
     )?;
 
+    crate::application::magazine_service::init_magazine_schema(&transaction)?;
+    crate::application::knowledge_service::init_knowledge_schema(&transaction)?;
+
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     transaction.commit()?;
     if let Some(path) = migration_backup {
@@ -7417,7 +7420,10 @@ mod tests {
         .unwrap();
 
         let initial = get_collection_source(&conn, registered.source.id).unwrap();
-        assert_eq!(initial.rules_json, r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#);
+        assert_eq!(
+            initial.rules_json,
+            r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#
+        );
 
         // Switch to streaming mode (auto_enqueue = false)
         let updated = crate::application::collection_service::update_profile_source_settings(
@@ -7427,10 +7433,16 @@ mod tests {
             Some(false),
         )
         .unwrap();
-        assert_eq!(updated.rules_json, r#"{"ignoreDuplicates":true,"autoEnqueue":false}"#);
+        assert_eq!(
+            updated.rules_json,
+            r#"{"ignoreDuplicates":true,"autoEnqueue":false}"#
+        );
 
         let reloaded = get_collection_source(&conn, registered.source.id).unwrap();
-        assert_eq!(reloaded.rules_json, r#"{"ignoreDuplicates":true,"autoEnqueue":false}"#);
+        assert_eq!(
+            reloaded.rules_json,
+            r#"{"ignoreDuplicates":true,"autoEnqueue":false}"#
+        );
 
         // Switch back to auto_enqueue = true
         let updated_back = crate::application::collection_service::update_profile_source_settings(
@@ -7440,7 +7452,10 @@ mod tests {
             Some(true),
         )
         .unwrap();
-        assert_eq!(updated_back.rules_json, r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#);
+        assert_eq!(
+            updated_back.rules_json,
+            r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#
+        );
     }
 
     #[test]

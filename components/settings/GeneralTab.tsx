@@ -387,7 +387,7 @@ export function GeneralTab({
                     </button>
                 </div>
                 <p className="text-[10px] leading-relaxed text-white/40">
-                    Controla si el reproductor adapta la miniatura al espacio completo o conserva la proporción exacta original.
+                    La ventana de detalle siempre adapta el video completo sin recortes. Este ajuste solo cambia cómo rellena Cinema.
                 </p>
             </SectionCard>
 

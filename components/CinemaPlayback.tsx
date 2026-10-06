@@ -83,6 +83,8 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
     const [progressTipPosition, setProgressTipPosition] = useState(0);
     const [toast, setToast] = useState('');
     const [isIdle, setIsIdle] = useState(false);
+    const [audioFading, setAudioFading] = useState(false);
+    const [entryReady, setEntryReady] = useState(false);
     const [failedVideos, setFailedVideos] = useState<Record<number, boolean>>({});
     const [metrics, setMetrics] = useState({ width: 0, height: 0, cardWidth: 0, cardHeight: 0, step: 0 });
     const mediaRefs = useRef<Array<HTMLVideoElement | null>>([]);
@@ -104,6 +106,8 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
     const previousDragTimeRef = useRef(0);
     const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const fadeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const fadeDoneRef = useRef(false);
     const transcriptCacheRef = useRef(new Map<number, TranscriptChunk[]>());
     const current = videos[index] ?? videos[0];
     const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -119,6 +123,50 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
         toastTimerRef.current = setTimeout(() => setToast(''), 2200);
     }, []);
+
+    const cancelAudioFade = useCallback(() => {
+        if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
+        fadeTimerRef.current = null;
+        setAudioFading(false);
+    }, []);
+
+    // Subida progresiva y elegante del sonido al entrar: rampa suave
+    // 0 -> volumen objetivo con curva smoothstep. Si el navegador bloquea
+    // el audio, el video sigue en mute y el control queda visible.
+    const startAudioFade = useCallback((targetVolume: number) => {
+        if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
+        fadeTimerRef.current = null;
+        if (fadeDoneRef.current) return;
+        fadeDoneRef.current = true;
+        if (reducedMotion) {
+            setMuted(false);
+            return;
+        }
+        setMuted(false);
+        setVolume(0);
+        setAudioFading(true);
+        const steps = 40;
+        let step = 0;
+        fadeTimerRef.current = setInterval(() => {
+            step += 1;
+            const t = Math.min(1, step / steps);
+            const eased = t * t * (3 - 2 * t);
+            const value = Math.max(0, Math.min(1, Math.round(targetVolume * eased * 100) / 100));
+            const media = mediaRefs.current[indexRef.current];
+            if (media) {
+                try {
+                    media.muted = false;
+                    media.volume = value;
+                } catch { /* el elemento aún no está listo */ }
+            }
+            setVolume(value);
+            if (t >= 1) {
+                if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
+                fadeTimerRef.current = null;
+                setAudioFading(false);
+            }
+        }, 45);
+    }, [reducedMotion]);
 
     const move = useCallback((direction: -1 | 1) => {
         if (!videos.length) return;
@@ -278,7 +326,22 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
 
     useEffect(() => () => {
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
     }, []);
+
+    // Al entrar a Cinema se intenta el sonido con rampa progresiva una vez
+    // que el medio actual existe. El gesto de apertura habilita el audio.
+    useEffect(() => {
+        if (!isPlayable || fadeDoneRef.current) return;
+        const timer = setTimeout(() => startAudioFade(0.8), 350);
+        return () => clearTimeout(timer);
+    }, [isPlayable, startAudioFade]);
+
+    // Animación de entrada: velo de carga con la marca que se disuelve.
+    useEffect(() => {
+        const timer = setTimeout(() => setEntryReady(true), reducedMotion ? 1 : 950);
+        return () => clearTimeout(timer);
+    }, [reducedMotion]);
 
     useEffect(() => {
         const handler = (event: KeyboardEvent) => {
@@ -289,14 +352,14 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
             if (event.code === 'Space') { event.preventDefault(); setPlaying((value) => !value); }
             else if (event.key === 'ArrowLeft') move(-1);
             else if (event.key === 'ArrowRight') move(1);
-            else if (event.key.toLowerCase() === 'm') setMuted((value) => !value);
+            else if (event.key.toLowerCase() === 'm') { cancelAudioFade(); setMuted((value) => !value); }
             else if (event.key.toLowerCase() === 'l' && current) setLiked((value) => ({ ...value, [current.id]: !value[current.id] }));
             else if (event.key.toLowerCase() === 'f') void document.documentElement.requestFullscreen?.().catch(() => undefined);
             else if (event.key === 'Escape') commentsOpen ? setCommentsOpen(false) : onClose();
         };
         window.addEventListener('keydown', handler);
         return () => window.removeEventListener('keydown', handler);
-    }, [commentsOpen, current, move, onClose]);
+    }, [commentsOpen, current, move, onClose, cancelAudioFade]);
 
     const setProgressFromPointer = (clientX: number) => {
         const media = mediaRefs.current[index];
@@ -531,8 +594,8 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
                 <span className="cinema-reference__separator" />
                 <div className="cinema-reference__rail-group">
                     <div className="cinema-reference__volume-wrap">
-                        <button type="button" className="cinema-reference__solo" onClick={() => setMuted((value) => !value)} title="Sonido" aria-label={muted ? 'Activar sonido' : 'Silenciar'} aria-pressed={!muted}>{muted ? <FaVolumeXmark size={18} /> : <FaVolumeHigh size={18} />}</button>
-                        <span className="cinema-reference__volume-pop"><input type="range" min="0" max="1" step="0.01" value={volume} onChange={(event) => { setVolume(Number(event.target.value)); setMuted(false); }} aria-label="Volumen" /></span>
+                        <button type="button" className={`cinema-reference__solo${audioFading ? ' is-fading' : ''}`} onClick={() => { cancelAudioFade(); setMuted((value) => !value); }} title="Sonido" aria-label={audioFading ? 'Subiendo sonido…' : muted ? 'Activar sonido' : 'Silenciar'} aria-pressed={!muted}>{muted && !audioFading ? <FaVolumeXmark size={18} /> : <FaVolumeHigh size={18} />}</button>
+                        <span className="cinema-reference__volume-pop"><input type="range" min="0" max="1" step="0.01" value={volume} onChange={(event) => { cancelAudioFade(); setVolume(Number(event.target.value)); setMuted(false); }} aria-label="Volumen" /></span>
                     </div>
                     <div className={`cinema-reference__more-wrap ${menuOpen ? 'is-open' : ''}`}>
                         <button type="button" className="cinema-reference__solo" onClick={() => setMenuOpen((value) => !value)} title="Más" aria-label="Más"><span className="cinema-reference__dots">•••</span></button>
@@ -604,6 +667,13 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
 
             <button type="button" className="cinema-reference__close" onClick={onClose} title="Salir de Cinema" aria-label="Salir de Cinema"><FaXmark size={15} /><span>ESC</span></button>
             {toast && <div className="cinema-reference__toast" role="status">{toast}</div>}
+            {!entryReady && (
+                <div className="cinema-reference__entry-loader" aria-hidden="true">
+                    <span className="cinema-reference__entry-mark"><PulsariaIcon size={44} /></span>
+                    <span className="cinema-reference__entry-word">PULSARIA CINEMA</span>
+                    <span className="cinema-reference__entry-bar"><i /></span>
+                </div>
+            )}
         </div>
     );
 }

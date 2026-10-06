@@ -121,6 +121,40 @@ cargo check --manifest-path src-tauri/Cargo.toml && npm run build
 |--------|-------|
 | `queue_service.rs` ↔ `python_runner.rs` | `JobMessage` moved to `domain/models.rs` |
 
+
+## Design Gate
+
+Pulsaria enforces a Design Gate before every major release. The gate uses the Apple Design skill at .agents/skills/apple-design/ as the authoritative auditor. Apple's Human Interface Guidelines (123 pages) are the benchmark; Pulsaria's own design system is the product identity.
+
+### Skill location and references
+
+- **Skill root**: .agents/skills/apple-design/
+- **Skill file**: SKILL.md — five-lens audit process (accessibility, platform conventions, visual design & craft, interaction, content/writing)
+- **References**: references/hig/*.md (123 pages), references/hig-lookup.md, references/cross-platform.md
+- **Design system**: docs/design-system/PULSARIA_DESIGN_SYSTEM.md
+
+### Commands
+
+- **Audit**: .kilo/command/apple-design-review.md
+- **Improve**: .kilo/command/apple-design-improve.md
+
+### Workflow
+
+1. **Trigger**: Run apple-design-review against any UI artifact (screenshot, mockup, wireframe, or frontend code).
+2. **Audit**: Agent loads the skill in READ-ONLY mode, walks the five lenses, and produces a report with Summary, Critical, Improvements, Craft notes, What works, Platform notes.
+3. **Findings**: Report uses severity tags (Critical / High / Medium / Low) and cites specific HIG files and headings.
+4. **Approval**: User reviews and approves findings. No code changes are made during the audit.
+5. **Implement**: User approves findings, then agent runs apple-design-improve to produce a concrete, sequenced plan (accessibility → conventions → craft → polish).
+6. **Execute**: Only after user approval of the improvement plan does the agent modify source code.
+
+### Important rules
+
+- **Skill is an auditor, not an auto-modifier**. The skill inspects and reports; it does not write code.
+- **HIG is Apple's authority**, but Pulsaria's design system is the product identity. When guidelines collide with product intent, name the trade-off and recommend.
+- **Do not modify skill files**. .agents/skills/apple-design/ is tracked but must remain read-only during reviews.
+- **Do not modify source code during audits**. All changes happen only after explicit user approval.
+- **Cross-reference**: use docs/design-system/PULSARIA_DESIGN_SYSTEM.md for Pulsaria-specific tokens, themes, and component conventions.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
@@ -130,3 +164,4 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+

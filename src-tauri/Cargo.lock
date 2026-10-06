@@ -3884,6 +3884,7 @@ dependencies = [
 name = "pulsaria"
 version = "0.1.0-beta.3"
 dependencies = [
+ "async-trait",
  "axum",
  "bincode",
  "chrono",

@@ -1,43 +1,55 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { KioscoReader } from '@/components/KioscoReader';
+import { coverArtSVG, hashSeed, hexToHue, timeAgoEs } from '@/lib/kiosco';
 import {
     FaBookOpen,
-    FaBrain,
+    FaMagnifyingGlass,
     FaClock,
     FaArrowRotateLeft,
     FaPlus,
     FaXmark,
-    FaCheck,
-    FaFilm,
     FaFileLines,
-    FaCamera,
-    FaWandMagicSparkles,
     FaChevronRight,
-    FaFolder
+    FaFolder,
+    FaWandMagicSparkles,
 } from '@/components/icon-library';
+import {
+    fetchMagazineArticles,
+    fetchMagazineChapters,
+    fetchMagazineCompilations,
+    fetchMagazineVolumes,
+    fetchGeminiStatus,
+    compileMagazineSource,
+    compileMultiSourceEditorial,
+    fetchMagazineCompilationCandidate,
+    retryMagazineCompilation,
+    filterMagazineVolumes,
+    latestCompilation,
+    presentCompilationState,
+    presentEditorialState,
+    type MagazineArticleRecord,
+    type MagazineChapterRecord,
+    type MagazineCompilationRecord,
+    type MagazineEvidenceTarget,
+    type MagazineVolumeView,
+    type NewVolumeCandidate,
+} from '@/lib/magazines';
 
-export interface MagazineVolume {
-    id: string;
-    volumeNumber: string;
-    title: string;
-    subtitle: string;
-    category: 'recipes' | 'tech' | 'guides' | 'lifestyle';
-    color: string;
-    accentGlow: string;
-    spineGradient: string;
-    coverGradient: string;
-    articleCount: number;
-    videoCount: number;
-    lastUpdated: string;
-    syncStatus: 'live' | 'compiling' | 'idle';
-    syncMessage?: string;
-    description: string;
-    tags: string[];
-}
+/**
+ * Librero de Revistas & Tomos Inteligentes.
+ *
+ * Lee los tomos desde SQLite a través de IPC (`get_magazine_volumes`) y
+ * refleja el estado REAL de las compilaciones editoriales por tomo
+ * (`get_magazine_compilations`). Compilar (`compile_magazine_source`)
+ * requiere la app de escritorio y clave Gemini en el proceso nativo; sin
+ * ella el backend falla cerrado con un mensaje accionable.
+ * Fuera del shell nativo se muestra vista previa marcada, sin inventar datos.
+ */
 
-const DEMO_VOLUMES: MagazineVolume[] = [
+const PREVIEW_VOLUMES: MagazineVolumeView[] = [
     {
         id: 'vol-recipes',
         volumeNumber: 'TOMO I',
@@ -48,13 +60,11 @@ const DEMO_VOLUMES: MagazineVolume[] = [
         accentGlow: 'rgba(255, 154, 60, 0.35)',
         spineGradient: 'linear-gradient(180deg, #d35400 0%, #78281f 100%)',
         coverGradient: 'linear-gradient(145deg, #1e130c 0%, #120b07 100%)',
-        articleCount: 14,
-        videoCount: 19,
-        lastUpdated: 'Hace 3 min',
-        syncStatus: 'compiling',
-        syncMessage: 'Gemini 3.8 Flash extrayendo ingredientes de @chef.lucas...',
-        description: 'Compendio gastronómico automático. Cada video de cocina es analizado por Gemini 3.8 Flash para tabular ingredientes, tiempos de cocción y seleccionar los fotogramas clave de cada paso.',
-        tags: ['Gastronomía', 'Repostería', 'Paso a Paso', 'OCR de Textos']
+        articleCount: 0,
+        videoCount: 0,
+        editorialState: 'published',
+        description: 'Compendio gastronómico. Cada video de cocina indexado podrá tabular ingredientes, tiempos de cocción y fotogramas clave de cada paso.',
+        updatedAt: '',
     },
     {
         id: 'vol-tech',
@@ -66,12 +76,11 @@ const DEMO_VOLUMES: MagazineVolume[] = [
         accentGlow: 'rgba(56, 189, 248, 0.35)',
         spineGradient: 'linear-gradient(180deg, #0284c7 0%, #082f49 100%)',
         coverGradient: 'linear-gradient(145deg, #091524 0%, #050b14 100%)',
-        articleCount: 9,
-        videoCount: 12,
-        lastUpdated: 'Hace 22 min',
-        syncStatus: 'live',
-        description: 'Manual de referencia técnica. Transforma tutoriales rápidos en documentación limpia con bloques de código, comandos terminales y arquitectura de software.',
-        tags: ['Rust', 'Next.js', 'IA Local', 'DevOps']
+        articleCount: 0,
+        videoCount: 0,
+        editorialState: 'published',
+        description: 'Manual de referencia técnica. Transformará tutoriales en documentación con bloques de código, comandos y arquitectura.',
+        updatedAt: '',
     },
     {
         id: 'vol-guides',
@@ -83,12 +92,11 @@ const DEMO_VOLUMES: MagazineVolume[] = [
         accentGlow: 'rgba(52, 211, 153, 0.35)',
         spineGradient: 'linear-gradient(180deg, #059669 0%, #064e3b 100%)',
         coverGradient: 'linear-gradient(145deg, #091f16 0%, #05100c 100%)',
-        articleCount: 11,
-        videoCount: 15,
-        lastUpdated: 'Hoy 14:20',
-        syncStatus: 'idle',
-        description: 'Guías prácticas de reparación, carpintería y trucos cotidianos organizados en fichas de ejecución inmediata con fotos de herramientas y materiales.',
-        tags: ['Tutoriales', 'Lifehacks', 'Herramientas', 'Fotogramas Clave']
+        articleCount: 0,
+        videoCount: 0,
+        editorialState: 'published',
+        description: 'Guías prácticas de reparación y trucos cotidianos en fichas de ejecución inmediata con fotos de herramientas y materiales.',
+        updatedAt: '',
     },
     {
         id: 'vol-lifestyle',
@@ -100,27 +108,324 @@ const DEMO_VOLUMES: MagazineVolume[] = [
         accentGlow: 'rgba(168, 85, 247, 0.35)',
         spineGradient: 'linear-gradient(180deg, #7e22ce 0%, #3b0764 100%)',
         coverGradient: 'linear-gradient(145deg, #190c24 0%, #0d0614 100%)',
-        articleCount: 7,
-        videoCount: 10,
-        lastUpdated: 'Ayer',
-        syncStatus: 'live',
-        description: 'Protocolos de entrenamiento y salud. Segmenta repeticiones, identifica posturas mediante visión computacional y sincroniza con notas de cronometraje.',
-        tags: ['Entrenamiento', 'Movilidad', 'Nutrición', 'Cronometrado']
+        articleCount: 0,
+        videoCount: 0,
+        editorialState: 'published',
+        description: 'Protocolos de entrenamiento y salud segmentados por repeticiones, postura y cronometraje.',
+        updatedAt: '',
     }
 ];
 
-export function MagazinesBookshelf() {
-    const [volumes] = useState<MagazineVolume[]>(DEMO_VOLUMES);
-    const [selectedVolume, setSelectedVolume] = useState<MagazineVolume | null>(null);
-    const [isRefreshing, setIsRefreshing] = useState(false);
+/** Insignia honesta del estado de compilación: siempre proviene del backend. */
+function compilationBadge(compilation: MagazineCompilationRecord): {
+    dot: string;
+    text: string;
+    label: string;
+} {
+    const base = presentCompilationState(compilation.status);
+    const progress = compilation.status === 'processing' ? ` ${compilation.progress}%` : '';
+    switch (compilation.status) {
+        case 'completed':
+            return { dot: 'bg-emerald-400', text: 'text-emerald-300/80', label: base };
+        case 'processing':
+        case 'queued':
+            return { dot: 'bg-sky-400 animate-pulse', text: 'text-sky-300/80', label: `${base}${progress}` };
+        case 'requires_review':
+            return { dot: 'bg-amber-400', text: 'text-amber-300/80', label: base };
+        case 'failed':
+        case 'cancelled':
+            return { dot: 'bg-rose-400', text: 'text-rose-300/80', label: base };
+        default:
+            return { dot: 'bg-white/25', text: 'text-white/35', label: base };
+    }
+}
 
-    const handleRefresh = () => {
+export function MagazinesBookshelf() {
+    const [volumes, setVolumes] = useState<MagazineVolumeView[]>([]);
+    const [isPreview, setIsPreview] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedVolume, setSelectedVolume] = useState<MagazineVolumeView | null>(null);
+    const [selectedArticles, setSelectedArticles] = useState<MagazineArticleRecord[]>([]);
+    const [isLoadingArticles, setIsLoadingArticles] = useState(false);
+    const [volumeChapters, setVolumeChapters] = useState<MagazineChapterRecord[]>([]);
+    const [isLoadingChapters, setIsLoadingChapters] = useState(false);
+    const [reader, setReader] = useState<{
+        articleId: string;
+        target: MagazineEvidenceTarget | null;
+    } | null>(null);
+    const [readerVolume, setReaderVolume] = useState<MagazineVolumeView | null>(null);
+    const [hoveredVolume, setHoveredVolume] = useState<MagazineVolumeView | null>(null);
+    const [openingVolumeId, setOpeningVolumeId] = useState<string | null>(null);
+    const openTimerRef = useRef<number | null>(null);
+
+    useEffect(() => () => {
+        if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    }, []);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const [compilationsByVolume, setCompilationsByVolume] = useState<Record<string, MagazineCompilationRecord[]>>({});
+    const [geminiReady, setGeminiReady] = useState<boolean | null>(null);
+    const [compileJobId, setCompileJobId] = useState('');
+    const [isCompiling, setIsCompiling] = useState(false);
+    const [compileFeedback, setCompileFeedback] = useState<string | null>(null);
+    const [candidates, setCandidates] = useState<
+        Array<{ compilationId: number; volumeId: string; candidate: NewVolumeCandidate }>
+    >([]);
+
+    const loadCompilations = useCallback(async (volumeIds: string[]) => {
+        const entries = await Promise.all(
+            volumeIds.map(async (volumeId) => {
+                try {
+                    const rows = await fetchMagazineCompilations(volumeId);
+                    return [volumeId, rows] as const;
+                } catch {
+                    return [volumeId, []] as const;
+                }
+            }),
+        );
+        const dict: Record<string, MagazineCompilationRecord[]> = Object.fromEntries(entries);
+        setCompilationsByVolume(dict);
+
+        // Descubrir candidatos a nuevos tomos propuestos en las compilaciones recientes
+        const discovered: Array<{ compilationId: number; volumeId: string; candidate: NewVolumeCandidate }> = [];
+        for (const [volId, rows] of entries) {
+            for (const row of rows.slice(0, 3)) {
+                try {
+                    const cand = await fetchMagazineCompilationCandidate(row.id);
+                    if (cand && !discovered.some((d) => d.compilationId === row.id)) {
+                        discovered.push({ compilationId: row.id, volumeId: volId, candidate: cand });
+                    }
+                } catch {
+                    // sin candidato
+                }
+            }
+        }
+        setCandidates(discovered);
+    }, []);
+
+    const loadVolumes = useCallback(async () => {
+        setIsLoading(true);
+        setLoadError(null);
+        try {
+            const live = await fetchMagazineVolumes();
+            setVolumes(live);
+            setIsPreview(false);
+            void loadCompilations(live.map((volume) => volume.id));
+            fetchGeminiStatus()
+                .then((ready) => setGeminiReady(ready))
+                .catch(() => setGeminiReady(false));
+        } catch (error) {
+            setGeminiReady(null);
+            setCompilationsByVolume({});
+            if (error instanceof Error && error.message === 'preview-without-native-shell') {
+                setVolumes(PREVIEW_VOLUMES);
+                setIsPreview(true);
+            } else {
+                setVolumes(PREVIEW_VOLUMES);
+                setIsPreview(true);
+                setLoadError('No se pudo leer el librero local. Mostrando vista previa.');
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    }, [loadCompilations]);
+
+    useEffect(() => {
+        let active = true;
+        queueMicrotask(() => {
+            if (active) void loadVolumes();
+        });
+        return () => {
+            active = false;
+        };
+    }, [loadVolumes]);
+
+    const handleRefresh = useCallback(() => {
         setIsRefreshing(true);
-        setTimeout(() => setIsRefreshing(false), 1200);
-    };
+        void loadVolumes().finally(() => setIsRefreshing(false));
+    }, [loadVolumes]);
+
+    const openVolume = useCallback((volume: MagazineVolumeView) => {
+        // Transición de apertura del librero vivo: la revista se eleva y
+        // se disuelve antes de abrir su modal. Se cancela cualquier
+        // apertura previa para no abrir un tomo obsoleto con doble clic.
+        if (openTimerRef.current) clearTimeout(openTimerRef.current);
+        setOpeningVolumeId(volume.id);
+        openTimerRef.current = window.setTimeout(() => {
+            openTimerRef.current = null;
+            setSelectedVolume(volume);
+            setOpeningVolumeId(null);
+        }, 340);
+        setSelectedArticles([]);
+        setVolumeChapters([]);
+        setCompileJobId('');
+        setCompileFeedback(null);
+        if (isPreview) return;
+        setIsLoadingArticles(true);
+        fetchMagazineArticles(volume.id)
+            .then(setSelectedArticles)
+            .catch(() => setSelectedArticles([]))
+            .finally(() => setIsLoadingArticles(false));
+        setIsLoadingChapters(true);
+        fetchMagazineChapters(volume.id)
+            .then(setVolumeChapters)
+            .catch(() => setVolumeChapters([]))
+            .finally(() => setIsLoadingChapters(false));
+    }, [isPreview]);
+
+    const openArticle = useCallback(
+        (volume: MagazineVolumeView, articleId: string, target: MagazineEvidenceTarget | null = null) => {
+            setReaderVolume(volume);
+            setReader({ articleId, target });
+            setSelectedVolume(null);
+        },
+        [],
+    );
+
+    const closeReader = useCallback(() => {
+        setReader(null);
+        // Regresar: Artículo ← Tomo ← Librero (se reabre el tomo de origen).
+        if (readerVolume) {
+            openVolume(readerVolume);
+        }
+    }, [readerVolume, openVolume]);
+
+    // Tilt 3D premium en la portada (solo puntero fino, sin reduced-motion).
+    const handleBookTilt = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const px = (event.clientX - rect.left) / rect.width - 0.5;
+        const py = (event.clientY - rect.top) / rect.height - 0.5;
+        event.currentTarget.style.setProperty('--tilt-y', `${(px * 7).toFixed(2)}deg`);
+        event.currentTarget.style.setProperty('--tilt-x', `${(-py * 7).toFixed(2)}deg`);
+    }, []);
+
+    const resetBookTilt = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        event.currentTarget.style.removeProperty('--tilt-x');
+        event.currentTarget.style.removeProperty('--tilt-y');
+    }, []);
+
+    const refreshVolumeData = useCallback(async (volume: MagazineVolumeView) => {
+        try {
+            const [articles, compilations, live, chapters] = await Promise.all([
+                fetchMagazineArticles(volume.id),
+                fetchMagazineCompilations(volume.id),
+                fetchMagazineVolumes(),
+                fetchMagazineChapters(volume.id),
+            ]);
+            setSelectedArticles(articles);
+            setCompilationsByVolume((prev) => ({ ...prev, [volume.id]: compilations }));
+            setVolumes(live);
+            setVolumeChapters(chapters);
+        } catch {
+            /* la vista conserva los últimos datos leídos */
+        }
+    }, []);
+
+    const handleCompile = useCallback(async () => {
+        if (!selectedVolume || isCompiling) return;
+        const jobIds = compileJobId
+            .split(/[,\s]+/)
+            .map((s) => Number.parseInt(s.trim(), 10))
+            .filter((n) => Number.isInteger(n) && n > 0);
+
+        if (jobIds.length === 0) {
+            setCompileFeedback('Indica uno o más IDs numéricos de video (jobs) a compilar (ej. 1 o 1, 2, 3).');
+            return;
+        }
+        setIsCompiling(true);
+        setCompileFeedback(null);
+        try {
+            const outcome =
+                jobIds.length === 1
+                    ? await compileMagazineSource(jobIds[0], selectedVolume.id)
+                    : await compileMultiSourceEditorial(jobIds, selectedVolume.id);
+
+            const article = outcome.article_id ? ` · artículo ${outcome.article_id}` : '';
+            const version = outcome.version ? ` v${outcome.version}` : '';
+            const conflicts = outcome.conflict_count > 0 ? ` · ${outcome.conflict_count} conflicto(s)` : '';
+            const candidateInfo = outcome.candidate
+                ? ` · Candidato sugerido: “${outcome.candidate.suggested_title}”`
+                : '';
+            const unchanged = outcome.unchanged ? ' (sin cambios)' : '';
+
+            if (outcome.candidate) {
+                setCandidates((prev) => {
+                    const filtered = prev.filter((c) => c.compilationId !== outcome.compilation_id);
+                    return [
+                        ...filtered,
+                        {
+                            compilationId: outcome.compilation_id,
+                            volumeId: selectedVolume.id,
+                            candidate: outcome.candidate!,
+                        },
+                    ];
+                });
+            }
+
+            setCompileFeedback(
+                `${presentCompilationState(outcome.status)}${unchanged}${article}${version}${conflicts}${candidateInfo}. ${outcome.message}`,
+            );
+            await refreshVolumeData(selectedVolume);
+        } catch (error) {
+            setCompileFeedback(
+                error instanceof Error ? error.message : 'La compilación falló sin detalle.',
+            );
+            try {
+                const compilations = await fetchMagazineCompilations(selectedVolume.id);
+                setCompilationsByVolume((prev) => ({ ...prev, [selectedVolume.id]: compilations }));
+            } catch {
+                /* sin compilaciones legibles */
+            }
+        } finally {
+            setIsCompiling(false);
+        }
+    }, [selectedVolume, isCompiling, compileJobId, refreshVolumeData]);
+
+    const handleRetry = useCallback(async (compilationId: number) => {
+        if (!selectedVolume || isCompiling) return;
+        setIsCompiling(true);
+        setCompileFeedback(null);
+        try {
+            const outcome = await retryMagazineCompilation(compilationId);
+            setCompileFeedback(
+                `${presentCompilationState(outcome.status)}. ${outcome.message}`,
+            );
+            await refreshVolumeData(selectedVolume);
+        } catch (error) {
+            setCompileFeedback(
+                error instanceof Error ? error.message : 'El reintento falló sin detalle.',
+            );
+        } finally {
+            setIsCompiling(false);
+        }
+    }, [selectedVolume, isCompiling, refreshVolumeData]);
+
+    const filteredVolumes = useMemo(
+        () => filterMagazineVolumes(volumes, searchQuery),
+        [volumes, searchQuery],
+    );
+
+    const totalArticles = useMemo(
+        () => volumes.reduce((sum, volume) => sum + volume.articleCount, 0),
+        [volumes],
+    );
+    const totalSources = useMemo(
+        () => volumes.reduce((sum, volume) => sum + volume.videoCount, 0),
+        [volumes],
+    );
+
+    const modalLatest = !selectedVolume || isPreview
+        ? null
+        : latestCompilation(compilationsByVolume[selectedVolume.id] ?? []);
+    const modalRetryable = modalLatest !== null
+        && (modalLatest.status === 'failed'
+            || modalLatest.status === 'cancelled'
+            || modalLatest.status === 'requires_review');
 
     return (
-        <div className="w-full h-full flex flex-col overflow-y-auto custom-scrollbar p-6 lg:p-8 font-sans select-none relative">
+        <div className="w-full h-full flex flex-col overflow-y-auto custom-scrollbar p-4 lg:p-6 font-sans select-none relative">
             {/* Ambient Background Lighting */}
             <div className="absolute top-0 left-1/4 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
             <div className="absolute top-1/3 right-1/4 w-96 h-96 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -134,93 +439,196 @@ export function MagazinesBookshelf() {
                         </span>
                         <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-3">
                             Revistas &amp; Tomos Inteligentes
-                            <span className="text-[10px] font-mono tracking-wider font-semibold uppercase px-2.5 py-0.5 rounded-full bg-emerald-400/10 border border-emerald-400/20 text-emerald-300">
-                                Gemini 3.8 Flash
+                            <span className="text-[10px] font-mono tracking-wider font-semibold uppercase px-2.5 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-white/60">
+                                Motor editorial · Fase 2
                             </span>
+                            {isPreview && (
+                                <span className="text-[10px] font-mono tracking-wider font-semibold uppercase px-2.5 py-0.5 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-300">
+                                    Vista previa
+                                </span>
+                            )}
                         </h1>
                     </div>
                     <p className="text-xs text-white/50 max-w-2xl leading-relaxed">
-                        Librero editorial dinámico. Transforma automáticamente videos indexados en volúmenes temáticos: recetas con ingredientes tabulados, guías técnicas cronometradas y galerías de fotogramas clave.
+                        Librero vivo: compila videos de la biblioteca en artículos trazables
+                        (fuentes, evidencia, versiones, conflictos). Requiere clave Gemini
+                        en el proceso nativo; sin ella, la compilación falla cerrado.
                     </p>
                 </div>
 
                 <div className="flex items-center gap-2.5 shrink-0">
+                    <label className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/[0.05] border border-white/10 text-white/70 focus-within:border-white/25 transition-all">
+                        <FaMagnifyingGlass size={12} className="text-white/40 shrink-0" />
+                        <input
+                            type="search"
+                            value={searchQuery}
+                            onChange={(event) => setSearchQuery(event.target.value)}
+                            placeholder="Buscar tomos…"
+                            aria-label="Buscar tomos del librero"
+                            className="bg-transparent outline-none text-xs placeholder:text-white/30 w-36 md:w-44"
+                        />
+                    </label>
                     <button
                         type="button"
                         onClick={handleRefresh}
-                        disabled={isRefreshing}
+                        disabled={isRefreshing || isLoading}
                         className="px-3.5 py-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-white text-xs font-medium flex items-center gap-2 transition-all disabled:opacity-50"
-                        title="Re-sincronizar librero con videos indexados"
+                        title="Releer tomos desde la biblioteca local"
                     >
                         <FaArrowRotateLeft size={12} className={isRefreshing ? 'animate-spin text-sky-400' : 'text-white/60'} />
-                        <span>{isRefreshing ? 'Sincronizando...' : 'Actualizar Tomos'}</span>
+                        <span>{isRefreshing ? 'Leyendo…' : 'Actualizar'}</span>
                     </button>
                     <button
                         type="button"
-                        className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-medium flex items-center gap-2 transition-all shadow-sm"
-                        title="Crear un nuevo tomo personalizado"
+                        disabled
+                        className="px-3.5 py-2 rounded-xl bg-white/[0.03] border border-white/10 text-white/35 text-xs font-medium flex items-center gap-2 cursor-not-allowed"
+                        title="La creación de tomos personalizados llega en una fase posterior"
                     >
-                        <FaPlus size={12} className="text-white/70" />
+                        <FaPlus size={12} />
                         <span>Nuevo Tomo</span>
                     </button>
                 </div>
             </div>
 
-            {/* AI Status Banner */}
-            <div className="my-5 p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.08] backdrop-blur-md flex items-center justify-between gap-4 relative z-10 shrink-0">
+            {/* Reader (Artículo ← Tomo ← Librero) o estantería */}
+            {reader && readerVolume ? (
+                <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar py-4 relative z-10">
+                    <KioscoReader
+                        volume={readerVolume}
+                        articleId={reader.articleId}
+                        initialTarget={reader.target}
+                        onBack={closeReader}
+                    />
+                </div>
+            ) : (
+                <>
+            {/* Status Banner */}
+            <div className="my-3 p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.08] backdrop-blur-md flex items-center justify-between gap-4 relative z-10 shrink-0">
                 <div className="flex items-center gap-3">
                     <span className="relative flex h-2.5 w-2.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                        <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${isPreview ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                        <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isPreview ? 'bg-amber-500' : 'bg-emerald-500'}`} />
                     </span>
                     <div className="flex flex-col">
                         <span className="text-xs font-semibold text-white/90 flex items-center gap-2">
-                            Motor Editorial Activo en Tiempo Real
-                            <span className="text-[10px] text-white/40 font-mono">· Ingesta continua</span>
+                            {isPreview
+                                ? 'Vista previa sin motor local'
+                                : 'Librero local sincronizado'}
+                            <span className="text-[10px] text-white/40 font-mono">· SQLite</span>
                         </span>
                         <span className="text-[11px] text-white/50">
-                            A medida que agregas o sincronizas videos, Gemini 3.8 Flash los clasifica y genera fascículos ilustrados con timing exacto.
+                            {isPreview
+                                ? 'Abre Pulsaria en su ventana de escritorio para leer tus tomos reales.'
+                                : loadError
+                                    ?? (geminiReady === null
+                                        ? 'Consultando motor editorial…'
+                                        : geminiReady
+                                            ? 'Motor editorial listo: evidencia → Gemini → validación → SQLite.'
+                                            : 'Motor editorial presente pero sin clave Gemini: compilar fallará cerrado hasta configurarla en Ajustes.')}
                         </span>
                     </div>
                 </div>
                 <div className="hidden sm:flex items-center gap-3 text-xs text-white/50 font-mono">
                     <span>{volumes.length} Tomos</span>
                     <span>·</span>
-                    <span>41 Artículos Extraídos</span>
+                    <span>{totalArticles} Artículos</span>
+                    <span>·</span>
+                    <span>{totalSources} Fuentes</span>
                 </div>
             </div>
 
             {/* Bookshelf Presentation */}
-            <div className="flex-1 min-h-0 flex flex-col gap-10 py-4 relative z-10">
-                {/* Upper Shelf */}
+            <div className="flex-1 min-h-0 flex flex-col gap-6 py-3 relative z-10">
                 <div className="flex flex-col">
                     <div className="flex items-center justify-between pb-3 px-2">
                         <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-2">
                             <FaFolder size={12} />
                             Estantería Principal · Volúmenes Activos
                         </span>
-                        <span className="text-[11px] text-white/35 font-mono">Visualización 3D</span>
+                        <span className="text-[11px] text-white/35 font-mono">
+                            {isLoading ? 'Leyendo…' : `${filteredVolumes.length} visibles`}
+                        </span>
                     </div>
 
-                    {/* Books Grid on Shelf */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 px-3 pt-4 pb-6">
-                        {volumes.map((volume) => {
-                            const isCompiling = volume.syncStatus === 'compiling';
-                            const isLive = volume.syncStatus === 'live';
+                    {/* Tip de sala + caption viva con datos reales del tomo */}
+                    <p className={`text-center font-mono text-[10px] tracking-[0.26em] uppercase text-white/40 transition-opacity duration-500 px-3 ${hoveredVolume ? 'opacity-0' : 'opacity-100'}`}>
+                        elige una revista para abrirla
+                    </p>
+                    <div
+                        aria-live="polite"
+                        className={`mx-auto flex items-center gap-3.5 px-[18px] py-2.5 rounded-[10px] max-w-[94vw] overflow-hidden border border-white/10 bg-[#100e16]/90 font-mono text-[11px] tracking-[0.06em] text-white/50 transition-all duration-300 whitespace-nowrap ${hoveredVolume ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                    >
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#e2607f] shrink-0 animate-pulse" />
+                        {hoveredVolume && (
+                            <>
+                                <b className="text-white font-medium tracking-[0.1em]">{hoveredVolume.title}</b>
+                                <em className="not-italic text-white/30">{hoveredVolume.volumeNumber}</em>
+                                <em className="not-italic text-white/30">{hoveredVolume.category}</em>
+                                <em className="not-italic text-white/30">
+                                    {hoveredVolume.articleCount} {hoveredVolume.articleCount === 1 ? 'artículo' : 'artículos'} · {hoveredVolume.videoCount} {hoveredVolume.videoCount === 1 ? 'fuente' : 'fuentes'}
+                                </em>
+                                <em className="not-italic text-white/30">actualizado {timeAgoEs(hoveredVolume.updatedAt)}</em>
+                            </>
+                        )}
+                    </div>
 
-                            return (
+                    {isLoading ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 px-3 pt-4 pb-6">
+                            {[0, 1, 2, 3].map((skeleton) => (
+                                <div key={skeleton} className="h-72 w-full rounded-2xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
+                            ))}
+                        </div>
+                    ) : filteredVolumes.length === 0 ? (
+                        <div className="mx-3 mb-6 p-10 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-center flex flex-col items-center gap-2">
+                            <FaBookOpen size={22} className="text-white/25" />
+                            <p className="text-sm text-white/70 font-medium">
+                                {searchQuery.trim()
+                                    ? `Sin tomos para “${searchQuery.trim()}”.`
+                                    : 'Aún no hay tomos en el librero.'}
+                            </p>
+                            <p className="text-[11px] text-white/40">
+                                {searchQuery.trim()
+                                    ? 'Prueba con otro término del título, categoría o descripción.'
+                                    : 'Los tomos canónicos se siembran al iniciar la base local.'}
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 px-3 pt-4 pb-6">
+                            {filteredVolumes.map((volume, cardIndex) => {
+                                const latest = isPreview
+                                    ? null
+                                    : latestCompilation(compilationsByVolume[volume.id] ?? []);
+                                const badge = latest
+                                    ? compilationBadge(latest)
+                                    : {
+                                        dot: 'bg-white/25',
+                                        text: 'text-white/35',
+                                        label: isPreview ? 'Vista previa' : 'Sin compilaciones',
+                                    };
+                                const coverHue = hexToHue(volume.color);
+                                const coverSeed = hashSeed(volume.id);
+                                return (
                                 <motion.div
                                     key={volume.id}
+                                    initial={{ opacity: 0, y: 26 }}
                                     whileHover={{ y: -8, scale: 1.02 }}
-                                    transition={{ type: 'spring', stiffness: 350, damping: 25 }}
-                                    onClick={() => setSelectedVolume(volume)}
+                                    transition={{ type: 'spring', stiffness: 350, damping: 25, delay: (cardIndex % 8) * 0.05 }}
+                                    onClick={() => openVolume(volume)}
+                                    onMouseEnter={() => setHoveredVolume(volume)}
+                                    onMouseLeave={() => setHoveredVolume((current) => current?.id === volume.id ? null : current)}
+                                    onFocus={() => setHoveredVolume(volume)}
+                                    onBlur={() => setHoveredVolume((current) => current?.id === volume.id ? null : current)}
+                                    animate={openingVolumeId === volume.id ? { opacity: 0, y: -30, scale: 1.16 } : { opacity: 1, y: 0, scale: 1 }}
                                     className="cursor-pointer group flex flex-col"
                                 >
                                     {/* 3D Book Object */}
                                     <div
+                                        onMouseMove={handleBookTilt}
+                                        onMouseLeave={resetBookTilt}
                                         className="relative h-72 w-full rounded-2xl overflow-hidden border border-white/10 transition-all flex shadow-[0_15px_35px_rgba(0,0,0,0.6)] group-hover:shadow-[0_20px_45px_rgba(0,0,0,0.8)] group-hover:border-white/20"
                                         style={{
                                             background: volume.coverGradient,
+                                            transform: 'perspective(900px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg))',
                                         }}
                                     >
                                         {/* Spine (Lomo del libro/tomo) */}
@@ -237,6 +645,17 @@ export function MagazinesBookshelf() {
 
                                         {/* Front Cover (Portada de la revista) */}
                                         <div className="flex-1 flex flex-col justify-between p-4 relative overflow-hidden">
+                                            {/* Arte procedural de portada (semilla del tomo) */}
+                                            <div
+                                                aria-hidden="true"
+                                                className="absolute inset-0 opacity-45 group-hover:opacity-60 transition-opacity pointer-events-none [&>svg]:h-full [&>svg]:w-full"
+                                                dangerouslySetInnerHTML={{ __html: coverArtSVG(coverSeed, coverHue) }}
+                                            />
+                                            <div
+                                                aria-hidden="true"
+                                                className="absolute inset-0 pointer-events-none"
+                                                style={{ background: 'linear-gradient(180deg, rgba(8,6,14,0.42) 0%, rgba(8,6,14,0.05) 40%, rgba(6,4,12,0.78) 100%)' }}
+                                            />
                                             {/* Decorative Ambient Aura */}
                                             <div
                                                 className="absolute -top-10 -right-10 w-32 h-32 rounded-full blur-2xl opacity-40 group-hover:opacity-70 transition-opacity"
@@ -248,17 +667,9 @@ export function MagazinesBookshelf() {
                                                 <span className="text-[9px] font-mono font-bold tracking-wider text-white/50 bg-black/40 px-2 py-0.5 rounded border border-white/5">
                                                     PULSARIA EDITORIAL
                                                 </span>
-                                                {isCompiling ? (
-                                                    <span className="flex items-center gap-1 text-[9px] font-mono font-bold text-amber-300 bg-amber-400/15 border border-amber-400/30 px-2 py-0.5 rounded-full animate-pulse">
-                                                        <FaWandMagicSparkles size={9} />
-                                                        Compilando
-                                                    </span>
-                                                ) : isLive ? (
-                                                    <span className="flex items-center gap-1 text-[9px] font-mono font-bold text-emerald-300 bg-emerald-400/15 border border-emerald-400/30 px-2 py-0.5 rounded-full">
-                                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                                                        En Vivo
-                                                    </span>
-                                                ) : null}
+                                                <span className="text-[9px] font-mono font-bold text-white/60 bg-white/[0.07] border border-white/10 px-2 py-0.5 rounded-full">
+                                                    {presentEditorialState(volume.editorialState)}
+                                                </span>
                                             </div>
 
                                             {/* Center Title */}
@@ -276,8 +687,9 @@ export function MagazinesBookshelf() {
 
                                             {/* Footer Badges */}
                                             <div className="pt-2 border-t border-white/[0.08] flex items-center justify-between text-[10px] text-white/50 relative z-10">
-                                                <span className="font-mono">{volume.articleCount} fascículos</span>
-                                                <span className="text-white/40">{volume.lastUpdated}</span>
+                                                <span className="font-mono">
+                                                    {volume.articleCount} {volume.articleCount === 1 ? 'artículo' : 'artículos'} · {volume.videoCount} {volume.videoCount === 1 ? 'fuente' : 'fuentes'}
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
@@ -292,28 +704,89 @@ export function MagazinesBookshelf() {
                                         </span>
                                         <FaChevronRight size={10} className="text-white/30 group-hover:text-white group-hover:translate-x-0.5 transition-all shrink-0 ml-1" />
                                     </div>
-                                    {volume.syncMessage && (
-                                        <span className="px-1 text-[10px] text-amber-300/80 truncate mt-0.5">
-                                            {volume.syncMessage}
-                                        </span>
-                                    )}
+                                    <div className="mt-1 px-1 flex items-center gap-1.5 text-[10px] font-mono">
+                                        <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                                        <span className={badge.text}>{badge.label}</span>
+                                    </div>
                                 </motion.div>
-                            );
-                        })}
-                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {/* Propuestas Editoriales: Candidatos a Nuevos Tomos (Fase 4) */}
+                    {candidates.length > 0 && (
+                        <div className="flex flex-col gap-3 pt-6 border-t border-white/[0.08]">
+                            <div className="flex items-center justify-between px-2">
+                                <span className="text-xs font-bold uppercase tracking-[0.16em] text-amber-400/90 flex items-center gap-2">
+                                    <FaWandMagicSparkles size={12} className="text-amber-400" />
+                                    Propuestas Editoriales · Nuevos Tomos Candidatos
+                                </span>
+                                <span className="text-[11px] text-amber-300/60 font-mono">
+                                    {candidates.length} {candidates.length === 1 ? 'propuesta' : 'propuestas'} sugeridas
+                                </span>
+                            </div>
+                            <p className="text-xs text-white/50 px-2 max-w-3xl leading-relaxed">
+                                El motor editorial identificó que el contenido analizado sobrepasa el alcance de los tomos existentes y sugiere crear nuevos tomos independientes.
+                                <strong className="text-white/80 font-medium ml-1">
+                                    Estas propuestas NO han creado tomos automáticamente
+                                </strong>; permanecen como sugerencias hasta que decidas aceptarlas en una fase futura.
+                            </p>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-2 pt-2">
+                                {candidates.map(({ compilationId, candidate }) => (
+                                    <div
+                                        key={compilationId}
+                                        className="p-4 rounded-2xl bg-amber-500/[0.04] border border-amber-500/20 hover:border-amber-500/35 transition-all flex flex-col justify-between gap-3 relative overflow-hidden"
+                                    >
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/25 text-amber-300">
+                                                    Candidato Sugerido
+                                                </span>
+                                                <span className="text-[10px] font-mono text-white/40">
+                                                    Confianza: {Math.round((candidate.confidence ?? 0.85) * 100)}%
+                                                </span>
+                                            </div>
+                                            <h4 className="text-sm font-bold text-white tracking-tight">
+                                                {candidate.suggested_title}
+                                            </h4>
+                                            <p className="text-xs text-white/60 leading-relaxed line-clamp-3">
+                                                {candidate.rationale}
+                                            </p>
+                                        </div>
+
+                                        <div className="pt-2 border-t border-white/[0.06] flex flex-col gap-1 text-[11px] text-white/40 font-mono">
+                                            <div className="flex items-center justify-between">
+                                                <span>Categoría: <span className="text-white/70">{candidate.suggested_category}</span></span>
+                                                {candidate.suggested_chapter && (
+                                                    <span>Capítulo: <span className="text-white/70">{candidate.suggested_chapter}</span></span>
+                                                )}
+                                            </div>
+                                            <div className="text-[10px] text-white/30 truncate">
+                                                Fuentes de soporte: Jobs #{candidate.supporting_job_ids.join(', #')}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
+                </>
+            )}
 
-            {/* Modal de Detalle / Maqueta de Revista Digital */}
+            {/* Volume Detail Modal */}
             <AnimatePresence>
-                {selectedVolume && (
+                {selectedVolume && !reader && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl">
                         <motion.div
                             initial={{ scale: 0.95, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-                            className="w-full max-w-4xl max-h-[90vh] rounded-3xl bg-[#0d0f17] border border-white/15 overflow-hidden flex flex-col shadow-[0_30px_90px_rgba(0,0,0,0.95)]"
+                            className="w-full max-w-3xl max-h-[90vh] rounded-3xl bg-[#0d0f17] border border-white/15 overflow-hidden flex flex-col shadow-[0_30px_90px_rgba(0,0,0,0.95)]"
                         >
                             {/* Modal Header */}
                             <div className="p-5 border-b border-white/10 flex items-center justify-between gap-4 shrink-0 bg-white/[0.02]">
@@ -330,7 +803,7 @@ export function MagazinesBookshelf() {
                                                 {selectedVolume.volumeNumber}
                                             </span>
                                             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-white/70">
-                                                Curaduría Gemini 3.8 Flash
+                                                {presentEditorialState(selectedVolume.editorialState)}
                                             </span>
                                         </div>
                                         <h2 className="text-lg font-bold text-white leading-tight">
@@ -343,144 +816,265 @@ export function MagazinesBookshelf() {
                                     type="button"
                                     onClick={() => setSelectedVolume(null)}
                                     className="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                                    aria-label="Cerrar detalle del tomo"
                                 >
                                     <FaXmark size={14} />
                                 </button>
                             </div>
 
-                            {/* Modal Body: Estructura y Maqueta Editorial */}
-                            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
-                                {/* Volume Intro Card */}
+                            {/* Modal Body */}
+                            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5">
                                 <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex flex-col gap-2">
-                                    <span className="text-xs font-semibold text-white/90">Estrategia del Tomo</span>
+                                    <span className="text-xs font-semibold text-white/90">Sobre este tomo</span>
                                     <p className="text-xs text-white/60 leading-relaxed">
                                         {selectedVolume.description}
                                     </p>
-                                    <div className="flex flex-wrap gap-1.5 mt-2">
-                                        {selectedVolume.tags.map((tag, idx) => (
-                                            <span key={idx} className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/5 text-[11px] text-white/70 font-medium">
-                                                #{tag}
-                                            </span>
-                                        ))}
-                                    </div>
+                                    <span className="text-[11px] text-white/40 font-mono">
+                                        {selectedVolume.articleCount} {selectedVolume.articleCount === 1 ? 'artículo' : 'artículos'} · {selectedVolume.videoCount} {selectedVolume.videoCount === 1 ? 'fuente' : 'fuentes'} · {selectedVolume.category}
+                                    </span>
                                 </div>
 
-                                {/* Maqueta de Revista Digital */}
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs font-bold uppercase tracking-wider text-white/40">
-                                            Maqueta Editorial de Fascículo (Estructura en Tiempo Real)
+                                            Compilación editorial
                                         </span>
-                                        <span className="text-[11px] text-sky-400 font-mono flex items-center gap-1.5">
-                                            <FaBrain size={12} />
-                                            Extracción multimodal activa
+                                        {modalLatest && (
+                                            <span className="text-[11px] text-white/40 font-mono">
+                                                #{modalLatest.id} · {presentCompilationState(modalLatest.status)}
+                                                {modalLatest.status === 'processing' ? ` · ${modalLatest.progress}%` : ''}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {isPreview ? (
+                                        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+                                            <p className="text-xs text-white/60">
+                                                Vista previa: compilar requiere la app de escritorio con
+                                                clave Gemini en el proceso nativo.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06] flex flex-col gap-3">
+                                            <p className="text-[11px] text-white/50 leading-relaxed">
+                                                {modalLatest
+                                                    ? (modalLatest.error_message ?? modalLatest.message ?? 'Sin mensaje del motor.')
+                                                    : 'Este tomo aún no tiene compilaciones. Indica el ID del video (job) para compilarlo.'}
+                                            </p>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    value={compileJobId}
+                                                    onChange={(event) => setCompileJobId(event.target.value)}
+                                                    placeholder="ID(s) de video: ej. 1 o 1, 2, 3"
+                                                    aria-label="ID(s) de los videos a compilar"
+                                                    disabled={isCompiling}
+                                                    className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-xs text-white placeholder:text-white/30 focus:border-white/25 disabled:opacity-50"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void handleCompile()}
+                                                    disabled={isCompiling}
+                                                    className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold transition-all disabled:opacity-50 shrink-0"
+                                                    title="Compilar uno o varios videos hacia este tomo (soporta síntesis multi-fuente)"
+                                                >
+                                                    {isCompiling ? 'Compilando…' : 'Compilar'}
+                                                </button>
+                                                {modalRetryable && modalLatest && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleRetry(modalLatest.id)}
+                                                        disabled={isCompiling}
+                                                        className="px-3.5 py-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-white text-xs font-medium flex items-center gap-2 transition-all disabled:opacity-50 shrink-0"
+                                                        title="Reejecutar la última compilación con sus parámetros guardados"
+                                                    >
+                                                        <FaArrowRotateLeft size={11} className={isCompiling ? 'animate-spin' : ''} />
+                                                        <span>Reintentar</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                            {compileFeedback && (
+                                                <p className="text-[11px] text-white/60 leading-relaxed break-words">
+                                                    {compileFeedback}
+                                                </p>
+                                            )}
+                                            {geminiReady === false && (
+                                                <p className="text-[11px] text-amber-300/80">
+                                                    Sin clave Gemini en el proceso nativo: la compilación
+                                                    fallará cerrado hasta configurarla en Ajustes.
+                                                </p>
+                                            )}
+
+                                            {/* Propuesta de nuevo tomo detectada en este tomo (Fase 4) */}
+                                            {candidates.filter((c) => c.volumeId === selectedVolume.id).map(({ compilationId, candidate }) => (
+                                                <div
+                                                    key={compilationId}
+                                                    className="p-3.5 rounded-2xl bg-amber-500/[0.05] border border-amber-500/25 flex flex-col gap-1.5"
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-[10px] font-mono font-bold uppercase text-amber-300 flex items-center gap-1.5">
+                                                            <FaWandMagicSparkles size={11} />
+                                                            Sugerencia editorial detectada
+                                                        </span>
+                                                        <span className="text-[10px] font-mono text-white/40">
+                                                            Confianza: {Math.round((candidate.confidence ?? 0.85) * 100)}%
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs font-semibold text-white">
+                                                        Propuesta de nuevo tomo: “{candidate.suggested_title}”
+                                                    </p>
+                                                    <p className="text-[11px] text-white/60 leading-relaxed">
+                                                        {candidate.rationale}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold uppercase tracking-wider text-white/40">
+                                            Capítulos
+                                        </span>
+                                        <span className="text-[11px] text-white/40 font-mono">
+                                            {isLoadingChapters ? 'Leyendo…' : `${volumeChapters.length}`}
                                         </span>
                                     </div>
 
-                                    {/* Mockup Page Spread */}
-                                    <div className="p-6 rounded-2xl bg-black/40 border border-white/10 flex flex-col gap-5">
-                                        {/* Mockup Magazine Header */}
-                                        <div className="flex items-center justify-between border-b border-white/10 pb-3 text-xs text-white/40 font-serif italic">
-                                            <span>Pulsaria Gourmet &amp; Craft · Fascículo #04</span>
-                                            <span>Edición Dinámica Generada</span>
+                                    {isPreview ? (
+                                        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+                                            <p className="text-xs text-white/60">
+                                                Vista previa: los capítulos se leen desde la base local en la app de escritorio.
+                                            </p>
                                         </div>
-
-                                        {/* Content Grid */}
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                                            {/* Left: Keyframe Photo / Visual Evidence */}
-                                            <div className="flex flex-col gap-2">
-                                                <div className="aspect-[4/5] rounded-xl bg-gradient-to-br from-white/10 via-black/40 to-black/80 border border-white/10 flex flex-col items-center justify-center p-4 text-center relative overflow-hidden">
-                                                    <FaCamera size={24} className="text-white/30 mb-2" />
-                                                    <span className="text-xs font-bold text-white/70">Fotograma Clave</span>
-                                                    <span className="text-[10px] text-white/40 mt-1">Seleccionado por nitidez y contraste visual por Gemini</span>
-                                                    <span className="absolute bottom-2 left-2 text-[9px] font-mono text-white/30 bg-black/60 px-1.5 py-0.5 rounded">
-                                                        TC: 00:18.4
+                                    ) : isLoadingChapters ? (
+                                        <div className="h-12 rounded-xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
+                                    ) : volumeChapters.length === 0 ? (
+                                        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
+                                            <p className="text-xs text-white/60">
+                                                Este tomo aún no tiene capítulos. Los artículos sin capítulo aparecen abajo.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <ol className="flex flex-col gap-1.5">
+                                            {volumeChapters.map((chapter) => {
+                                                const count = selectedArticles.filter(
+                                                    (article) => article.chapter_id === chapter.id,
+                                                ).length;
+                                                return (
+                                                    <li
+                                                        key={chapter.id}
+                                                        className="px-4 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center gap-3"
+                                                    >
+                                                        <span className="text-[11px] font-mono font-bold text-white/40 shrink-0">
+                                                            {String(chapter.ordinal + 1).padStart(2, '0')}
+                                                        </span>
+                                                        <span className="flex flex-col min-w-0">
+                                                            <span className="text-[13px] font-semibold text-white/85 truncate">
+                                                                {chapter.title}
+                                                            </span>
+                                                            {chapter.description && (
+                                                                <span className="text-[11px] text-white/40 truncate">
+                                                                    {chapter.description}
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                        <span className="ml-auto text-[11px] text-white/35 font-mono shrink-0">
+                                                            {count} {count === 1 ? 'artículo' : 'artículos'}
+                                                        </span>
+                                                    </li>
+                                                );
+                                            })}
+                                            {selectedArticles.filter((article) => article.chapter_id === null
+                                                || article.chapter_id === undefined).length > 0 && (
+                                                <li className="px-4 py-2 rounded-xl bg-white/[0.01] border border-dashed border-white/10 flex items-center justify-between">
+                                                    <span className="text-xs text-white/50">Sin capítulo</span>
+                                                    <span className="text-[11px] text-white/35 font-mono">
+                                                        {selectedArticles.filter((article) => article.chapter_id === null
+                                                            || article.chapter_id === undefined).length}
                                                     </span>
-                                                </div>
-                                                <span className="text-[10px] text-white/40 italic text-center">Figura 1.1 · Emplatado final</span>
-                                            </div>
+                                                </li>
+                                            )}
+                                        </ol>
+                                    )}
+                                </div>
 
-                                            {/* Center: Ingredients / Structured Data */}
-                                            <div className="flex flex-col gap-3 p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                                                <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
-                                                    <FaFileLines size={12} />
-                                                    <span>Ingredientes / Materiales Tabulados</span>
-                                                </div>
-                                                <ul className="text-xs text-white/70 space-y-2 leading-relaxed">
-                                                    <li className="flex items-center justify-between border-b border-white/5 pb-1">
-                                                        <span>• Harina de trigo</span>
-                                                        <span className="font-mono text-white/40">250g</span>
-                                                    </li>
-                                                    <li className="flex items-center justify-between border-b border-white/5 pb-1">
-                                                        <span>• Mantequilla sin sal</span>
-                                                        <span className="font-mono text-white/40">120g</span>
-                                                    </li>
-                                                    <li className="flex items-center justify-between border-b border-white/5 pb-1">
-                                                        <span>• Azúcar glass</span>
-                                                        <span className="font-mono text-white/40">80g</span>
-                                                    </li>
-                                                    <li className="flex items-center justify-between border-b border-white/5 pb-1">
-                                                        <span>• Extracto de vainilla</span>
-                                                        <span className="font-mono text-white/40">1 cdta (5ml)</span>
-                                                    </li>
-                                                </ul>
-                                                <div className="mt-auto p-2 rounded-lg bg-amber-400/10 border border-amber-400/20 text-[10px] text-amber-200">
-                                                    * Cantidades y unidades calculadas por síntesis de voz y OCR.
-                                                </div>
-                                            </div>
-
-                                            {/* Right: Step-by-Step Timed Instructions */}
-                                            <div className="flex flex-col gap-3 p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                                                <div className="flex items-center gap-2 text-xs font-bold text-sky-300">
-                                                    <FaClock size={12} />
-                                                    <span>Pasos Cronometrados con Video</span>
-                                                </div>
-                                                <div className="space-y-2.5 text-xs text-white/70">
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <div className="flex items-center justify-between text-[10px] font-mono text-sky-400">
-                                                            <span>Paso 1: Pomada de mantequilla</span>
-                                                            <span className="bg-sky-400/10 px-1 rounded">0:00 - 0:14</span>
-                                                        </div>
-                                                        <p className="text-[11px] text-white/60 leading-snug">
-                                                            Acremar la mantequilla a temperatura ambiente hasta obtener textura suave.
-                                                        </p>
-                                                    </div>
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <div className="flex items-center justify-between text-[10px] font-mono text-sky-400">
-                                                            <span>Paso 2: Integración seca</span>
-                                                            <span className="bg-sky-400/10 px-1 rounded">0:15 - 0:38</span>
-                                                        </div>
-                                                        <p className="text-[11px] text-white/60 leading-snug">
-                                                            Tamizar la harina e incorporar en dos tandas sin sobrebatir la masa.
-                                                        </p>
-                                                    </div>
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <div className="flex items-center justify-between text-[10px] font-mono text-sky-400">
-                                                            <span>Paso 3: Horneado &amp; Reposo</span>
-                                                            <span className="bg-sky-400/10 px-1 rounded">0:39 - 0:58</span>
-                                                        </div>
-                                                        <p className="text-[11px] text-white/60 leading-snug">
-                                                            Hornear a 180°C durante 12 minutos hasta dorar los bordes.
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold uppercase tracking-wider text-white/40">
+                                            Artículos del tomo
+                                        </span>
+                                        <span className="text-[11px] text-white/40 font-mono">
+                                            {isLoadingArticles ? 'Leyendo…' : `${selectedArticles.length} visibles`}
+                                        </span>
                                     </div>
+
+                                    {isPreview ? (
+                                        <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-center">
+                                            <p className="text-xs text-white/60">
+                                                Vista previa: los artículos se leen desde la base local en la app de escritorio.
+                                            </p>
+                                        </div>
+                                    ) : isLoadingArticles ? (
+                                        <div className="flex flex-col gap-2">
+                                            {[0, 1].map((skeleton) => (
+                                                <div key={skeleton} className="h-16 rounded-xl bg-white/[0.03] border border-white/[0.06] animate-pulse" />
+                                            ))}
+                                        </div>
+                                    ) : selectedArticles.length === 0 ? (
+                                        <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-center flex flex-col items-center gap-2">
+                                            <FaFileLines size={18} className="text-white/25" />
+                                            <p className="text-xs text-white/60">
+                                                Este tomo aún no tiene artículos. Se publicarán aquí cuando el motor
+                                                editorial procese videos de la biblioteca.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <ul className="flex flex-col gap-2">
+                                            {selectedArticles.map((article) => (
+                                                <li key={article.id}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => selectedVolume && openArticle(selectedVolume, article.id)}
+                                                        className="w-full text-left p-3.5 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.06] hover:border-white/[0.12] flex flex-col gap-1 transition-all"
+                                                    >
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="text-[13px] font-semibold text-white/90 truncate">
+                                                            {article.title}
+                                                        </span>
+                                                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.06] text-white/60 shrink-0">
+                                                            {presentEditorialState(article.editorial_state)} · v{article.active_version}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[11px] text-white/50 line-clamp-2 leading-relaxed">
+                                                        {article.summary}
+                                                    </p>
+                                                    <span className="text-[10px] text-white/35 font-mono flex items-center gap-1.5">
+                                                        <FaClock size={10} />
+                                                        {article.article_type} · abrir lector
+                                                        <FaChevronRight size={9} className="text-white/25" />
+                                                    </span>
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
                                 </div>
                             </div>
 
                             {/* Modal Footer */}
                             <div className="p-4 border-t border-white/10 bg-white/[0.02] flex items-center justify-between shrink-0">
                                 <span className="text-xs text-white/50">
-                                    Al agregar más videos de este tema, se anexan automáticamente como nuevas páginas del tomo.
+                                    Pulsa un artículo para abrir el lector con su evidencia y fuentes.
                                 </span>
                                 <button
                                     type="button"
                                     onClick={() => setSelectedVolume(null)}
                                     className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold transition-all"
                                 >
-                                    Cerrar Vista Previa
+                                    Cerrar
                                 </button>
                             </div>
                         </motion.div>

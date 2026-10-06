@@ -1,27 +1,22 @@
 'use client';
 
-import type { ComponentType } from 'react';
 import Image from 'next/image';
-import { FaMagnifyingGlass, FaBookOpen } from '@/components/icon-library';
 import { useI18n } from '@/lib/i18n';
 
 export type GlobalSection = 'home' | 'profiles' | 'activity' | 'library' | 'magazines' | 'settings';
-
-type RailIcon = ComponentType<{ size?: number; className?: string }>;
 
 interface RailButtonProps {
     section: GlobalSection;
     label: string;
     activeSection: GlobalSection;
     onNavigate: (section: GlobalSection) => void;
-    Icon?: RailIcon;
     artwork?: string;
     activityCount?: number;
 }
 
 interface RailActionProps {
     label: string;
-    Icon: RailIcon;
+    artwork: string;
     onClick: () => void;
     pressed?: boolean;
 }
@@ -31,7 +26,6 @@ function RailButton({
     label,
     activeSection,
     onNavigate,
-    Icon,
     artwork,
     activityCount = 0,
 }: RailButtonProps) {
@@ -43,13 +37,12 @@ function RailButton({
             type="button"
             className={`pulsaria-nav-item${isActive ? ' pulsaria-nav-item--active' : ''}`}
             aria-label={label}
+            data-tooltip={label}
             aria-current={isActive ? 'page' : undefined}
             onClick={() => onNavigate(section)}
         >
             {artwork ? (
-                <Image src={artwork} alt="" aria-hidden="true" width={24} height={24} unoptimized draggable={false} className="pulsaria-nav-item__artwork" />
-            ) : Icon ? (
-                <Icon size={16} className="pulsaria-nav-item__icon" />
+                <Image src={artwork} alt="" aria-hidden="true" width={46} height={46} unoptimized draggable={false} className="pulsaria-nav-item__artwork" />
             ) : null}
             {section === 'activity' && activityCount > 0 && (
                 <span className="pulsaria-nav-item__badge" aria-label={t('navPendingActivityCount', { count: activityCount })}>
@@ -76,24 +69,26 @@ function HomeRailButton({
             type="button"
             className={`pulsaria-nav-item${isActive ? ' pulsaria-nav-item--active' : ''}`}
             aria-label={label}
+            data-tooltip={label}
             aria-current={isActive ? 'page' : undefined}
             onClick={() => onNavigate('home')}
         >
-            <Image src="/icons/menu/home.webp" alt="" aria-hidden="true" width={24} height={24} unoptimized draggable={false} className="pulsaria-nav-item__artwork" />
+            <Image src="/icons/menu/dreamcore-v2/home.png" alt="" aria-hidden="true" width={46} height={46} unoptimized draggable={false} className="pulsaria-nav-item__artwork" />
         </button>
     );
 }
 
-function RailAction({ label, Icon, onClick, pressed }: RailActionProps) {
+function RailAction({ label, artwork, onClick, pressed }: RailActionProps) {
     return (
         <button
             type="button"
             className={`pulsaria-nav-item${pressed ? ' pulsaria-nav-item--active' : ''}`}
             aria-label={label}
+            data-tooltip={label}
             aria-pressed={pressed}
             onClick={onClick}
         >
-            <Icon size={16} className="pulsaria-nav-item__icon" />
+            <Image src={artwork} alt="" aria-hidden="true" width={46} height={46} unoptimized draggable={false} className="pulsaria-nav-item__artwork" />
         </button>
     );
 }
@@ -138,21 +133,21 @@ export function Sidebar({
                 />
             </div>
             <nav className="pulsaria-nav-rail__nav" aria-label={t('navSections')}>
-                <RailAction label={t('navSearch')} onClick={onOpenSearch} Icon={FaMagnifyingGlass} />
+                <RailAction label={t('navSearch')} onClick={onOpenSearch} artwork="/icons/menu/dreamcore-v2/search.png" />
                 <HomeRailButton label={t('navHome')} activeSection={activeSection} onNavigate={onNavigate} />
                 <RailButton
                     section="profiles"
                     label={t('navProfiles')}
                     activeSection={activeSection}
                     onNavigate={onNavigate}
-                    artwork="/icons/menu/profiles.webp"
+                    artwork="/icons/menu/dreamcore-v2/profiles.png"
                 />
                 <RailButton
                     section="activity"
                     label={t('navActivity')}
                     activeSection={activeSection}
                     onNavigate={onNavigate}
-                    artwork="/icons/menu/activity.webp"
+                    artwork="/icons/menu/dreamcore-v2/activity.png"
                     activityCount={activityCount}
                 />
                 <RailButton
@@ -160,26 +155,27 @@ export function Sidebar({
                     label={t('navPlaylists')}
                     activeSection={activeSection}
                     onNavigate={onNavigate}
-                    artwork="/icons/menu/playlist.webp"
+                    artwork="/icons/menu/dreamcore-v2/playlist.png"
                 />
                 <RailButton
                     section="magazines"
                     label={t('navMagazines')}
                     activeSection={activeSection}
                     onNavigate={onNavigate}
-                    Icon={FaBookOpen}
+                    artwork="/icons/menu/dreamcore-v2/magazines.png"
                 />
-                <RailButton section="settings" label={t('navSettings')} activeSection={activeSection} onNavigate={onNavigate} artwork="/icons/menu/settings.webp" />
+                <RailButton section="settings" label={t('navSettings')} activeSection={activeSection} onNavigate={onNavigate} artwork="/icons/menu/dreamcore-v2/settings.png" />
             </nav>
             <div className="pulsaria-nav-rail__footer">
                 <button
                     type="button"
                     className="pulsaria-nav-cinema"
                     aria-label={canOpenCinema ? t('navCinemaOpen') : t('navCinemaUnavailable')}
+                    data-tooltip={canOpenCinema ? t('navCinemaOpen') : t('navCinemaUnavailable')}
                     onClick={onOpenCinema}
                     disabled={!canOpenCinema}
                 >
-                    <Image src="/icons/menu/cinema.webp" alt="" aria-hidden="true" width={40} height={40} unoptimized draggable={false} className="pulsaria-nav-cinema__artwork" />
+                    <Image src="/icons/menu/dreamcore-v2/cinema.png" alt="" aria-hidden="true" width={46} height={46} unoptimized draggable={false} className="pulsaria-nav-cinema__artwork" />
                 </button>
             </div>
         </aside>

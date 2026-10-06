@@ -1,0 +1,10 @@
+﻿python :   File "<string>", line 6
+En línea: 4 Carácter: 1
++ python -c "
++ ~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  File "<string>", line 6:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    c.execute(" SELECT name FROM sqlite_master WHERE type=table\)
+              ^
+SyntaxError: unterminated string literal (detected at line 6)

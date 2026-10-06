@@ -84,9 +84,17 @@ impl SourceWatchConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceRules {
-    #[serde(rename = "ignoreDuplicates", alias = "ignore_duplicates", default = "default_true")]
+    #[serde(
+        rename = "ignoreDuplicates",
+        alias = "ignore_duplicates",
+        default = "default_true"
+    )]
     pub ignore_duplicates: bool,
-    #[serde(rename = "autoEnqueue", alias = "auto_enqueue", default = "default_true")]
+    #[serde(
+        rename = "autoEnqueue",
+        alias = "auto_enqueue",
+        default = "default_true"
+    )]
     pub auto_enqueue: bool,
 }
 
