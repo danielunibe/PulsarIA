@@ -181,6 +181,7 @@ function BlockFigure({ block }: { block: ContentBlock }) {
   if (!block.path || !url) return null;
   return (
     <figure className="flex flex-col gap-1.5 my-2">
+      {/* eslint-disable-next-line @next/next/no-img-element — URL resuelta async vía resolveAssetUrl (asset local/dinámico, no optimizable por next/image) */}
       <img
         src={url}
         alt={block.title ?? 'Figura del artículo'}
