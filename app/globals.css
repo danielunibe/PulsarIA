@@ -6024,24 +6024,64 @@ html[data-leaving="true"] .pulsaria-window-frame {
   }
 }
 
-/* Pulso al maximizar/restaurar: viste el salto nativo instantáneo. */
-.pulsaria-window-frame.is-zooming {
-  animation: pulsaria-window-zoom 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+/* Pulso al maximizar (crece) / restaurar (encoge): viste el salto nativo
+   instantáneo con dirección. `is-zooming` queda como alias heredado. */
+.pulsaria-window-frame.is-zooming,
+.pulsaria-window-frame.is-zooming-in {
+  animation: pulsaria-window-zoom-in 0.34s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-@keyframes pulsaria-window-zoom {
+.pulsaria-window-frame.is-zooming-out {
+  animation: pulsaria-window-zoom-out 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pulsaria-window-zoom-in {
   0% {
-    transform: scale(0.986);
+    opacity: 0.55;
+    transform: scale(0.968);
   }
   100% {
+    opacity: 1;
     transform: scale(1);
+  }
+}
+
+@keyframes pulsaria-window-zoom-out {
+  0% {
+    opacity: 0.7;
+    transform: scale(1.022);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Hundido previo a minimizar: se reproduce antes del minimize nativo,
+   igual que la salida de cierre. */
+.pulsaria-window-frame.is-minimizing {
+  animation: pulsaria-window-dip 0.15s cubic-bezier(0.4, 0, 0.6, 1) both;
+  pointer-events: none;
+}
+
+@keyframes pulsaria-window-dip {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0.35;
+    transform: scale(0.978) translateY(6px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pulsaria-window-frame,
   html[data-leaving="true"] .pulsaria-window-frame,
-  .pulsaria-window-frame.is-zooming {
+  .pulsaria-window-frame.is-zooming,
+  .pulsaria-window-frame.is-zooming-in,
+  .pulsaria-window-frame.is-zooming-out,
+  .pulsaria-window-frame.is-minimizing {
     animation-duration: 0.01s !important;
   }
 }

@@ -84,6 +84,9 @@ export interface WindowControlsApi {
 export function useWindowControls(onClose?: () => Promise<void> | void): WindowControlsApi {
     const [isMaximized, setIsMaximized] = useState(false);
     const [windowAction, setWindowAction] = useState<'minimize' | 'maximize' | 'close' | null>(null);
+    const { t } = useI18n();
+    const isMaximizedRef = useRef(false);
+    isMaximizedRef.current = isMaximized;
 
     const markWindowAction = (action: 'minimize' | 'maximize' | 'close') => {
         setWindowAction(action);
@@ -92,32 +95,57 @@ export function useWindowControls(onClose?: () => Promise<void> | void): WindowC
 
     const reportWindowError = (action: string, error: unknown) => {
         console.warn(`Window ${action} failed:`, error);
-        toast.error(`No se pudo ${action} la ventana`, {
-            description: 'La ventana nativa no aceptó la acción. Reinicia Pulsaria si persiste.',
+        toast.error(t('windowActionFailed', { action }), {
+            description: t('windowActionFailedDesc'),
             duration: 3500,
         });
+    };
+
+    /** Relee el estado real maximizado con reintentos: en Windows el cambio
+        nativo puede llegar después de que `toggleMaximize` resuelva, y leer
+        una sola vez deja el icono al revés (restaurar ↔ maximizar). */
+    const syncMaximizedState = async (retries = 3): Promise<boolean> => {
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const currentWindow = getCurrentWindow();
+            let state = await currentWindow.isMaximized();
+            for (let attempt = 0; attempt < retries && state === isMaximizedRef.current; attempt++) {
+                await new Promise((resolve) => window.setTimeout(resolve, 120));
+                state = await currentWindow.isMaximized();
+            }
+            setIsMaximized(state);
+            return state;
+        } catch {
+            return isMaximizedRef.current;
+        }
     };
 
     const minimize = async () => {
         markWindowAction('minimize');
         try {
+            const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (typeof document !== 'undefined' && !reduced) {
+                playWindowDip('is-minimizing');
+                await new Promise((resolve) => window.setTimeout(resolve, 150));
+            }
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             await getCurrentWindow().minimize();
         } catch (error) {
-            reportWindowError('minimizar', error);
+            reportWindowError(t('windowVerbMinimize'), error);
         }
     };
 
     const maximize = async () => {
         markWindowAction('maximize');
-        playWindowZoom();
         try {
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             const currentWindow = getCurrentWindow();
+            const wasMaximized = await currentWindow.isMaximized().catch(() => isMaximizedRef.current);
             await currentWindow.toggleMaximize();
-            setIsMaximized(await currentWindow.isMaximized());
+            playWindowZoom(wasMaximized ? 'out' : 'in');
+            await syncMaximizedState();
         } catch (error) {
-            reportWindowError('maximizar', error);
+            reportWindowError(t('windowVerbMaximize'), error);
         }
     };
 
@@ -137,7 +165,7 @@ export function useWindowControls(onClose?: () => Promise<void> | void): WindowC
             await getCurrentWindow().close();
         } catch (error) {
             if (typeof document !== 'undefined') delete document.documentElement.dataset.leaving;
-            reportWindowError('cerrar', error);
+            reportWindowError(t('windowVerbClose'), error);
         }
     };
 
@@ -220,17 +248,22 @@ export function WindowControls({ controls }: { controls: WindowControlsApi }) {
     );
 }
 
-/** Pulso de zoom al maximizar/restaurar: la ventana nativa cambia al instante,
-    esta animación viste la transición. */
-function playWindowZoom() {
+/** Pulso direccional al maximizar/restaurar: la ventana nativa cambia al
+    instante, esta animación viste la transición (crecer ↔ encoger). */
+function playWindowZoom(direction: 'in' | 'out') {
+    playWindowDip(direction === 'in' ? 'is-zooming-in' : 'is-zooming-out', 360);
+}
+
+/** Revelado de marco con clase temporal; respeta reduced-motion. */
+function playWindowDip(className: 'is-zooming-in' | 'is-zooming-out' | 'is-minimizing', holdMs = 200) {
     if (typeof document === 'undefined') return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const frame = document.querySelector('.pulsaria-window-frame');
     if (!(frame instanceof HTMLElement)) return;
-    frame.classList.remove('is-zooming');
+    frame.classList.remove('is-zooming', 'is-zooming-in', 'is-zooming-out', 'is-minimizing');
     void frame.offsetWidth;
-    frame.classList.add('is-zooming');
-    window.setTimeout(() => frame.classList.remove('is-zooming'), 320);
+    frame.classList.add(className);
+    window.setTimeout(() => frame.classList.remove(className), holdMs + 40);
 }
 
 function startWindowDrag(event: ReactMouseEvent<HTMLElement>) {
