@@ -202,7 +202,7 @@ function BlockFigure({ block }: { block: ContentBlock }) {
         className="rounded-xl border border-white/10 max-h-64 w-auto self-start object-contain bg-black"
       />
       {(block.title || block.timestamp !== undefined) && (
-        <figcaption className="text-[11px] text-white/40 flex items-center gap-1.5">
+          <figcaption className="text-[11px] text-white/55 flex items-center gap-1.5">
           <FaCamera size={10} />
           {block.title ?? t('magazineFigure')}
           {typeof block.timestamp === 'number' && Number.isFinite(block.timestamp)
@@ -231,7 +231,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
       return (
         <div className="my-3">
           {block.title && (
-            <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-white/45 mb-2">{block.title}</h4>
+            <h4 className="text-xs font-bold uppercase tracking-[0.16em] text-white/45 mb-2">{block.title}</h4>
           )}
           <ul className="rounded-2xl border border-white/[0.08] bg-white/[0.02] divide-y divide-white/[0.06] overflow-hidden">
             {items.map((item, index) => (
@@ -252,7 +252,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
       return (
         <div className="my-3">
           {block.title && (
-            <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-white/45 mb-2">{block.title}</h4>
+            <h4 className="text-xs font-bold uppercase tracking-[0.16em] text-white/45 mb-2">{block.title}</h4>
           )}
           <ol className="flex flex-col gap-2">
             {steps.map((step, index) => {
@@ -269,7 +269,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
                   <div className="flex flex-col gap-1">
                     <p className="text-[13px] text-white/80 leading-relaxed">{text}</p>
                     {time && (
-                      <span className="text-[11px] text-sky-300/70 font-mono flex items-center gap-1">
+                      <span className="text-[11px] text-sky-300/90 font-mono flex items-center gap-1">
                         <FaClock size={10} />
                         {time}
                       </span>
@@ -289,7 +289,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
       if (!code) return null;
       return (
         <div className="my-3 rounded-xl border border-white/[0.08] bg-black/50 overflow-hidden">
-          <div className="px-3 py-1.5 border-b border-white/[0.07] text-[10px] font-mono text-white/40 flex items-center gap-1.5">
+          <div className="px-3 py-1.5 border-b border-white/[0.07] text-[10px] font-mono uppercase tracking-[0.18em] text-white/40 flex items-center gap-1.5">
             <FaCode size={10} />
             {block.language ?? block.title ?? t('magazineCode')}
           </div>
@@ -300,7 +300,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
     case 'quote':
     case 'citation':
       return block.text ? (
-        <blockquote className="my-3 border-l-2 border-white/25 pl-4 py-1 text-[14px] text-white/75 italic leading-relaxed">
+          <blockquote className="my-3 border-l-2 border-white/25 pl-4 py-1 text-[14px] text-white/80 italic leading-relaxed">
           “{block.text}”
         </blockquote>
       ) : null;
@@ -329,7 +329,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
       return (
         <div className="my-3 rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-3">
           {block.title && !block.text && (
-            <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-white/45 mb-1.5">{block.title}</h4>
+            <h4 className="text-xs font-bold uppercase tracking-[0.16em] text-white/45 mb-1.5">{block.title}</h4>
           )}
           {block.title && block.text && (
             <p className="text-[13px] text-white/80">
@@ -383,7 +383,7 @@ function TimestampButton({
       type="button"
       onClick={onSeek}
       title={title}
-      className="font-mono text-sky-300/90 hover:text-sky-200 bg-sky-400/10 hover:bg-sky-400/20 border border-sky-400/20 rounded px-1.5 py-0.5 text-[11px] transition-all"
+      className="font-mono text-sky-300/90 hover:text-sky-200 bg-sky-400/10 hover:bg-sky-400/20 border border-sky-400/20 rounded px-1.5 py-0.5 min-h-[24px] min-w-[44px] text-[11px] transition-colors outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60"
     >
       {formatTimestamp(value)}
     </button>
@@ -482,7 +482,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
         <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-center flex flex-col items-center gap-2">
           <FaFileLines size={22} className="text-white/25" />
           <p className="text-sm text-white/75 font-medium">{t('magazineOpenError')}</p>
-          <p className="text-xs text-white/45">{loadError ?? t('magazineNoData')}</p>
+          <p className="text-xs text-white/55">{loadError ?? t('magazineNoData')}</p>
         </div>
       ) : (
         <>
@@ -528,15 +528,15 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
               <span className="text-[10px] font-mono uppercase tracking-[0.18em] px-2.5 py-1 rounded-full bg-white/[0.07] border border-white/10 text-white/70">
                 {presentArticleType(details.article.article_type, locale)}
               </span>
-              <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-white/[0.05] border border-white/10 text-white/55">
+              <span className="text-[10px] font-mono uppercase tracking-[0.18em] px-2.5 py-1 rounded-full bg-white/[0.05] border border-white/10 text-white/55">
                 {presentEditorialState(details.article.editorial_state, locale)} · v{details.article.active_version}
               </span>
             </div>
             <h1 className="text-2xl md:text-[28px] font-extrabold text-white tracking-tight leading-tight">
               {details.article.title}
             </h1>
-            <p className="text-[14px] text-white/60 leading-relaxed">{details.article.summary}</p>
-            <p className="text-[11px] text-white/35 font-mono">
+            <p className="text-[14px] text-white/70 leading-relaxed">{details.article.summary}</p>
+            <p className="text-[11px] text-white/50 font-mono">
               {details.evidence.length === 1 ? t('magazineEvidenceOne', { count: 1 }) : t('magazineEvidenceMany', { count: details.evidence.length })} ·{' '}
               {details.sources.length === 1 ? t('magazineSourceOne', { count: 1 }) : t('magazineSourceMany', { count: details.sources.length })} ·{' '}
               {details.versions.length === 1 ? t('magazineVersionOne', { count: 1 }) : t('magazineVersionMany', { count: details.versions.length })}
@@ -569,7 +569,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
               {t('magazineEvidence')} · {details.evidence.length}
             </h2>
             {details.evidence.length === 0 ? (
-              <p className="text-xs text-white/45">
+              <p className="text-xs text-white/50">
                 {t('magazineEvidenceEmpty')}
               </p>
             ) : (
@@ -587,7 +587,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/45">
+                        <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/50">
                           {presentEvidenceKind(item.evidence_kind, locale)} · #{item.id}
                         </span>
                         <span className="flex items-center gap-1.5">
@@ -622,13 +622,13 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                         </p>
                       )}
                       <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-[11px] text-white/35 font-mono">
+                        <span className="text-[11px] text-white/50 font-mono">
                           {t('magazineJobMeta', { id: item.job_id, pct: Math.round(item.confidence * 100) })}
                         </span>
                         <button
                           type="button"
                           onClick={() => openEvidence(item)}
-                          className="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/15 border border-white/10 text-white/75 hover:text-white text-[11px] font-semibold flex items-center gap-1.5 transition-all"
+                          className="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/15 border border-white/10 text-white/75 hover:text-white text-[11px] font-semibold flex items-center gap-1.5 transition-colors min-h-[24px] outline-none focus-visible:ring-1 focus-visible:ring-white/50"
                         >
                           <FaEye size={11} />
                           {t('magazineViewSource')}
@@ -659,7 +659,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
               {t('magazineSources')} · {details.sources.length}
             </h2>
             {details.sources.length === 0 ? (
-              <p className="text-xs text-white/45">{t('magazineNoSources')}</p>
+              <p className="text-xs text-white/50">{t('magazineNoSources')}</p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {details.sources.map((source) => {
@@ -684,7 +684,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                         <button
                           type="button"
                           onClick={() => openEvidence(evidenceById.get(first.id) ?? first)}
-                          className="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/15 border border-white/10 text-white/75 hover:text-white text-[11px] font-semibold flex items-center gap-1.5 transition-all"
+                          className="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/15 border border-white/10 text-white/75 hover:text-white text-[11px] font-semibold flex items-center gap-1.5 transition-colors min-h-[24px] outline-none focus-visible:ring-1 focus-visible:ring-white/50"
                         >
                           <FaEye size={11} />
                           {t('magazineOpenMedia')}

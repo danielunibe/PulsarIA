@@ -454,11 +454,11 @@ export function MagazinesBookshelf() {
                         </span>
                         <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-3">
                             {t('shelfTitle')}
-                            <span className="text-[10px] font-mono tracking-wider font-semibold uppercase px-2.5 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-white/60">
+                            <span className="text-[10px] font-mono tracking-[0.18em] font-semibold uppercase px-2.5 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-white/60">
                                 {t('shelfPhase')}
                             </span>
                             {isPreview && (
-                                <span className="text-[10px] font-mono tracking-wider font-semibold uppercase px-2.5 py-0.5 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-300">
+                                <span className="text-[10px] font-mono tracking-[0.18em] font-semibold uppercase px-2.5 py-0.5 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-300">
                                     {t('shelfPreviewBadge')}
                                 </span>
                             )}
@@ -564,7 +564,7 @@ export function MagazinesBookshelf() {
                     </div>
 
                     {/* Tip de sala + caption viva con datos reales del tomo */}
-                    <p className={`text-center font-mono text-[10px] tracking-[0.26em] uppercase text-white/40 transition-opacity duration-500 px-3 ${hoveredVolume ? 'opacity-0' : 'opacity-100'}`}>
+                    <p className={`text-center font-mono text-[10px] tracking-[0.18em] uppercase text-white/50 transition-opacity duration-500 px-3 ${hoveredVolume ? 'opacity-0' : 'opacity-100'}`}>
                         {t('shelfPickHint')}
                     </p>
                     <div
@@ -624,21 +624,29 @@ export function MagazinesBookshelf() {
                                 <motion.div
                                     key={volume.id}
                                     initial={{ opacity: 0, y: 26 }}
-                                    whileHover={{ y: -8, scale: 1.02 }}
                                     transition={{ type: 'spring', stiffness: 350, damping: 25, delay: (cardIndex % 8) * 0.05 }}
                                     onClick={() => openVolume(volume)}
+                                    onKeyDown={(event: React.KeyboardEvent<HTMLDivElement>) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            openVolume(volume);
+                                        }
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-label={`${volume.volumeNumber} · ${volume.title}`}
                                     onMouseEnter={() => setHoveredVolume(volume)}
                                     onMouseLeave={() => setHoveredVolume((current) => current?.id === volume.id ? null : current)}
                                     onFocus={() => setHoveredVolume(volume)}
                                     onBlur={() => setHoveredVolume((current) => current?.id === volume.id ? null : current)}
                                     animate={openingVolumeId === volume.id ? { opacity: 0, y: -30, scale: 1.16 } : { opacity: 1, y: 0, scale: 1 }}
-                                    className="cursor-pointer group flex flex-col"
+                                    className="cursor-pointer group flex flex-col rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-white/40"
                                 >
                                     {/* 3D Book Object */}
                                     <div
                                         onMouseMove={handleBookTilt}
                                         onMouseLeave={resetBookTilt}
-                                        className="relative h-72 w-full rounded-2xl overflow-hidden border border-white/10 transition-all flex shadow-[0_15px_35px_rgba(0,0,0,0.6)] group-hover:shadow-[0_20px_45px_rgba(0,0,0,0.8)] group-hover:border-white/20"
+                                        className="relative h-72 w-full rounded-2xl overflow-hidden border border-white/10 transition-[box-shadow,border-color,transform] duration-200 ease-out flex shadow-[0_15px_35px_rgba(0,0,0,0.6)] group-hover:shadow-[0_20px_45px_rgba(0,0,0,0.8)] group-hover:border-white/20"
                                         style={{
                                             background: volume.coverGradient,
                                             transform: 'perspective(900px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg))',
@@ -661,7 +669,7 @@ export function MagazinesBookshelf() {
                                             {/* Arte procedural de portada (semilla del tomo) */}
                                             <div
                                                 aria-hidden="true"
-                                                className="absolute inset-0 opacity-45 group-hover:opacity-60 transition-opacity pointer-events-none [&>svg]:h-full [&>svg]:w-full"
+                                                className="absolute inset-0 opacity-45 group-hover:opacity-60 transition-opacity duration-300 will-change-[opacity] pointer-events-none [&>svg]:h-full [&>svg]:w-full"
                                                 dangerouslySetInnerHTML={{ __html: coverArtSVG(coverSeed, coverHue) }}
                                             />
                                             <div
@@ -671,16 +679,16 @@ export function MagazinesBookshelf() {
                                             />
                                             {/* Decorative Ambient Aura */}
                                             <div
-                                                className="absolute -top-10 -right-10 w-32 h-32 rounded-full blur-2xl opacity-40 group-hover:opacity-70 transition-opacity"
+                                                className="absolute -top-10 -right-10 w-32 h-32 rounded-full blur-2xl opacity-40 group-hover:opacity-70 transition-opacity duration-300 pointer-events-none"
                                                 style={{ background: volume.color }}
                                             />
 
                                             {/* Top Metadata */}
                                             <div className="flex items-start justify-between gap-2 relative z-10">
-                                                <span className="text-[9px] font-mono font-bold tracking-wider text-white/50 bg-black/40 px-2 py-0.5 rounded border border-white/5">
+                                                <span className="text-[9px] font-mono font-bold uppercase tracking-[0.18em] text-white/50 bg-black/40 px-2 py-0.5 rounded border border-white/5">
                                                     PULSARIA EDITORIAL
                                                 </span>
-                                                <span className="text-[9px] font-mono font-bold text-white/60 bg-white/[0.07] border border-white/10 px-2 py-0.5 rounded-full">
+                                                <span className="text-[9px] font-mono font-bold uppercase tracking-[0.18em] text-white/60 bg-white/[0.07] border border-white/10 px-2 py-0.5 rounded-full">
                                                     {presentEditorialState(volume.editorialState, locale)}
                                                 </span>
                                             </div>
@@ -690,10 +698,10 @@ export function MagazinesBookshelf() {
                                                 <span className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: volume.color }}>
                                                     {volume.volumeNumber}
                                                 </span>
-                                                <h3 className="text-base font-extrabold text-white tracking-tight leading-tight group-hover:text-white transition-colors">
+                                                <h3 className="text-base font-extrabold text-white tracking-tight leading-tight group-hover:text-white transition-colors duration-200">
                                                     {volume.title}
                                                 </h3>
-                                                <p className="text-[11px] text-white/55 line-clamp-2 leading-relaxed">
+                                                <p className="text-[11px] text-white/55 line-clamp-2 leading-relaxed min-h-[2.6em]">
                                                     {volume.subtitle}
                                                 </p>
                                             </div>
@@ -754,7 +762,7 @@ export function MagazinesBookshelf() {
                                     >
                                         <div className="flex flex-col gap-2">
                                             <div className="flex items-center justify-between gap-2">
-                                                <span className="text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/25 text-amber-300">
+                                                <span className="text-[9px] font-mono font-bold uppercase tracking-[0.18em] px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/25 text-amber-300">
                                                     {t('shelfSuggestedCandidate')}
                                                 </span>
                                                 <span className="text-[10px] font-mono text-white/40">
@@ -799,7 +807,7 @@ export function MagazinesBookshelf() {
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-                            className="w-full max-w-3xl max-h-[90vh] rounded-3xl bg-[#0d0f17] border border-white/15 overflow-hidden flex flex-col shadow-[0_30px_90px_rgba(0,0,0,0.95)]"
+                            className="w-full max-w-3xl max-h-[90vh] rounded-3xl bg-[#100e16] border border-white/10 overflow-hidden flex flex-col shadow-2xl"
                         >
                             {/* Modal Header */}
                             <div className="p-5 border-b border-white/10 flex items-center justify-between gap-4 shrink-0 bg-white/[0.02]">
@@ -828,7 +836,7 @@ export function MagazinesBookshelf() {
                                 <button
                                     type="button"
                                     onClick={() => setSelectedVolume(null)}
-                                    className="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
+                                    className="w-8 h-8 rounded-xl bg-white/[0.06] hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all outline-none focus-visible:ring-2 focus-visible:ring-white/40"
                                     aria-label={t('shelfCloseDetail')}
                                 >
                                     <FaXmark size={14} />
@@ -836,7 +844,7 @@ export function MagazinesBookshelf() {
                             </div>
 
                             {/* Modal Body */}
-                            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5">
+                            <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-4">
                                 <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex flex-col gap-2">
                                     <span className="text-xs font-semibold text-white/90">{t('shelfAboutVolume')}</span>
                                     <p className="text-xs text-white/60 leading-relaxed">
@@ -849,7 +857,7 @@ export function MagazinesBookshelf() {
 
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-center justify-between">
-                                        <span className="text-xs font-bold uppercase tracking-wider text-white/40">
+                                        <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">
                                             {t('shelfEditorialBuild')}
                                         </span>
                                         {modalLatest && (
@@ -946,7 +954,7 @@ export function MagazinesBookshelf() {
 
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-center justify-between">
-                                        <span className="text-xs font-bold uppercase tracking-wider text-white/40">
+                                        <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">
                                             {t('shelfChapters')}
                                         </span>
                                         <span className="text-[11px] text-white/40 font-mono">
@@ -1014,7 +1022,7 @@ export function MagazinesBookshelf() {
 
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-center justify-between">
-                                        <span className="text-xs font-bold uppercase tracking-wider text-white/40">
+                                        <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">
                                             {t('shelfVolumeArticles')}
                                         </span>
                                         <span className="text-[11px] text-white/40 font-mono">
@@ -1054,14 +1062,14 @@ export function MagazinesBookshelf() {
                                                         <span className="text-[13px] font-semibold text-white/90 truncate">
                                                             {article.title}
                                                         </span>
-                                                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.06] text-white/60 shrink-0">
+                                                        <span className="text-[10px] font-mono uppercase tracking-[0.14em] px-2 py-0.5 rounded-full bg-white/[0.06] text-white/70 shrink-0">
                                                             {presentEditorialState(article.editorial_state, locale)} · v{article.active_version}
                                                         </span>
                                                     </div>
                                                     <p className="text-[11px] text-white/50 line-clamp-2 leading-relaxed">
                                                         {article.summary}
                                                     </p>
-                                                    <span className="text-[10px] text-white/35 font-mono flex items-center gap-1.5">
+                                                    <span className="text-[10px] text-white/50 font-mono flex items-center gap-1.5">
                                                         <FaClock size={10} />
                                                         {presentArticleType(article.article_type, locale)} · {t('shelfOpenReader')}
                                                         <FaChevronRight size={9} className="text-white/25" />

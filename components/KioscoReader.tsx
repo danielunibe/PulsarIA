@@ -176,7 +176,7 @@ function BlockView({ block }: { block: KioscoBlock }) {
     case 'heading':
     case 'title':
     case 'subtitle':
-      return <h3 className={styles.hl} style={{ fontSize: '1.4em' }}>{block.text ?? block.title}</h3>;
+      return <h3 className={`${styles.hl} ${styles.hlSm}`}>{block.text ?? block.title}</h3>;
     case 'ingredients':
     case 'list':
     case 'items':
@@ -601,7 +601,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         return shell(
           <>
             <p className={styles.ki}>{t('kioscoTraceable')}</p>
-            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>{t('kioscoSustains')}</h2>
+            <h2 className={`${styles.hl} ${styles.hlMd}`}>{t('kioscoSustains')}</h2>
             {items.map((item) => (
               <div key={item.id} className={styles.evCard}>
                 {item.transcript_text && <q>{item.transcript_text}</q>}
@@ -625,7 +625,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         return shell(
           <>
             <p className={styles.ki}>{t('magazineSources')}</p>
-            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>{t('kioscoSourceVideos')}</h2>
+            <h2 className={`${styles.hl} ${styles.hlMd}`}>{t('kioscoSourceVideos')}</h2>
             {details.sources.length === 0 ? (
               <p className={styles.body}>{t('magazineNoSources')}</p>
             ) : (
@@ -645,7 +645,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         return shell(
           <>
             <p className={styles.ki}>{t('magazineConflicts')}</p>
-            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>{t('kioscoToResolve')}</h2>
+            <h2 className={`${styles.hl} ${styles.hlMd}`}>{t('kioscoToResolve')}</h2>
             <div className={styles.body}>
               {details.conflicts.map((conflict) => (
                 <p key={conflict.id}>
@@ -659,7 +659,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         return shell(
           <>
             <p className={styles.ki}>{t('magazineVersions')}</p>
-            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>{t('kioscoHistory')}</h2>
+            <h2 className={`${styles.hl} ${styles.hlMd}`}>{t('kioscoHistory')}</h2>
             <div className={styles.toc}>
               {details.versions.map((version) => (
                 <div key={version.id}>
