@@ -11,6 +11,7 @@ import {
   FaTriangleExclamation,
 } from '@/components/icon-library';
 import { EvidenceSourceInspector } from '@/components/EvidenceSourceInspector';
+import { useI18n } from '@/lib/i18n';
 import {
   fetchMagazineArticleDetails,
   formatTimestamp,
@@ -120,7 +121,16 @@ function normalizeBlock(value: unknown, fallbackKind: string): ContentBlock | nu
   return block;
 }
 
-function parseStructuredContent(raw: string): { blocks: ContentBlock[]; rawFallback: string | null } {
+export interface MagazineRecipeLabels {
+  yieldTitle: string;
+  ingredientsTitle: string;
+  stepsTitle: string;
+}
+
+function parseStructuredContent(
+  raw: string,
+  labels?: MagazineRecipeLabels,
+): { blocks: ContentBlock[]; rawFallback: string | null } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
@@ -149,12 +159,13 @@ function parseStructuredContent(raw: string): { blocks: ContentBlock[]; rawFallb
     ([key]) => !['yield', 'servings', 'ingredients', 'steps'].includes(key),
   );
   const yieldText = asString(root.yield) ?? asString(root.servings);
-  if (yieldText) blocks.push({ kind: 'data', title: 'Rinde', text: yieldText });
+  const recipeLabels = labels ?? { yieldTitle: 'Rinde', ingredientsTitle: 'Ingredientes', stepsTitle: 'Preparación' };
+  if (yieldText) blocks.push({ kind: 'data', title: recipeLabels.yieldTitle, text: yieldText });
   if (Array.isArray(root.ingredients)) {
-    blocks.push({ kind: 'ingredients', title: 'Ingredientes', items: root.ingredients as unknown[] });
+    blocks.push({ kind: 'ingredients', title: recipeLabels.ingredientsTitle, items: root.ingredients as unknown[] });
   }
   if (Array.isArray(root.steps)) {
-    blocks.push({ kind: 'steps', title: 'Preparación', steps: root.steps as unknown[] });
+    blocks.push({ kind: 'steps', title: recipeLabels.stepsTitle, steps: root.steps as unknown[] });
   }
   for (const [key, entry] of extraEntries) {
     const block = normalizeBlock(entry, 'text');
@@ -167,6 +178,7 @@ function parseStructuredContent(raw: string): { blocks: ContentBlock[]; rawFallb
 }
 
 function BlockFigure({ block }: { block: ContentBlock }) {
+  const { t } = useI18n();
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!block.path) return;
@@ -185,14 +197,14 @@ function BlockFigure({ block }: { block: ContentBlock }) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={url}
-        alt={block.title ?? 'Figura del artículo'}
+        alt={block.title ?? t('magazineFigureAlt')}
         loading="lazy"
         className="rounded-xl border border-white/10 max-h-64 w-auto self-start object-contain bg-black"
       />
       {(block.title || block.timestamp !== undefined) && (
         <figcaption className="text-[11px] text-white/40 flex items-center gap-1.5">
           <FaCamera size={10} />
-          {block.title ?? 'Figura'}
+          {block.title ?? t('magazineFigure')}
           {typeof block.timestamp === 'number' && Number.isFinite(block.timestamp)
             ? ` · ${formatTimestamp(block.timestamp)}`
             : ''}
@@ -203,6 +215,7 @@ function BlockFigure({ block }: { block: ContentBlock }) {
 }
 
 function StructuredBlock({ block }: { block: ContentBlock }) {
+  const { t } = useI18n();
   switch (block.kind) {
     case 'heading':
     case 'title':
@@ -243,7 +256,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
           )}
           <ol className="flex flex-col gap-2">
             {steps.map((step, index) => {
-              const text = itemText(step) || `Paso ${index + 1}`;
+              const text = itemText(step) || t('magazineStepFallback', { index: index + 1 });
               const time = itemTime(step);
               return (
                 <li
@@ -278,7 +291,7 @@ function StructuredBlock({ block }: { block: ContentBlock }) {
         <div className="my-3 rounded-xl border border-white/[0.08] bg-black/50 overflow-hidden">
           <div className="px-3 py-1.5 border-b border-white/[0.07] text-[10px] font-mono text-white/40 flex items-center gap-1.5">
             <FaCode size={10} />
-            {block.language ?? block.title ?? 'código'}
+            {block.language ?? block.title ?? t('magazineCode')}
           </div>
           <pre className="p-3 text-xs text-white/80 font-mono overflow-x-auto custom-scrollbar">{code}</pre>
         </div>
@@ -387,8 +400,17 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
   const [details, setDetails] = useState<MagazineArticleDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const { t, locale } = useI18n();
   const [inspectorEvidence, setInspectorEvidence] = useState<MagazineEvidenceRecord | null>(null);
   const [highlightId, setHighlightId] = useState<number | null>(initialTarget?.evidenceId ?? null);
+  const recipeLabels = useMemo<MagazineRecipeLabels>(
+    () => ({
+      yieldTitle: t('magazineYield'),
+      ingredientsTitle: t('magazineIngredients'),
+      stepsTitle: t('magazineSteps'),
+    }),
+    [t],
+  );
 
   useEffect(() => {
     let live = true;
@@ -401,7 +423,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
         if (live) setDetails(loaded);
       })
       .catch((error: unknown) => {
-        if (live) setLoadError(error instanceof Error ? error.message : 'No se pudo leer el artículo.');
+        if (live) setLoadError(error instanceof Error ? error.message : t('magazineLoadError'));
       })
       .finally(() => {
         if (live) setIsLoading(false);
@@ -409,7 +431,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
     return () => {
       live = false;
     };
-  }, [articleId]);
+  }, [articleId, t]);
 
   useEffect(() => {
     if (highlightId !== null && details) {
@@ -432,8 +454,8 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
   };
 
   const parsedContent = useMemo(
-    () => (details ? parseStructuredContent(details.article.structured_content_json) : null),
-    [details],
+    () => (details ? parseStructuredContent(details.article.structured_content_json, recipeLabels) : null),
+    [details, recipeLabels],
   );
 
   return (
@@ -459,8 +481,8 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
       ) : loadError || !details ? (
         <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-center flex flex-col items-center gap-2">
           <FaFileLines size={22} className="text-white/25" />
-          <p className="text-sm text-white/75 font-medium">No se pudo abrir el artículo.</p>
-          <p className="text-xs text-white/45">{loadError ?? 'Sin datos.'}</p>
+          <p className="text-sm text-white/75 font-medium">{t('magazineOpenError')}</p>
+          <p className="text-xs text-white/45">{loadError ?? t('magazineNoData')}</p>
         </div>
       ) : (
         <>
@@ -470,14 +492,14 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
               <FaTriangleExclamation size={15} className="text-amber-300 shrink-0 mt-0.5" />
               <div className="flex flex-col gap-1">
                 <p className="text-xs text-amber-100/90 font-semibold">
-                  Este artículo contiene información pendiente de revisión.
+                  {t('magazinePendingReview')}
                 </p>
                 <button
                   type="button"
                   onClick={() => scrollToId('reader-conflicts')}
                   className="self-start text-[11px] text-amber-200/80 hover:text-amber-100 underline underline-offset-2"
                 >
-                  Ver {details.conflicts.length === 1 ? 'el conflicto' : `los ${details.conflicts.length} conflictos`}
+                  {details.conflicts.length === 1 ? t('magazineViewConflictOne') : t('magazineViewConflictMany', { count: details.conflicts.length })}
                 </button>
               </div>
             </div>
@@ -485,18 +507,18 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
           {(details.article.editorial_state === 'processing'
             || details.article.editorial_state === 'updating') && (
             <div className="rounded-2xl border border-sky-400/25 bg-sky-400/[0.06] px-4 py-3 text-xs text-sky-100/90">
-              Este artículo se está actualizando: lo que ves puede estar incompleto.
+              {t('magazineUpdating')}
             </div>
           )}
           {details.article.editorial_state === 'failed' && (
             <div className="rounded-2xl border border-rose-400/25 bg-rose-400/[0.06] px-4 py-3 text-xs text-rose-100/90">
-              La compilación de este artículo falló. Puedes regresar y reintentarla desde el flujo de compilación del tomo.
+              {t('magazineFailed')}
             </div>
           )}
           {(details.article.editorial_state === 'draft'
             || details.article.editorial_state === 'archived') && (
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-white/55">
-              {presentEditorialState(details.article.editorial_state)}: contenido no publicado.
+              {t('magazineUnpublished', { state: presentEditorialState(details.article.editorial_state, locale) })}
             </div>
           )}
 
@@ -504,10 +526,10 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
           <header className="flex flex-col gap-2.5">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-mono uppercase tracking-[0.18em] px-2.5 py-1 rounded-full bg-white/[0.07] border border-white/10 text-white/70">
-                {presentArticleType(details.article.article_type)}
+                {presentArticleType(details.article.article_type, locale)}
               </span>
               <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-white/[0.05] border border-white/10 text-white/55">
-                {presentEditorialState(details.article.editorial_state)} · v{details.article.active_version}
+                {presentEditorialState(details.article.editorial_state, locale)} · v{details.article.active_version}
               </span>
             </div>
             <h1 className="text-2xl md:text-[28px] font-extrabold text-white tracking-tight leading-tight">
@@ -515,22 +537,22 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
             </h1>
             <p className="text-[14px] text-white/60 leading-relaxed">{details.article.summary}</p>
             <p className="text-[11px] text-white/35 font-mono">
-              {details.evidence.length} {details.evidence.length === 1 ? 'evidencia' : 'evidencias'} ·{' '}
-              {details.sources.length} {details.sources.length === 1 ? 'fuente' : 'fuentes'} ·{' '}
-              {details.versions.length} {details.versions.length === 1 ? 'versión' : 'versiones'}
+              {details.evidence.length === 1 ? t('magazineEvidenceOne', { count: 1 }) : t('magazineEvidenceMany', { count: details.evidence.length })} ·{' '}
+              {details.sources.length === 1 ? t('magazineSourceOne', { count: 1 }) : t('magazineSourceMany', { count: details.sources.length })} ·{' '}
+              {details.versions.length === 1 ? t('magazineVersionOne', { count: 1 }) : t('magazineVersionMany', { count: details.versions.length })}
             </p>
           </header>
 
           <div className="h-px bg-white/[0.08]" />
 
           {/* Contenido estructurado */}
-          <section aria-label="Contenido" className="flex flex-col">
+          <section aria-label={t('magazineContent')} className="flex flex-col">
             {parsedContent && parsedContent.blocks.length > 0 ? (
               parsedContent.blocks.map((block, index) => <StructuredBlock key={index} block={block} />)
             ) : (
               <details className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-3">
                 <summary className="text-xs text-white/60 cursor-pointer">
-                  Contenido sin bloques interpretables — ver JSON original
+                  {t('magazineRawFallback')}
                 </summary>
                 <pre className="mt-2 text-[11px] text-white/55 font-mono overflow-x-auto custom-scrollbar whitespace-pre-wrap break-words">
                   {parsedContent?.rawFallback ?? details.article.structured_content_json}
@@ -542,13 +564,13 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
           <div className="h-px bg-white/[0.08]" />
 
           {/* Evidencia: capa de confianza */}
-          <section aria-label="Evidencia" className="flex flex-col gap-3">
+          <section aria-label={t('magazineEvidence')} className="flex flex-col gap-3">
             <h2 className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">
-              Evidencia · {details.evidence.length}
+              {t('magazineEvidence')} · {details.evidence.length}
             </h2>
             {details.evidence.length === 0 ? (
               <p className="text-xs text-white/45">
-                Este artículo no declara evidencia: su contenido no es verificable contra la biblioteca.
+                {t('magazineEvidenceEmpty')}
               </p>
             ) : (
               <ul className="flex flex-col gap-2.5">
@@ -566,13 +588,13 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                     >
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/45">
-                          {presentEvidenceKind(item.evidence_kind)} · #{item.id}
+                          {presentEvidenceKind(item.evidence_kind, locale)} · #{item.id}
                         </span>
                         <span className="flex items-center gap-1.5">
                           <TimestampButton
                             value={item.timestamp_start}
                             onSeek={() => openEvidence(item)}
-                            title="Abrir la fuente en este timestamp"
+                            title={t('magazineOpenAtTimestamp')}
                           />
                           {item.timestamp_end !== null
                             && Number.isFinite(item.timestamp_end)
@@ -582,7 +604,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                                 <TimestampButton
                                   value={item.timestamp_end}
                                   onSeek={() => openEvidence(item)}
-                                  title="Abrir la fuente en este timestamp"
+                                  title={t('magazineOpenAtTimestamp')}
                                 />
                               </>
                             )}
@@ -595,13 +617,13 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                       )}
                       {item.extracted_fact && (
                         <p className="text-[13px] text-white/85 leading-relaxed">
-                          <span className="text-white/40">Dato: </span>
+                          <span className="text-white/40">{t('magazineFact')}: </span>
                           {item.extracted_fact}
                         </p>
                       )}
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <span className="text-[11px] text-white/35 font-mono">
-                          job {item.job_id} · confianza {Math.round(item.confidence * 100)}%
+                          {t('magazineJobMeta', { id: item.job_id, pct: Math.round(item.confidence * 100) })}
                         </span>
                         <button
                           type="button"
@@ -609,7 +631,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                           className="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/15 border border-white/10 text-white/75 hover:text-white text-[11px] font-semibold flex items-center gap-1.5 transition-all"
                         >
                           <FaEye size={11} />
-                          Ver fuente
+                          {t('magazineViewSource')}
                         </button>
                       </div>
                     </li>
@@ -632,12 +654,12 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
           )}
 
           {/* Fuentes */}
-          <section aria-label="Fuentes" className="flex flex-col gap-2.5">
+          <section aria-label={t('magazineSources')} className="flex flex-col gap-2.5">
             <h2 className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">
-              Fuentes · {details.sources.length}
+              {t('magazineSources')} · {details.sources.length}
             </h2>
             {details.sources.length === 0 ? (
-              <p className="text-xs text-white/45">Sin fuentes vinculadas.</p>
+              <p className="text-xs text-white/45">{t('magazineNoSources')}</p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {details.sources.map((source) => {
@@ -650,12 +672,12 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                     >
                       <div className="flex flex-col gap-0.5">
                         <span className="text-[13px] text-white/85 font-medium">
-                          Video original · job {source.job_id}
+                          {t('magazineOriginalVideo')} · job {source.job_id}
                         </span>
                         <span className="text-[11px] text-white/40 font-mono">
                           {source.source_role}
                           {source.citation_label ? ` · ${source.citation_label}` : ''} ·{' '}
-                          {linked.length} {linked.length === 1 ? 'evidencia' : 'evidencias'}
+                          {linked.length === 1 ? t('magazineEvidenceOne', { count: 1 }) : t('magazineEvidenceMany', { count: linked.length })}
                         </span>
                       </div>
                       {first && (
@@ -665,7 +687,7 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                           className="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/15 border border-white/10 text-white/75 hover:text-white text-[11px] font-semibold flex items-center gap-1.5 transition-all"
                         >
                           <FaEye size={11} />
-                          Abrir medio
+                          {t('magazineOpenMedia')}
                         </button>
                       )}
                     </li>
@@ -677,10 +699,10 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
 
           {/* Conflictos: nunca presentar lo disputado como verdad */}
           {details.conflicts.length > 0 && (
-            <section id="reader-conflicts" aria-label="Conflictos" className="flex flex-col gap-2.5 scroll-mt-6">
+            <section id="reader-conflicts" aria-label={t('magazineConflicts')} className="flex flex-col gap-2.5 scroll-mt-6">
               <h2 className="text-xs font-bold uppercase tracking-[0.16em] text-amber-200/60 flex items-center gap-1.5">
                 <FaTriangleExclamation size={12} />
-                Información en revisión · {details.conflicts.length}
+                {t('magazineUnderReview')} · {details.conflicts.length}
               </h2>
               <ul className="flex flex-col gap-2">
                 {details.conflicts.map((conflict) => (
@@ -691,8 +713,8 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                     <span className="text-[11px] font-mono text-amber-200/70">{conflict.fact_key}</span>
                     <p className="text-[13px] text-white/75 leading-relaxed">{conflict.description}</p>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] text-white/40">
-                        Estado: {conflict.resolution_state}
+                        <span className="text-[11px] text-white/40">
+                          {t('magazineState')}: {conflict.resolution_state}
                         {conflict.resolution_notes ? ` · ${conflict.resolution_notes}` : ''}
                       </span>
                       <span className="flex gap-1.5 ml-auto">
@@ -706,9 +728,9 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
                               type="button"
                               onClick={() => openEvidence(target)}
                               className="px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/10 border border-white/10 text-white/65 hover:text-white text-[11px] font-mono transition-all"
-                              title="Abrir la evidencia de este lado del conflicto"
+                              title={t('magazineOpenEvidenceSide')}
                             >
-                              Ver {side}
+                              {t('magazineViewSide', { side })}
                             </button>
                           );
                         })}
@@ -721,13 +743,13 @@ export function MagazineReader({ volume, articleId, initialTarget, onBack }: Mag
           )}
 
           {/* Versiones */}
-          <section aria-label="Versiones" className="flex flex-col gap-2">
+          <section aria-label={t('magazineVersions')} className="flex flex-col gap-2">
             <h2 className="text-xs font-bold uppercase tracking-[0.16em] text-white/40">
-              Versiones · v{details.article.active_version} activa
+              {t('magazineVersionsActive', { version: details.article.active_version })}
             </h2>
             <details className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3">
               <summary className="text-xs text-white/60 cursor-pointer">
-                Historial ({details.versions.length} {details.versions.length === 1 ? 'versión' : 'versiones'})
+                {details.versions.length === 1 ? t('magazineHistoryOne', { count: 1 }) : t('magazineHistoryMany', { count: details.versions.length })}
               </summary>
               <ul className="mt-2 flex flex-col gap-1.5">
                 {details.versions.map((version) => (

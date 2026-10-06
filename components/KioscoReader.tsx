@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import { EvidenceSourceInspector } from '@/components/EvidenceSourceInspector';
+import { useI18n } from '@/lib/i18n';
 import {
   fetchMagazineArticleDetails,
   formatTimestamp,
@@ -27,7 +28,7 @@ import {
   KIOSCO_FLIP_MS,
   paginateBlocks,
   softArtSVG,
-  timeAgoEs,
+  timeAgo,
   type KioscoBlock,
 } from '@/lib/kiosco';
 import styles from '@/components/KioscoMagazine.module.css';
@@ -126,7 +127,12 @@ function normalizeBlock(value: unknown): KioscoBlock | null {
   return block;
 }
 
-function parseBlocks(raw: string): KioscoBlock[] {
+export interface KioscoRecipeLabels {
+  ingredientsTitle: string;
+  stepsTitle: string;
+}
+
+function parseBlocks(raw: string, labels?: KioscoRecipeLabels): KioscoBlock[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
@@ -146,11 +152,12 @@ function parseBlocks(raw: string): KioscoBlock[] {
       .filter((block): block is KioscoBlock => block !== null);
   }
   const blocks: KioscoBlock[] = [];
+  const recipeLabels = labels ?? { ingredientsTitle: 'Ingredientes', stepsTitle: 'Preparación' };
   if (Array.isArray(root.ingredients)) {
-    blocks.push({ kind: 'ingredients', title: 'Ingredientes', items: root.ingredients as unknown[] });
+    blocks.push({ kind: 'ingredients', title: recipeLabels.ingredientsTitle, items: root.ingredients as unknown[] });
   }
   if (Array.isArray(root.steps)) {
-    blocks.push({ kind: 'steps', title: 'Preparación', steps: root.steps as unknown[] });
+    blocks.push({ kind: 'steps', title: recipeLabels.stepsTitle, steps: root.steps as unknown[] });
   }
   for (const [key, entry] of Object.entries(root)) {
     if (['yield', 'servings', 'ingredients', 'steps'].includes(key)) continue;
@@ -164,6 +171,7 @@ function parseBlocks(raw: string): KioscoBlock[] {
 }
 
 function BlockView({ block }: { block: KioscoBlock }) {
+  const { t } = useI18n();
   switch (block.kind) {
     case 'heading':
     case 'title':
@@ -197,7 +205,7 @@ function BlockView({ block }: { block: KioscoBlock }) {
           {block.title && <p className={styles.ki}>{block.title}</p>}
           <div className={styles.body}>
             {steps.map((step, index) => (
-              <p key={index}><strong>{index + 1}. </strong>{itemText(step) || `Paso ${index + 1}`}</p>
+              <p key={index}><strong>{index + 1}. </strong>{itemText(step) || t('magazineStepFallback', { index: index + 1 })}</p>
             ))}
           </div>
         </div>
@@ -210,7 +218,7 @@ function BlockView({ block }: { block: KioscoBlock }) {
       if (!code) return null;
       return (
         <div>
-          <p className={styles.ki}>{block.language ?? block.title ?? 'código'}</p>
+          <p className={styles.ki}>{block.language ?? block.title ?? t('magazineCode')}</p>
           <pre className={styles.body} style={{ whiteSpace: 'pre-wrap', fontSize: '0.8em' }}>{code}</pre>
         </div>
       );
@@ -249,6 +257,7 @@ function BlockView({ block }: { block: KioscoBlock }) {
 }
 
 export function KioscoReader({ volume, articleId, initialTarget, onBack }: KioscoReaderProps) {
+  const { t, locale } = useI18n();
   const [details, setDetails] = useState<MagazineArticleDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -275,6 +284,13 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
 
   const seed = useMemo(() => hashSeed(articleId), [articleId]);
   const hue = useMemo(() => seed % 360, [seed]);
+  const recipeLabels = useMemo<KioscoRecipeLabels>(
+    () => ({
+      ingredientsTitle: t('magazineIngredients'),
+      stepsTitle: t('magazineSteps'),
+    }),
+    [t],
+  );
   const reducedMotion = useMemo(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     [],
@@ -297,7 +313,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         if (live) setDetails(loaded);
       })
       .catch((error: unknown) => {
-        if (live) setLoadError(error instanceof Error ? error.message : 'No se pudo leer el artículo.');
+        if (live) setLoadError(error instanceof Error ? error.message : t('magazineLoadError'));
       })
       .finally(() => {
         if (live) setIsLoading(false);
@@ -305,29 +321,49 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
     return () => {
       live = false;
     };
-  }, [articleId]);
+  }, [articleId, t]);
 
   /* Páginas desde el contenido real. */
   const pages = useMemo<KioscoPage[]>(() => {
     if (!details) return [];
-    const list: KioscoPage[] = [{ kind: 'cover', section: 'portada' }];
-    const blocks = parseBlocks(details.article.structured_content_json);
+    const sectionLabel = (kind: PageKind): string => {
+      switch (kind) {
+        case 'cover':
+          return t('kioscoSectionCover');
+        case 'index':
+          return t('kioscoIndex');
+        case 'content':
+          return details.article.title;
+        case 'evidence':
+          return t('magazineEvidence');
+        case 'sources':
+          return t('magazineSources');
+        case 'conflicts':
+          return t('magazineConflicts');
+        case 'versions':
+          return t('magazineVersions');
+        case 'colophon':
+          return t('kioscoColophon');
+      }
+    };
+    const list: KioscoPage[] = [{ kind: 'cover', section: sectionLabel('cover') }];
+    const blocks = parseBlocks(details.article.structured_content_json, recipeLabels);
     const contentPages = paginateBlocks(blocks);
-    list.push({ kind: 'index', section: 'índice' });
+    list.push({ kind: 'index', section: sectionLabel('index') });
     contentPages.forEach((group, groupIndex) => {
       list.push({ kind: 'content', section: details.article.title, blocks: group, first: groupIndex === 0 });
     });
     if (details.evidence.length > 0) {
       for (let start = 0; start < details.evidence.length; start += 2) {
-        list.push({ kind: 'evidence', section: 'evidencia', evidenceStart: start });
+        list.push({ kind: 'evidence', section: sectionLabel('evidence'), evidenceStart: start });
       }
     }
-    list.push({ kind: 'sources', section: 'fuentes' });
-    if (details.conflicts.length > 0) list.push({ kind: 'conflicts', section: 'conflictos' });
-    if (details.versions.length > 1) list.push({ kind: 'versions', section: 'versiones' });
-    list.push({ kind: 'colophon', section: 'colofón' });
+    list.push({ kind: 'sources', section: sectionLabel('sources') });
+    if (details.conflicts.length > 0) list.push({ kind: 'conflicts', section: sectionLabel('conflicts') });
+    if (details.versions.length > 1) list.push({ kind: 'versions', section: sectionLabel('versions') });
+    list.push({ kind: 'colophon', section: sectionLabel('colophon') });
     return list;
-  }, [details]);
+  }, [details, recipeLabels, t]);
   pagesRef.current = pages;
 
   const step = flipStep(single);
@@ -368,11 +404,11 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
   /* Etiqueta viva desde updated_at real. */
   useEffect(() => {
     if (!details) return;
-    const update = () => setLiveLabel(`actualizada ${timeAgoEs(details.article.updated_at)}`);
+    const update = () => setLiveLabel(`${t('kioscoUpdated')} ${timeAgo(details.article.updated_at, locale)}`);
     update();
     const timer = window.setInterval(update, 15000);
     return () => window.clearInterval(timer);
-  }, [details]);
+  }, [details, locale, t]);
 
   /* Animación de apertura: la portada gira y revela la página 0. */
   useEffect(() => {
@@ -498,12 +534,12 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
           <div className={styles.cvArt} style={{ opacity: 0.62 }} dangerouslySetInnerHTML={{ __html: coverArtSVG(seed, hue) }} />
           <div className={styles.cvVeil} />
           <div className={styles.cvTop}>
-            <span className={styles.cvLive}><i />en vivo</span>
+            <span className={styles.cvLive}><i />{t('kioscoCoverLive')}</span>
             <span className={styles.cvCode}>{volume.volumeNumber}</span>
           </div>
           <div className={styles.cvMast}>
             <b>{details.article.title}</b>
-            <span>{presentArticleType(details.article.article_type)}</span>
+            <span>{presentArticleType(details.article.article_type, locale)}</span>
           </div>
           <div className={styles.cvBot}>
             <div className={styles.cvRow}>
@@ -529,17 +565,18 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
     );
     switch (page.kind) {
       case 'index': {
+        const contentCount = pagesRef.current.filter((p) => p.kind === 'content').length;
         const rows: Array<[string, string, string]> = [
-          ['Contenido', details.article.title, `${pagesRef.current.filter((p) => p.kind === 'content').length} pág.`],
-          ['Evidencia', `${details.evidence.length} piezas trazables`, `${details.evidence.length}`],
-          ['Fuentes', `${details.sources.length} vinculadas`, `${details.sources.length}`],
-          ['Conflictos', details.conflicts.length > 0 ? `${details.conflicts.length} por resolver` : 'ninguno', `${details.conflicts.length}`],
-          ['Versiones', `v${details.article.active_version} activa`, `${details.versions.length}`],
+          [t('magazineContent'), details.article.title, t('kioscoPages', { count: contentCount })],
+          [t('magazineEvidence'), t('kioscoTraceablePieces', { count: details.evidence.length }), `${details.evidence.length}`],
+          [t('magazineSources'), t('kioscoLinked', { count: details.sources.length }), `${details.sources.length}`],
+          [t('magazineConflicts'), details.conflicts.length > 0 ? t('kioscoToResolveCount', { count: details.conflicts.length }) : t('kioscoNone'), `${details.conflicts.length}`],
+          [t('magazineVersions'), t('kioscoActiveVersion', { version: details.article.active_version }), `${details.versions.length}`],
         ];
         return shell(
           <>
-            <p className={styles.ki}>Índice</p>
-            <h2 className={styles.hl}>En este artículo</h2>
+            <p className={styles.ki}>{t('kioscoIndex')}</p>
+            <h2 className={styles.hl}>{t('kioscoInArticle')}</h2>
             <div className={styles.toc}>
               {rows.map(([label, text, count]) => (
                 <div key={label}><b>{count}</b><i>{text}</i><em>{label}</em></div>
@@ -555,7 +592,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
               <BlockView key={index} block={block} />
             ))}
             {(page.blocks ?? []).length === 0 && (
-              <p className={styles.body}>Sin contenido en esta página.</p>
+              <p className={styles.body}>{t('kioscoEmptyPage')}</p>
             )}
           </>,
         );
@@ -563,20 +600,20 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         const items = details.evidence.slice(page.evidenceStart ?? 0, (page.evidenceStart ?? 0) + 2);
         return shell(
           <>
-            <p className={styles.ki}>Evidencia trazable</p>
-            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>Lo que sostiene el texto</h2>
+            <p className={styles.ki}>{t('kioscoTraceable')}</p>
+            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>{t('kioscoSustains')}</h2>
             {items.map((item) => (
               <div key={item.id} className={styles.evCard}>
                 {item.transcript_text && <q>{item.transcript_text}</q>}
                 {item.extracted_fact && <p>{item.extracted_fact}</p>}
                 <div className={styles.evMeta}>
-                  <span>{presentEvidenceKind(item.evidence_kind)}</span>
+                  <span>{presentEvidenceKind(item.evidence_kind, locale)}</span>
                   {(item.timestamp_start !== null && item.timestamp_start !== undefined) && (
                     <span>{formatTimestamp(item.timestamp_start)}</span>
                   )}
                   <span>{Math.round(item.confidence * 100)}%</span>
                   <button type="button" className={styles.evBtn} onClick={() => setInspectorEvidence(item)}>
-                    Ver fuente
+                    {t('magazineViewSource')}
                   </button>
                 </div>
               </div>
@@ -587,10 +624,10 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
       case 'sources':
         return shell(
           <>
-            <p className={styles.ki}>Fuentes</p>
-            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>Videos de origen</h2>
+            <p className={styles.ki}>{t('magazineSources')}</p>
+            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>{t('kioscoSourceVideos')}</h2>
             {details.sources.length === 0 ? (
-              <p className={styles.body}>Sin fuentes vinculadas.</p>
+              <p className={styles.body}>{t('magazineNoSources')}</p>
             ) : (
               <div className={styles.toc}>
                 {details.sources.map((source) => (
@@ -607,8 +644,8 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
       case 'conflicts':
         return shell(
           <>
-            <p className={styles.ki}>Conflictos</p>
-            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>Por resolver</h2>
+            <p className={styles.ki}>{t('magazineConflicts')}</p>
+            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>{t('kioscoToResolve')}</h2>
             <div className={styles.body}>
               {details.conflicts.map((conflict) => (
                 <p key={conflict.id}>
@@ -621,14 +658,14 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
       case 'versions':
         return shell(
           <>
-            <p className={styles.ki}>Versiones</p>
-            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>Historial</h2>
+            <p className={styles.ki}>{t('magazineVersions')}</p>
+            <h2 className={styles.hl} style={{ fontSize: '1.5em' }}>{t('kioscoHistory')}</h2>
             <div className={styles.toc}>
               {details.versions.map((version) => (
                 <div key={version.id}>
                   <b>v{version.version_number}</b>
                   <i>{version.change_summary ?? version.title}</i>
-                  <em>{timeAgoEs(version.created_at)}</em>
+                  <em>{timeAgo(version.created_at, locale)}</em>
                 </div>
               ))}
             </div>
@@ -638,14 +675,14 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
       default:
         return shell(
           <>
-            <p className={styles.ki}>Colofón</p>
+            <p className={styles.ki}>{t('kioscoColophon')}</p>
             <div className={styles.body}>
-              <p>Artículo compilado por el motor editorial de Pulsaria y conservado en la biblioteca local con trazabilidad completa a sus fuentes.</p>
-              <p>Ninguna imagen de esta edición es una fotografía: la portada se genera en el equipo a partir de una semilla.</p>
+              <p>{t('kioscoColophonP1')}</p>
+              <p>{t('kioscoColophonP2')}</p>
             </div>
             <div className={styles.rule} />
             <p className={styles.credit} style={{ textAlign: 'center' }}>
-              {volume.volumeNumber} · v{details.article.active_version} · {presentEditorialState(details.article.editorial_state)}
+              {volume.volumeNumber} · v{details.article.active_version} · {presentEditorialState(details.article.editorial_state, locale)}
             </p>
             <figure style={{ margin: '1em 0 0', height: '7em', overflow: 'hidden', borderRadius: 2 }} aria-hidden="true">
               <span dangerouslySetInnerHTML={{ __html: softArtSVG(seed + 7, hue) }} style={{ display: 'block', height: '100%' }} />
@@ -653,7 +690,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
           </>,
         );
     }
-  }, [details, hue, seed, volume]);
+  }, [details, hue, seed, volume, t, locale]);
 
   const total = pages.length;
   const counter = total === 0
@@ -665,7 +702,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
 
   if (isLoading) {
     return (
-      <div className={styles.reader} aria-label="Cargando artículo">
+      <div className={styles.reader} aria-label={t('kioscoLoadingArticle')}>
         <div className={styles.stage}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 620, width: '100%', margin: '0 auto' }}>
             <div style={{ height: 36, borderRadius: 10 }} className={styles.shimmer} />
@@ -683,10 +720,10 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
           <div className={styles.topbar}>
             <b>{volume.title}</b>
             <span className={styles.sp} />
-            <button type="button" className={styles.xbtn} onClick={onBack} aria-label="Cerrar">×</button>
+            <button type="button" className={styles.xbtn} onClick={onBack} aria-label={t('kioscoClose')}>×</button>
           </div>
           <p style={{ color: '#a49cb0', fontSize: 13, textAlign: 'center' }}>
-            No se pudo abrir el artículo. {loadError ?? 'Sin datos.'}
+            {t('magazineOpenError')} {loadError ?? t('magazineNoData')}
           </p>
         </div>
       </div>
@@ -694,17 +731,17 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
   }
 
   return (
-    <div className={styles.reader} role="dialog" aria-modal="false" aria-label={`Lector: ${details.article.title}`}>
+    <div className={styles.reader} role="dialog" aria-modal="false" aria-label={t('kioscoReaderTitle', { title: details.article.title })}>
       <div className={styles.stage}>
         <div className={styles.topbar}>
           <b>{details.article.title}</b>
-          <span className={styles.sub}>{volume.volumeNumber} · {presentArticleType(details.article.article_type)} · v{details.article.active_version} · {presentEditorialState(details.article.editorial_state)}</span>
+          <span className={styles.sub}>{volume.volumeNumber} · {presentArticleType(details.article.article_type, locale)} · v{details.article.active_version} · {presentEditorialState(details.article.editorial_state, locale)}</span>
           <span className={styles.sp} />
-          <span className={styles.livetag}><i />{liveLabel || 'actualizada —'}</span>
+          <span className={styles.livetag}><i />{liveLabel || t('kioscoUpdatedEmpty')}</span>
           <span className={styles.rctl}>
-            <button type="button" onClick={() => setFontScale((v) => clamp(Math.round((v - 0.08) * 100) / 100, 0.85, 1.5))} title="Reducir texto" aria-label="Reducir texto">A−</button>
-            <button type="button" onClick={() => setFontScale((v) => clamp(Math.round((v + 0.08) * 100) / 100, 0.85, 1.5))} title="Ampliar texto" aria-label="Ampliar texto">A+</button>
-            <button type="button" className={styles.xbtn} onClick={closeReader} aria-label="Cerrar lector">×</button>
+            <button type="button" onClick={() => setFontScale((v) => clamp(Math.round((v - 0.08) * 100) / 100, 0.85, 1.5))} title={t('kioscoDecreaseText')} aria-label={t('kioscoDecreaseText')}>A−</button>
+            <button type="button" onClick={() => setFontScale((v) => clamp(Math.round((v + 0.08) * 100) / 100, 0.85, 1.5))} title={t('kioscoIncreaseText')} aria-label={t('kioscoIncreaseText')}>A+</button>
+            <button type="button" className={styles.xbtn} onClick={closeReader} aria-label={t('kioscoCloseReader')}>×</button>
           </span>
         </div>
 
@@ -755,15 +792,15 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         </div>
 
         <div className={styles.nav}>
-          <button type="button" onClick={() => flip(-1)} disabled={idx <= 0} aria-label="Página anterior">
+          <button type="button" onClick={() => flip(-1)} disabled={idx <= 0} aria-label={t('kioscoPrevPage')}>
             <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
           </button>
           <span className={styles.ctr}><b>{counter}</b> / <span>{pad(Math.max(1, total))}</span></span>
-          <button type="button" onClick={() => flip(1)} disabled={idx >= maxIndex} aria-label="Página siguiente">
+          <button type="button" onClick={() => flip(1)} disabled={idx >= maxIndex} aria-label={t('kioscoNextPage')}>
             <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" /></svg>
           </button>
         </div>
-        <div className={styles.progress} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPct} aria-label="Progreso de lectura">
+        <div className={styles.progress} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPct} aria-label={t('kioscoReadingProgress')}>
           <i style={{ width: `${progressPct}%` }} />
         </div>
       </div>
@@ -773,7 +810,7 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
           style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(6,5,10,.9)', overflowY: 'auto', padding: 24 }}
           role="dialog"
           aria-modal="true"
-          aria-label="Fuente de evidencia"
+          aria-label={t('kioscoEvidenceSource')}
           onClick={(event) => {
             if (event.target === event.currentTarget) setInspectorEvidence(null);
           }}

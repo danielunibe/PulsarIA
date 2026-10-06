@@ -142,18 +142,28 @@ export function hexToHue(hex: string): number {
   return Math.round(((hue * 60) + 360) % 360);
 }
 
-/** Tiempo relativo corto en español desde un ISO o epoch. */
+/** Tiempo relativo corto (es-MX/en-US) desde un ISO o epoch. */
 export function timeAgoEs(value: string | number | null | undefined): string {
+  return timeAgo(value, 'es-MX');
+}
+
+/** Tiempo relativo corto con idioma base explícito. */
+export function timeAgo(
+  value: string | number | null | undefined,
+  locale: 'es-MX' | 'en-US' = 'es-MX',
+): string {
   if (value === null || value === undefined || value === '') return '—';
   const ts = typeof value === 'number' ? value : Date.parse(value);
   if (!Number.isFinite(ts)) return '—';
   const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (seconds < 60) return `hace ${seconds} s`;
+  const prefix = locale === 'en-US' ? '' : 'hace ';
+  const suffix = locale === 'en-US' ? ' ago' : '';
+  if (seconds < 60) return `${prefix}${seconds} s${suffix}`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `hace ${minutes} min`;
+  if (minutes < 60) return `${prefix}${minutes} min${suffix}`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `hace ${hours} h`;
-  return `hace ${Math.floor(hours / 24)} d`;
+  if (hours < 48) return `${prefix}${hours} h${suffix}`;
+  return `${prefix}${Math.floor(hours / 24)} d${suffix}`;
 }
 
 /* ---------------- Lógica de flip del spread ---------------- */

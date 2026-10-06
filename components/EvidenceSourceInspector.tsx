@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { FaCamera, FaClock, FaFilm, FaPlay, FaTriangleExclamation } from '@/components/icon-library';
+import { useI18n } from '@/lib/i18n';
 import {
   fetchMagazineSourceMedia,
   formatTimestamp,
@@ -29,10 +30,11 @@ interface EvidenceSourceInspectorProps {
   onClose: () => void;
 }
 
-function sourceStateLabel(sourceState: string, jobStatus: string): string {
-  if (sourceState === 'local') return 'Local';
-  if (sourceState === 'online') return 'Online · ficha conservada';
-  if (sourceState === 'unavailable') return 'No disponible · ficha conservada';
+function sourceStateLabel(sourceState: string, jobStatus: string, locale: 'es-MX' | 'en-US' = 'es-MX'): string {
+  const en = locale === 'en-US';
+  if (sourceState === 'local') return en ? 'Local' : 'Local';
+  if (sourceState === 'online') return en ? 'Online · entry retained' : 'Online · ficha conservada';
+  if (sourceState === 'unavailable') return en ? 'Unavailable · entry retained' : 'No disponible · ficha conservada';
   return `${sourceState} · job ${jobStatus}`;
 }
 
@@ -70,6 +72,7 @@ function SourceVideo({
   startSec: number | null;
   endSec: number | null;
 }) {
+  const { t, locale } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [posterUrl, setPosterUrl] = useState<string | null>(null);
@@ -106,9 +109,9 @@ function SourceVideo({
     return (
       <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-center flex flex-col items-center gap-2">
         <FaFilm size={20} className="text-white/25" />
-        <p className="text-xs text-white/70 font-medium">Fuente disponible pero reproducción no disponible.</p>
+        <p className="text-xs text-white/70 font-medium">{t('inspectorNoPlayback')}</p>
         <p className="text-[11px] text-white/40">
-          {sourceStateLabel(media.source_state, media.job_status)} · sin archivo de video local.
+          {sourceStateLabel(media.source_state, media.job_status, locale)} · {t('inspectorNoLocalFile')}
         </p>
       </div>
     );
@@ -143,7 +146,7 @@ function SourceVideo({
           {formatTimestamp(startSec)}
           {endSec !== null && Number.isFinite(endSec) ? ` — ${formatTimestamp(endSec)}` : ''}
           {media.duration_secs !== null && Number.isFinite(media.duration_secs)
-            ? ` · total ${formatTimestamp(media.duration_secs)}`
+            ? ` · ${t('inspectorTotal', { time: formatTimestamp(media.duration_secs) })}`
             : ''}
         </span>
         {startSec !== null && Number.isFinite(startSec) && (
@@ -153,7 +156,7 @@ function SourceVideo({
             className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-white text-[11px] font-semibold flex items-center gap-1.5 transition-all"
           >
             <FaPlay size={10} />
-            Reproducir segmento
+            {t('inspectorPlaySegment')}
           </button>
         )}
       </div>
@@ -167,6 +170,7 @@ export function EvidenceSourceInspector({
   sources,
   onClose,
 }: EvidenceSourceInspectorProps) {
+  const { t, locale } = useI18n();
   const [media, setMedia] = useState<MagazineSourceMedia | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -180,13 +184,13 @@ export function EvidenceSourceInspector({
       .then((resolved) => {
         if (!live) return;
         if (!resolved) {
-          setLoadError(`El video de origen (job ${evidence.job_id}) ya no existe en la biblioteca.`);
+          setLoadError(t('inspectorSourceGone', { id: evidence.job_id }));
           return;
         }
         setMedia(resolved);
       })
       .catch((error: unknown) => {
-        if (live) setLoadError(error instanceof Error ? error.message : 'No se pudo resolver la fuente.');
+        if (live) setLoadError(error instanceof Error ? error.message : t('inspectorResolveError'));
       })
       .finally(() => {
         if (live) setIsLoading(false);
@@ -194,27 +198,27 @@ export function EvidenceSourceInspector({
     return () => {
       live = false;
     };
-  }, [evidence.job_id, articleId]);
+  }, [evidence.job_id, articleId, t]);
 
   const source = sources.find((candidate) => candidate.id === evidence.source_id)
     ?? sources.find((candidate) => candidate.job_id === evidence.job_id);
 
   return (
     <section
-      aria-label="Inspector de fuente"
+      aria-label={t('inspectorTitle')}
       className="rounded-2xl border border-sky-400/20 bg-sky-400/[0.04] p-4 md:p-5 flex flex-col gap-3"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
           <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-sky-300/80">
-            Fuente original · job {evidence.job_id}
+            {t('inspectorOriginalSource')} · job {evidence.job_id}
           </span>
           <span className="text-sm font-semibold text-white/90">
-            {media?.title ?? 'Resolviendo fuente…'}
+            {media?.title ?? t('inspectorResolving')}
           </span>
           {media && (
             <span className="text-[11px] text-white/45">
-              {[media.author, media.platform, sourceStateLabel(media.source_state, media.job_status)]
+              {[media.author, media.platform, sourceStateLabel(media.source_state, media.job_status, locale)]
                 .filter(Boolean)
                 .join(' · ')}
             </span>
@@ -228,7 +232,7 @@ export function EvidenceSourceInspector({
           onClick={onClose}
           className="px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/15 border border-white/10 text-white/70 hover:text-white text-[11px] font-medium transition-all shrink-0"
         >
-          Cerrar
+          {t('inspectorClose')}
         </button>
       </div>
 
@@ -243,12 +247,12 @@ export function EvidenceSourceInspector({
             <figure className="flex flex-col gap-1.5">
               <ResolvedImage
                 path={evidence.keyframe_path}
-                alt={`Fotograma clave de la evidencia ${evidence.id}`}
+                alt={t('inspectorKeyframeAlt', { id: evidence.id })}
                 className="rounded-xl border border-white/10 max-h-56 w-auto self-start object-contain bg-black"
               />
               <figcaption className="text-[10px] text-white/35 flex items-center gap-1.5">
                 <FaCamera size={10} />
-                Fotograma persistido por el pipeline visual
+                {t('inspectorKeyframeSaved')}
                 {evidence.timestamp_start !== null && Number.isFinite(evidence.timestamp_start)
                   ? ` · ${formatTimestamp(evidence.timestamp_start)}`
                   : ''}
@@ -269,9 +273,9 @@ export function EvidenceSourceInspector({
                 : ''}
             </span>
             <span>·</span>
-            <span>evidencia #{evidence.id}</span>
+            <span>{t('inspectorEvidenceRef', { id: evidence.id })}</span>
             <span>·</span>
-            <span>confianza {Math.round(evidence.confidence * 100)}%</span>
+            <span>{t('inspectorConfidence', { pct: Math.round(evidence.confidence * 100) })}</span>
           </div>
         </>
       ) : null}

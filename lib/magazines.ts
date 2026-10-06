@@ -129,23 +129,24 @@ export function toMagazineVolumeView(record: MagazineVolumeRecord): MagazineVolu
   };
 }
 
-/** Etiqueta legible de un estado editorial para la interfaz. */
-export function presentEditorialState(state: string): string {
+/** Etiqueta legible de un estado editorial para la interfaz (es-MX/en-US). */
+export function presentEditorialState(state: string, locale: 'es-MX' | 'en-US' = 'es-MX'): string {
+  const en = locale === 'en-US';
   switch (state) {
     case 'draft':
-      return 'Borrador';
+      return en ? 'Draft' : 'Borrador';
     case 'processing':
-      return 'Procesando';
+      return en ? 'Processing' : 'Procesando';
     case 'published':
-      return 'Publicado';
+      return en ? 'Published' : 'Publicado';
     case 'updating':
-      return 'Actualizando';
+      return en ? 'Updating' : 'Actualizando';
     case 'requires_review':
-      return 'Requiere revisión';
+      return en ? 'Needs review' : 'Requiere revisión';
     case 'failed':
-      return 'Falló';
+      return en ? 'Failed' : 'Falló';
     case 'archived':
-      return 'Archivado';
+      return en ? 'Archived' : 'Archivado';
     default:
       return state;
   }
@@ -217,21 +218,22 @@ export interface CompilationOutcome {
   candidate?: NewVolumeCandidate | null;
 }
 
-/** Etiqueta legible de un estado de compilación para la interfaz. */
-export function presentCompilationState(status: string): string {
+/** Etiqueta legible de un estado de compilación para la interfaz (es-MX/en-US). */
+export function presentCompilationState(status: string, locale: 'es-MX' | 'en-US' = 'es-MX'): string {
+  const en = locale === 'en-US';
   switch (status) {
     case 'queued':
-      return 'En cola';
+      return en ? 'Queued' : 'En cola';
     case 'processing':
-      return 'Compilando';
+      return en ? 'Compiling' : 'Compilando';
     case 'completed':
-      return 'Estable';
+      return en ? 'Stable' : 'Estable';
     case 'failed':
-      return 'Falló';
+      return en ? 'Failed' : 'Falló';
     case 'cancelled':
-      return 'Cancelada';
+      return en ? 'Cancelled' : 'Cancelada';
     case 'requires_review':
-      return 'Requiere revisión';
+      return en ? 'Needs review' : 'Requiere revisión';
     default:
       return status;
   }
@@ -465,25 +467,26 @@ export function formatTimestamp(totalSeconds: number | null | undefined): string
   return `${pad(minutes, 2)}:${pad(whole, 2)}.${tenths}`;
 }
 
-/** Etiqueta legible de un tipo de artículo editorial. */
-export function presentArticleType(articleType: string): string {
+/** Etiqueta legible de un tipo de artículo editorial (es-MX/en-US). */
+export function presentArticleType(articleType: string, locale: 'es-MX' | 'en-US' = 'es-MX'): string {
+  const en = locale === 'en-US';
   switch (articleType) {
     case 'recipe':
-      return 'Receta';
+      return en ? 'Recipe' : 'Receta';
     case 'tutorial':
       return 'Tutorial';
     case 'guide':
-      return 'Guía';
+      return en ? 'Guide' : 'Guía';
     case 'technical':
-      return 'Técnico';
+      return en ? 'Technical' : 'Técnico';
     case 'review':
-      return 'Reseña';
+      return en ? 'Review' : 'Reseña';
     case 'reference':
-      return 'Referencia';
+      return en ? 'Reference' : 'Referencia';
     case 'comparison':
-      return 'Comparativa';
+      return en ? 'Comparison' : 'Comparativa';
     case 'collection':
-      return 'Colección';
+      return en ? 'Collection' : 'Colección';
     case 'insight':
       return 'Insight';
     default:
@@ -491,17 +494,18 @@ export function presentArticleType(articleType: string): string {
   }
 }
 
-/** Etiqueta legible de un tipo de evidencia. */
-export function presentEvidenceKind(kind: string): string {
+/** Etiqueta legible de un tipo de evidencia (es-MX/en-US). */
+export function presentEvidenceKind(kind: string, locale: 'es-MX' | 'en-US' = 'es-MX'): string {
+  const en = locale === 'en-US';
   switch (kind) {
     case 'transcript_segment':
-      return 'Transcripción';
+      return en ? 'Transcript' : 'Transcripción';
     case 'keyframe':
-      return 'Fotograma clave';
+      return en ? 'Key frame' : 'Fotograma clave';
     case 'ocr':
-      return 'Texto en pantalla';
+      return en ? 'On-screen text' : 'Texto en pantalla';
     case 'timestamp':
-      return 'Momento';
+      return en ? 'Moment' : 'Momento';
     case 'metadata':
       return 'Metadata';
     default:
