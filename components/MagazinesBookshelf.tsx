@@ -3,7 +3,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { KioscoReader } from '@/components/KioscoReader';
-import { coverArtSVG, hashSeed, hexToHue, timeAgoEs } from '@/lib/kiosco';
+import { useI18n, type TranslationKey } from '@/lib/i18n';
+import { coverArtSVG, hashSeed, hexToHue, timeAgo } from '@/lib/kiosco';
 import {
     FaBookOpen,
     FaMagnifyingGlass,
@@ -28,6 +29,7 @@ import {
     retryMagazineCompilation,
     filterMagazineVolumes,
     latestCompilation,
+    presentArticleType,
     presentCompilationState,
     presentEditorialState,
     type MagazineArticleRecord,
@@ -49,80 +51,86 @@ import {
  * Fuera del shell nativo se muestra vista previa marcada, sin inventar datos.
  */
 
-const PREVIEW_VOLUMES: MagazineVolumeView[] = [
+type PreviewText = (key: TranslationKey, params?: Record<string, string | number>) => string;
+
+const PREVIEW_VOLUME_DEFS = [
     {
         id: 'vol-recipes',
-        volumeNumber: 'TOMO I',
-        title: 'Recetario & Cocina de Autor',
-        subtitle: 'Ingredientes medidos, pasos cronometrados y capturas de emplatado',
+        numeral: 'I',
+        titleKey: 'shelfPrevTitle1',
+        subtitleKey: 'shelfPrevSubtitle1',
+        descriptionKey: 'shelfPrevDesc1',
         category: 'recipes',
         color: '#ff9a3c',
         accentGlow: 'rgba(255, 154, 60, 0.35)',
         spineGradient: 'linear-gradient(180deg, #d35400 0%, #78281f 100%)',
         coverGradient: 'linear-gradient(145deg, #1e130c 0%, #120b07 100%)',
-        articleCount: 0,
-        videoCount: 0,
-        editorialState: 'published',
-        description: 'Compendio gastronómico. Cada video de cocina indexado podrá tabular ingredientes, tiempos de cocción y fotogramas clave de cada paso.',
-        updatedAt: '',
     },
     {
         id: 'vol-tech',
-        volumeNumber: 'TOMO II',
-        title: 'Code Craft & Dev Architecture',
-        subtitle: 'Snippets de código, diagramas y notas de ingeniería extraídas',
+        numeral: 'II',
+        titleKey: 'shelfPrevTitle2',
+        subtitleKey: 'shelfPrevSubtitle2',
+        descriptionKey: 'shelfPrevDesc2',
         category: 'tech',
         color: '#38bdf8',
         accentGlow: 'rgba(56, 189, 248, 0.35)',
         spineGradient: 'linear-gradient(180deg, #0284c7 0%, #082f49 100%)',
         coverGradient: 'linear-gradient(145deg, #091524 0%, #050b14 100%)',
-        articleCount: 0,
-        videoCount: 0,
-        editorialState: 'published',
-        description: 'Manual de referencia técnica. Transformará tutoriales en documentación con bloques de código, comandos y arquitectura.',
-        updatedAt: '',
     },
     {
         id: 'vol-guides',
-        volumeNumber: 'TOMO III',
-        title: 'Guías Visuales & Hacks DIY',
-        subtitle: 'Manuales paso a paso con timestamps y fotogramas destacados',
+        numeral: 'III',
+        titleKey: 'shelfPrevTitle3',
+        subtitleKey: 'shelfPrevSubtitle3',
+        descriptionKey: 'shelfPrevDesc3',
         category: 'guides',
         color: '#34d399',
         accentGlow: 'rgba(52, 211, 153, 0.35)',
         spineGradient: 'linear-gradient(180deg, #059669 0%, #064e3b 100%)',
         coverGradient: 'linear-gradient(145deg, #091f16 0%, #05100c 100%)',
-        articleCount: 0,
-        videoCount: 0,
-        editorialState: 'published',
-        description: 'Guías prácticas de reparación y trucos cotidianos en fichas de ejecución inmediata con fotos de herramientas y materiales.',
-        updatedAt: '',
     },
     {
         id: 'vol-lifestyle',
-        volumeNumber: 'TOMO IV',
-        title: 'Biohacking & Fitness Protocols',
-        subtitle: 'Rutinas segmentadas por series, descansos y postura correcta',
+        numeral: 'IV',
+        titleKey: 'shelfPrevTitle4',
+        subtitleKey: 'shelfPrevSubtitle4',
+        descriptionKey: 'shelfPrevDesc4',
         category: 'lifestyle',
         color: '#a855f7',
         accentGlow: 'rgba(168, 85, 247, 0.35)',
         spineGradient: 'linear-gradient(180deg, #7e22ce 0%, #3b0764 100%)',
         coverGradient: 'linear-gradient(145deg, #190c24 0%, #0d0614 100%)',
+    },
+] as const;
+
+/** Volúmenes de vista previa localizados (solo fuera del shell nativo). */
+function buildPreviewVolumes(t: PreviewText): MagazineVolumeView[] {
+    return PREVIEW_VOLUME_DEFS.map((def) => ({
+        id: def.id,
+        volumeNumber: t('shelfVolumeLabel', { numeral: def.numeral }),
+        title: t(def.titleKey),
+        subtitle: t(def.subtitleKey),
+        category: def.category,
+        color: def.color,
+        accentGlow: def.accentGlow,
+        spineGradient: def.spineGradient,
+        coverGradient: def.coverGradient,
         articleCount: 0,
         videoCount: 0,
         editorialState: 'published',
-        description: 'Protocolos de entrenamiento y salud segmentados por repeticiones, postura y cronometraje.',
+        description: t(def.descriptionKey) as string,
         updatedAt: '',
-    }
-];
+    }));
+}
 
 /** Insignia honesta del estado de compilación: siempre proviene del backend. */
-function compilationBadge(compilation: MagazineCompilationRecord): {
+function compilationBadge(compilation: MagazineCompilationRecord, locale: 'es-MX' | 'en-US' = 'es-MX'): {
     dot: string;
     text: string;
     label: string;
 } {
-    const base = presentCompilationState(compilation.status);
+    const base = presentCompilationState(compilation.status, locale);
     const progress = compilation.status === 'processing' ? ` ${compilation.progress}%` : '';
     switch (compilation.status) {
         case 'completed':
@@ -141,6 +149,7 @@ function compilationBadge(compilation: MagazineCompilationRecord): {
 }
 
 export function MagazinesBookshelf() {
+    const { t, locale } = useI18n();
     const [volumes, setVolumes] = useState<MagazineVolumeView[]>([]);
     const [isPreview, setIsPreview] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -204,6 +213,8 @@ export function MagazinesBookshelf() {
         setCandidates(discovered);
     }, []);
 
+    const previewVolumes = useMemo(() => buildPreviewVolumes(t), [t]);
+
     const loadVolumes = useCallback(async () => {
         setIsLoading(true);
         setLoadError(null);
@@ -219,17 +230,17 @@ export function MagazinesBookshelf() {
             setGeminiReady(null);
             setCompilationsByVolume({});
             if (error instanceof Error && error.message === 'preview-without-native-shell') {
-                setVolumes(PREVIEW_VOLUMES);
+                setVolumes(previewVolumes);
                 setIsPreview(true);
             } else {
-                setVolumes(PREVIEW_VOLUMES);
+                setVolumes(previewVolumes);
                 setIsPreview(true);
-                setLoadError('No se pudo leer el librero local. Mostrando vista previa.');
+                setLoadError(t('shelfLoadError'));
             }
         } finally {
             setIsLoading(false);
         }
-    }, [loadCompilations]);
+    }, [loadCompilations, previewVolumes, t]);
 
     useEffect(() => {
         let active = true;
@@ -331,7 +342,7 @@ export function MagazinesBookshelf() {
             .filter((n) => Number.isInteger(n) && n > 0);
 
         if (jobIds.length === 0) {
-            setCompileFeedback('Indica uno o más IDs numéricos de video (jobs) a compilar (ej. 1 o 1, 2, 3).');
+            setCompileFeedback(t('shelfCompileAskIds'));
             return;
         }
         setIsCompiling(true);
@@ -342,13 +353,17 @@ export function MagazinesBookshelf() {
                     ? await compileMagazineSource(jobIds[0], selectedVolume.id)
                     : await compileMultiSourceEditorial(jobIds, selectedVolume.id);
 
-            const article = outcome.article_id ? ` · artículo ${outcome.article_id}` : '';
+            const article = outcome.article_id ? ` · ${t('shelfOutcomeArticle', { id: outcome.article_id })}` : '';
             const version = outcome.version ? ` v${outcome.version}` : '';
-            const conflicts = outcome.conflict_count > 0 ? ` · ${outcome.conflict_count} conflicto(s)` : '';
-            const candidateInfo = outcome.candidate
-                ? ` · Candidato sugerido: “${outcome.candidate.suggested_title}”`
+            const conflicts = outcome.conflict_count > 0
+                ? ` · ${outcome.conflict_count === 1
+                    ? t('magazineConflictCountOne', { count: 1 })
+                    : t('magazineConflictCountMany', { count: outcome.conflict_count })}`
                 : '';
-            const unchanged = outcome.unchanged ? ' (sin cambios)' : '';
+            const candidateInfo = outcome.candidate
+                ? ` · ${t('shelfOutcomeCandidate', { title: outcome.candidate.suggested_title })}`
+                : '';
+            const unchanged = outcome.unchanged ? ` ${t('shelfOutcomeUnchanged')}` : '';
 
             if (outcome.candidate) {
                 setCandidates((prev) => {
@@ -365,12 +380,12 @@ export function MagazinesBookshelf() {
             }
 
             setCompileFeedback(
-                `${presentCompilationState(outcome.status)}${unchanged}${article}${version}${conflicts}${candidateInfo}. ${outcome.message}`,
+                `${presentCompilationState(outcome.status, locale)}${unchanged}${article}${version}${conflicts}${candidateInfo}. ${outcome.message}`,
             );
             await refreshVolumeData(selectedVolume);
         } catch (error) {
             setCompileFeedback(
-                error instanceof Error ? error.message : 'La compilación falló sin detalle.',
+                error instanceof Error ? error.message : t('shelfCompileFailed'),
             );
             try {
                 const compilations = await fetchMagazineCompilations(selectedVolume.id);
@@ -381,7 +396,7 @@ export function MagazinesBookshelf() {
         } finally {
             setIsCompiling(false);
         }
-    }, [selectedVolume, isCompiling, compileJobId, refreshVolumeData]);
+    }, [selectedVolume, isCompiling, compileJobId, refreshVolumeData, t, locale]);
 
     const handleRetry = useCallback(async (compilationId: number) => {
         if (!selectedVolume || isCompiling) return;
@@ -390,17 +405,17 @@ export function MagazinesBookshelf() {
         try {
             const outcome = await retryMagazineCompilation(compilationId);
             setCompileFeedback(
-                `${presentCompilationState(outcome.status)}. ${outcome.message}`,
+                `${presentCompilationState(outcome.status, locale)}. ${outcome.message}`,
             );
             await refreshVolumeData(selectedVolume);
         } catch (error) {
             setCompileFeedback(
-                error instanceof Error ? error.message : 'El reintento falló sin detalle.',
+                error instanceof Error ? error.message : t('shelfRetryFailed'),
             );
         } finally {
             setIsCompiling(false);
         }
-    }, [selectedVolume, isCompiling, refreshVolumeData]);
+    }, [selectedVolume, isCompiling, refreshVolumeData, t, locale]);
 
     const filteredVolumes = useMemo(
         () => filterMagazineVolumes(volumes, searchQuery),
@@ -438,21 +453,19 @@ export function MagazinesBookshelf() {
                             <FaBookOpen size={18} />
                         </span>
                         <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-3">
-                            Revistas &amp; Tomos Inteligentes
+                            {t('shelfTitle')}
                             <span className="text-[10px] font-mono tracking-wider font-semibold uppercase px-2.5 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-white/60">
-                                Motor editorial · Fase 2
+                                {t('shelfPhase')}
                             </span>
                             {isPreview && (
                                 <span className="text-[10px] font-mono tracking-wider font-semibold uppercase px-2.5 py-0.5 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-300">
-                                    Vista previa
+                                    {t('shelfPreviewBadge')}
                                 </span>
                             )}
                         </h1>
                     </div>
                     <p className="text-xs text-white/50 max-w-2xl leading-relaxed">
-                        Librero vivo: compila videos de la biblioteca en artículos trazables
-                        (fuentes, evidencia, versiones, conflictos). Requiere clave Gemini
-                        en el proceso nativo; sin ella, la compilación falla cerrado.
+                        {t('shelfDescription')}
                     </p>
                 </div>
 
@@ -463,8 +476,8 @@ export function MagazinesBookshelf() {
                             type="search"
                             value={searchQuery}
                             onChange={(event) => setSearchQuery(event.target.value)}
-                            placeholder="Buscar tomos…"
-                            aria-label="Buscar tomos del librero"
+                            placeholder={t('shelfSearchPlaceholder')}
+                            aria-label={t('shelfSearchLabel')}
                             className="bg-transparent outline-none text-xs placeholder:text-white/30 w-36 md:w-44"
                         />
                     </label>
@@ -473,19 +486,19 @@ export function MagazinesBookshelf() {
                         onClick={handleRefresh}
                         disabled={isRefreshing || isLoading}
                         className="px-3.5 py-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-white text-xs font-medium flex items-center gap-2 transition-all disabled:opacity-50"
-                        title="Releer tomos desde la biblioteca local"
+                        title={t('shelfReread')}
                     >
                         <FaArrowRotateLeft size={12} className={isRefreshing ? 'animate-spin text-sky-400' : 'text-white/60'} />
-                        <span>{isRefreshing ? 'Leyendo…' : 'Actualizar'}</span>
+                        <span>{isRefreshing ? t('shelfReading') : t('shelfRefresh')}</span>
                     </button>
                     <button
                         type="button"
                         disabled
                         className="px-3.5 py-2 rounded-xl bg-white/[0.03] border border-white/10 text-white/35 text-xs font-medium flex items-center gap-2 cursor-not-allowed"
-                        title="La creación de tomos personalizados llega en una fase posterior"
+                        title={t('shelfNewVolumeLater')}
                     >
                         <FaPlus size={12} />
-                        <span>Nuevo Tomo</span>
+                        <span>{t('shelfNewVolume')}</span>
                     </button>
                 </div>
             </div>
@@ -512,28 +525,28 @@ export function MagazinesBookshelf() {
                     <div className="flex flex-col">
                         <span className="text-xs font-semibold text-white/90 flex items-center gap-2">
                             {isPreview
-                                ? 'Vista previa sin motor local'
-                                : 'Librero local sincronizado'}
+                                ? t('shelfPreviewNoEngine')
+                                : t('shelfSynced')}
                             <span className="text-[10px] text-white/40 font-mono">· SQLite</span>
                         </span>
                         <span className="text-[11px] text-white/50">
                             {isPreview
-                                ? 'Abre Pulsaria en su ventana de escritorio para leer tus tomos reales.'
+                                ? t('shelfOpenDesktop')
                                 : loadError
                                     ?? (geminiReady === null
-                                        ? 'Consultando motor editorial…'
+                                        ? t('shelfConsulting')
                                         : geminiReady
-                                            ? 'Motor editorial listo: evidencia → Gemini → validación → SQLite.'
-                                            : 'Motor editorial presente pero sin clave Gemini: compilar fallará cerrado hasta configurarla en Ajustes.')}
+                                            ? t('shelfEngineReady')
+                                            : t('shelfEngineNoKey'))}
                         </span>
                     </div>
                 </div>
                 <div className="hidden sm:flex items-center gap-3 text-xs text-white/50 font-mono">
-                    <span>{volumes.length} Tomos</span>
+                    <span>{t('shelfCountVolumes', { count: volumes.length })}</span>
                     <span>·</span>
-                    <span>{totalArticles} Artículos</span>
+                    <span>{t('shelfCountArticles', { count: totalArticles })}</span>
                     <span>·</span>
-                    <span>{totalSources} Fuentes</span>
+                    <span>{t('shelfCountSources', { count: totalSources })}</span>
                 </div>
             </div>
 
@@ -543,16 +556,16 @@ export function MagazinesBookshelf() {
                     <div className="flex items-center justify-between pb-3 px-2">
                         <span className="text-xs font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-2">
                             <FaFolder size={12} />
-                            Estantería Principal · Volúmenes Activos
+                            {t('shelfMainShelf')}
                         </span>
                         <span className="text-[11px] text-white/35 font-mono">
-                            {isLoading ? 'Leyendo…' : `${filteredVolumes.length} visibles`}
+                            {isLoading ? t('shelfReading') : t('shelfVisibleCount', { count: filteredVolumes.length })}
                         </span>
                     </div>
 
                     {/* Tip de sala + caption viva con datos reales del tomo */}
                     <p className={`text-center font-mono text-[10px] tracking-[0.26em] uppercase text-white/40 transition-opacity duration-500 px-3 ${hoveredVolume ? 'opacity-0' : 'opacity-100'}`}>
-                        elige una revista para abrirla
+                        {t('shelfPickHint')}
                     </p>
                     <div
                         aria-live="polite"
@@ -565,9 +578,9 @@ export function MagazinesBookshelf() {
                                 <em className="not-italic text-white/30">{hoveredVolume.volumeNumber}</em>
                                 <em className="not-italic text-white/30">{hoveredVolume.category}</em>
                                 <em className="not-italic text-white/30">
-                                    {hoveredVolume.articleCount} {hoveredVolume.articleCount === 1 ? 'artículo' : 'artículos'} · {hoveredVolume.videoCount} {hoveredVolume.videoCount === 1 ? 'fuente' : 'fuentes'}
+                                    {hoveredVolume.articleCount === 1 ? t('shelfArticleOne', { count: 1 }) : t('shelfArticleMany', { count: hoveredVolume.articleCount })} · {hoveredVolume.videoCount === 1 ? t('magazineSourceOne', { count: 1 }) : t('magazineSourceMany', { count: hoveredVolume.videoCount })}
                                 </em>
-                                <em className="not-italic text-white/30">actualizado {timeAgoEs(hoveredVolume.updatedAt)}</em>
+                                <em className="not-italic text-white/30">{t('shelfUpdatedAt', { time: timeAgo(hoveredVolume.updatedAt, locale) })}</em>
                             </>
                         )}
                     </div>
@@ -583,13 +596,13 @@ export function MagazinesBookshelf() {
                             <FaBookOpen size={22} className="text-white/25" />
                             <p className="text-sm text-white/70 font-medium">
                                 {searchQuery.trim()
-                                    ? `Sin tomos para “${searchQuery.trim()}”.`
-                                    : 'Aún no hay tomos en el librero.'}
+                                    ? t('shelfEmptySearch', { query: searchQuery.trim() })
+                                    : t('shelfEmptyShelf')}
                             </p>
                             <p className="text-[11px] text-white/40">
                                 {searchQuery.trim()
-                                    ? 'Prueba con otro término del título, categoría o descripción.'
-                                    : 'Los tomos canónicos se siembran al iniciar la base local.'}
+                                    ? t('shelfEmptySearchHint')
+                                    : t('shelfSeedHint')}
                             </p>
                         </div>
                     ) : (
@@ -599,11 +612,11 @@ export function MagazinesBookshelf() {
                                     ? null
                                     : latestCompilation(compilationsByVolume[volume.id] ?? []);
                                 const badge = latest
-                                    ? compilationBadge(latest)
+                                    ? compilationBadge(latest, locale)
                                     : {
                                         dot: 'bg-white/25',
                                         text: 'text-white/35',
-                                        label: isPreview ? 'Vista previa' : 'Sin compilaciones',
+                                        label: isPreview ? t('shelfPreviewBadge') : t('shelfNoCompilations'),
                                     };
                                 const coverHue = hexToHue(volume.color);
                                 const coverSeed = hashSeed(volume.id);
@@ -668,7 +681,7 @@ export function MagazinesBookshelf() {
                                                     PULSARIA EDITORIAL
                                                 </span>
                                                 <span className="text-[9px] font-mono font-bold text-white/60 bg-white/[0.07] border border-white/10 px-2 py-0.5 rounded-full">
-                                                    {presentEditorialState(volume.editorialState)}
+                                                    {presentEditorialState(volume.editorialState, locale)}
                                                 </span>
                                             </div>
 
@@ -688,7 +701,7 @@ export function MagazinesBookshelf() {
                                             {/* Footer Badges */}
                                             <div className="pt-2 border-t border-white/[0.08] flex items-center justify-between text-[10px] text-white/50 relative z-10">
                                                 <span className="font-mono">
-                                                    {volume.articleCount} {volume.articleCount === 1 ? 'artículo' : 'artículos'} · {volume.videoCount} {volume.videoCount === 1 ? 'fuente' : 'fuentes'}
+                                                    {volume.articleCount === 1 ? t('shelfArticleOne', { count: 1 }) : t('shelfArticleMany', { count: volume.articleCount })} · {volume.videoCount === 1 ? t('magazineSourceOne', { count: 1 }) : t('magazineSourceMany', { count: volume.videoCount })}
                                                 </span>
                                             </div>
                                         </div>
@@ -720,17 +733,17 @@ export function MagazinesBookshelf() {
                             <div className="flex items-center justify-between px-2">
                                 <span className="text-xs font-bold uppercase tracking-[0.16em] text-amber-400/90 flex items-center gap-2">
                                     <FaWandMagicSparkles size={12} className="text-amber-400" />
-                                    Propuestas Editoriales · Nuevos Tomos Candidatos
+                                    {t('shelfProposals')}
                                 </span>
                                 <span className="text-[11px] text-amber-300/60 font-mono">
-                                    {candidates.length} {candidates.length === 1 ? 'propuesta' : 'propuestas'} sugeridas
+                                    {candidates.length === 1 ? t('shelfProposalOne', { count: 1 }) : t('shelfProposalMany', { count: candidates.length })}
                                 </span>
                             </div>
                             <p className="text-xs text-white/50 px-2 max-w-3xl leading-relaxed">
-                                El motor editorial identificó que el contenido analizado sobrepasa el alcance de los tomos existentes y sugiere crear nuevos tomos independientes.
+                                {t('shelfProposalsDesc1')}
                                 <strong className="text-white/80 font-medium ml-1">
-                                    Estas propuestas NO han creado tomos automáticamente
-                                </strong>; permanecen como sugerencias hasta que decidas aceptarlas en una fase futura.
+                                    {t('shelfProposalsDesc2')}
+                                </strong>{t('shelfProposalsDesc3')}
                             </p>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-2 pt-2">
@@ -742,10 +755,10 @@ export function MagazinesBookshelf() {
                                         <div className="flex flex-col gap-2">
                                             <div className="flex items-center justify-between gap-2">
                                                 <span className="text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/25 text-amber-300">
-                                                    Candidato Sugerido
+                                                    {t('shelfSuggestedCandidate')}
                                                 </span>
                                                 <span className="text-[10px] font-mono text-white/40">
-                                                    Confianza: {Math.round((candidate.confidence ?? 0.85) * 100)}%
+                                                    {t('shelfConfidence', { pct: Math.round((candidate.confidence ?? 0.85) * 100) })}
                                                 </span>
                                             </div>
                                             <h4 className="text-sm font-bold text-white tracking-tight">
@@ -758,13 +771,13 @@ export function MagazinesBookshelf() {
 
                                         <div className="pt-2 border-t border-white/[0.06] flex flex-col gap-1 text-[11px] text-white/40 font-mono">
                                             <div className="flex items-center justify-between">
-                                                <span>Categoría: <span className="text-white/70">{candidate.suggested_category}</span></span>
+                                                <span>{t('shelfCategory')}: <span className="text-white/70">{candidate.suggested_category}</span></span>
                                                 {candidate.suggested_chapter && (
-                                                    <span>Capítulo: <span className="text-white/70">{candidate.suggested_chapter}</span></span>
+                                                    <span>{t('shelfChapter')}: <span className="text-white/70">{candidate.suggested_chapter}</span></span>
                                                 )}
                                             </div>
                                             <div className="text-[10px] text-white/30 truncate">
-                                                Fuentes de soporte: Jobs #{candidate.supporting_job_ids.join(', #')}
+                                                {t('shelfSupportSources')}: Jobs #{candidate.supporting_job_ids.join(', #')}
                                             </div>
                                         </div>
                                     </div>
@@ -803,7 +816,7 @@ export function MagazinesBookshelf() {
                                                 {selectedVolume.volumeNumber}
                                             </span>
                                             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-white/70">
-                                                {presentEditorialState(selectedVolume.editorialState)}
+                                                {presentEditorialState(selectedVolume.editorialState, locale)}
                                             </span>
                                         </div>
                                         <h2 className="text-lg font-bold text-white leading-tight">
@@ -816,7 +829,7 @@ export function MagazinesBookshelf() {
                                     type="button"
                                     onClick={() => setSelectedVolume(null)}
                                     className="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/15 border border-white/10 flex items-center justify-center text-white/60 hover:text-white transition-all"
-                                    aria-label="Cerrar detalle del tomo"
+                                    aria-label={t('shelfCloseDetail')}
                                 >
                                     <FaXmark size={14} />
                                 </button>
@@ -825,23 +838,23 @@ export function MagazinesBookshelf() {
                             {/* Modal Body */}
                             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5">
                                 <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex flex-col gap-2">
-                                    <span className="text-xs font-semibold text-white/90">Sobre este tomo</span>
+                                    <span className="text-xs font-semibold text-white/90">{t('shelfAboutVolume')}</span>
                                     <p className="text-xs text-white/60 leading-relaxed">
                                         {selectedVolume.description}
                                     </p>
                                     <span className="text-[11px] text-white/40 font-mono">
-                                        {selectedVolume.articleCount} {selectedVolume.articleCount === 1 ? 'artículo' : 'artículos'} · {selectedVolume.videoCount} {selectedVolume.videoCount === 1 ? 'fuente' : 'fuentes'} · {selectedVolume.category}
+                                        {selectedVolume.articleCount === 1 ? t('shelfArticleOne', { count: 1 }) : t('shelfArticleMany', { count: selectedVolume.articleCount })} · {selectedVolume.videoCount === 1 ? t('magazineSourceOne', { count: 1 }) : t('magazineSourceMany', { count: selectedVolume.videoCount })} · {selectedVolume.category}
                                     </span>
                                 </div>
 
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs font-bold uppercase tracking-wider text-white/40">
-                                            Compilación editorial
+                                            {t('shelfEditorialBuild')}
                                         </span>
                                         {modalLatest && (
                                             <span className="text-[11px] text-white/40 font-mono">
-                                                #{modalLatest.id} · {presentCompilationState(modalLatest.status)}
+                                                #{modalLatest.id} · {presentCompilationState(modalLatest.status, locale)}
                                                 {modalLatest.status === 'processing' ? ` · ${modalLatest.progress}%` : ''}
                                             </span>
                                         )}
@@ -850,16 +863,15 @@ export function MagazinesBookshelf() {
                                     {isPreview ? (
                                         <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
                                             <p className="text-xs text-white/60">
-                                                Vista previa: compilar requiere la app de escritorio con
-                                                clave Gemini en el proceso nativo.
+                                                {t('shelfPreviewCompile')}
                                             </p>
                                         </div>
                                     ) : (
                                         <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06] flex flex-col gap-3">
                                             <p className="text-[11px] text-white/50 leading-relaxed">
                                                 {modalLatest
-                                                    ? (modalLatest.error_message ?? modalLatest.message ?? 'Sin mensaje del motor.')
-                                                    : 'Este tomo aún no tiene compilaciones. Indica el ID del video (job) para compilarlo.'}
+                                                    ? (modalLatest.error_message ?? modalLatest.message ?? t('shelfNoEngineMsg'))
+                                                    : t('shelfEmptyCompile')}
                                             </p>
                                             <div className="flex items-center gap-2">
                                                 <input
@@ -867,8 +879,8 @@ export function MagazinesBookshelf() {
                                                     inputMode="numeric"
                                                     value={compileJobId}
                                                     onChange={(event) => setCompileJobId(event.target.value)}
-                                                    placeholder="ID(s) de video: ej. 1 o 1, 2, 3"
-                                                    aria-label="ID(s) de los videos a compilar"
+                                                    placeholder={t('shelfJobIdsPlaceholder')}
+                                                    aria-label={t('shelfJobIdsLabel')}
                                                     disabled={isCompiling}
                                                     className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-black/40 border border-white/10 outline-none text-xs text-white placeholder:text-white/30 focus:border-white/25 disabled:opacity-50"
                                                 />
@@ -877,9 +889,9 @@ export function MagazinesBookshelf() {
                                                     onClick={() => void handleCompile()}
                                                     disabled={isCompiling}
                                                     className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold transition-all disabled:opacity-50 shrink-0"
-                                                    title="Compilar uno o varios videos hacia este tomo (soporta síntesis multi-fuente)"
+                                                    title={t('shelfCompileTitle')}
                                                 >
-                                                    {isCompiling ? 'Compilando…' : 'Compilar'}
+                                                    {isCompiling ? t('shelfCompiling') : t('shelfCompile')}
                                                 </button>
                                                 {modalRetryable && modalLatest && (
                                                     <button
@@ -887,10 +899,10 @@ export function MagazinesBookshelf() {
                                                         onClick={() => void handleRetry(modalLatest.id)}
                                                         disabled={isCompiling}
                                                         className="px-3.5 py-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-white text-xs font-medium flex items-center gap-2 transition-all disabled:opacity-50 shrink-0"
-                                                        title="Reejecutar la última compilación con sus parámetros guardados"
+                                                        title={t('shelfRetryTitle')}
                                                     >
                                                         <FaArrowRotateLeft size={11} className={isCompiling ? 'animate-spin' : ''} />
-                                                        <span>Reintentar</span>
+                                                        <span>{t('shelfRetry')}</span>
                                                     </button>
                                                 )}
                                             </div>
@@ -901,8 +913,7 @@ export function MagazinesBookshelf() {
                                             )}
                                             {geminiReady === false && (
                                                 <p className="text-[11px] text-amber-300/80">
-                                                    Sin clave Gemini en el proceso nativo: la compilación
-                                                    fallará cerrado hasta configurarla en Ajustes.
+                                                    {t('shelfNoGemini')}
                                                 </p>
                                             )}
 
@@ -915,14 +926,14 @@ export function MagazinesBookshelf() {
                                                     <div className="flex items-center justify-between">
                                                         <span className="text-[10px] font-mono font-bold uppercase text-amber-300 flex items-center gap-1.5">
                                                             <FaWandMagicSparkles size={11} />
-                                                            Sugerencia editorial detectada
+                                                            {t('shelfSuggestionFound')}
                                                         </span>
                                                         <span className="text-[10px] font-mono text-white/40">
-                                                            Confianza: {Math.round((candidate.confidence ?? 0.85) * 100)}%
+                                                            {t('shelfConfidence', { pct: Math.round((candidate.confidence ?? 0.85) * 100) })}
                                                         </span>
                                                     </div>
                                                     <p className="text-xs font-semibold text-white">
-                                                        Propuesta de nuevo tomo: “{candidate.suggested_title}”
+                                                        {t('shelfNewVolumeProposal', { title: candidate.suggested_title })}
                                                     </p>
                                                     <p className="text-[11px] text-white/60 leading-relaxed">
                                                         {candidate.rationale}
@@ -936,17 +947,17 @@ export function MagazinesBookshelf() {
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs font-bold uppercase tracking-wider text-white/40">
-                                            Capítulos
+                                            {t('shelfChapters')}
                                         </span>
                                         <span className="text-[11px] text-white/40 font-mono">
-                                            {isLoadingChapters ? 'Leyendo…' : `${volumeChapters.length}`}
+                                            {isLoadingChapters ? t('shelfReading') : `${volumeChapters.length}`}
                                         </span>
                                     </div>
 
                                     {isPreview ? (
                                         <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
                                             <p className="text-xs text-white/60">
-                                                Vista previa: los capítulos se leen desde la base local en la app de escritorio.
+                                                {t('shelfPreviewChapters')}
                                             </p>
                                         </div>
                                     ) : isLoadingChapters ? (
@@ -954,7 +965,7 @@ export function MagazinesBookshelf() {
                                     ) : volumeChapters.length === 0 ? (
                                         <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
                                             <p className="text-xs text-white/60">
-                                                Este tomo aún no tiene capítulos. Los artículos sin capítulo aparecen abajo.
+                                                {t('shelfEmptyChapters')}
                                             </p>
                                         </div>
                                     ) : (
@@ -982,7 +993,7 @@ export function MagazinesBookshelf() {
                                                             )}
                                                         </span>
                                                         <span className="ml-auto text-[11px] text-white/35 font-mono shrink-0">
-                                                            {count} {count === 1 ? 'artículo' : 'artículos'}
+                                                            {count === 1 ? t('shelfArticleOne', { count: 1 }) : t('shelfArticleMany', { count })}
                                                         </span>
                                                     </li>
                                                 );
@@ -990,7 +1001,7 @@ export function MagazinesBookshelf() {
                                             {selectedArticles.filter((article) => article.chapter_id === null
                                                 || article.chapter_id === undefined).length > 0 && (
                                                 <li className="px-4 py-2 rounded-xl bg-white/[0.01] border border-dashed border-white/10 flex items-center justify-between">
-                                                    <span className="text-xs text-white/50">Sin capítulo</span>
+                                                    <span className="text-xs text-white/50">{t('shelfNoChapter')}</span>
                                                     <span className="text-[11px] text-white/35 font-mono">
                                                         {selectedArticles.filter((article) => article.chapter_id === null
                                                             || article.chapter_id === undefined).length}
@@ -1004,17 +1015,17 @@ export function MagazinesBookshelf() {
                                 <div className="flex flex-col gap-3">
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs font-bold uppercase tracking-wider text-white/40">
-                                            Artículos del tomo
+                                            {t('shelfVolumeArticles')}
                                         </span>
                                         <span className="text-[11px] text-white/40 font-mono">
-                                            {isLoadingArticles ? 'Leyendo…' : `${selectedArticles.length} visibles`}
+                                            {isLoadingArticles ? t('shelfReading') : t('shelfVisibleCount', { count: selectedArticles.length })}
                                         </span>
                                     </div>
 
                                     {isPreview ? (
                                         <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-center">
                                             <p className="text-xs text-white/60">
-                                                Vista previa: los artículos se leen desde la base local en la app de escritorio.
+                                                {t('shelfPreviewArticles')}
                                             </p>
                                         </div>
                                     ) : isLoadingArticles ? (
@@ -1027,8 +1038,7 @@ export function MagazinesBookshelf() {
                                         <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.06] text-center flex flex-col items-center gap-2">
                                             <FaFileLines size={18} className="text-white/25" />
                                             <p className="text-xs text-white/60">
-                                                Este tomo aún no tiene artículos. Se publicarán aquí cuando el motor
-                                                editorial procese videos de la biblioteca.
+                                                {t('shelfEmptyArticles')}
                                             </p>
                                         </div>
                                     ) : (
@@ -1045,7 +1055,7 @@ export function MagazinesBookshelf() {
                                                             {article.title}
                                                         </span>
                                                         <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.06] text-white/60 shrink-0">
-                                                            {presentEditorialState(article.editorial_state)} · v{article.active_version}
+                                                            {presentEditorialState(article.editorial_state, locale)} · v{article.active_version}
                                                         </span>
                                                     </div>
                                                     <p className="text-[11px] text-white/50 line-clamp-2 leading-relaxed">
@@ -1053,7 +1063,7 @@ export function MagazinesBookshelf() {
                                                     </p>
                                                     <span className="text-[10px] text-white/35 font-mono flex items-center gap-1.5">
                                                         <FaClock size={10} />
-                                                        {article.article_type} · abrir lector
+                                                        {presentArticleType(article.article_type, locale)} · {t('shelfOpenReader')}
                                                         <FaChevronRight size={9} className="text-white/25" />
                                                     </span>
                                                     </button>
@@ -1067,14 +1077,14 @@ export function MagazinesBookshelf() {
                             {/* Modal Footer */}
                             <div className="p-4 border-t border-white/10 bg-white/[0.02] flex items-center justify-between shrink-0">
                                 <span className="text-xs text-white/50">
-                                    Pulsa un artículo para abrir el lector con su evidencia y fuentes.
+                                    {t('shelfTapHint')}
                                 </span>
                                 <button
                                     type="button"
                                     onClick={() => setSelectedVolume(null)}
                                     className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold transition-all"
                                 >
-                                    Cerrar
+                                    {t('kioscoClose')}
                                 </button>
                             </div>
                         </motion.div>
