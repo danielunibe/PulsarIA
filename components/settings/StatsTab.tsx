@@ -90,6 +90,24 @@ export function StatsTab({
     t,
 }: StatsTabProps) {
     const { locale } = useI18n();
+    const reasonLabel = (reason: string): string => {
+        switch (reason) {
+            case 'online-source':
+                return t('stReasonOnline');
+            case 'unprotected':
+                return t('stReasonUnprotected');
+            case 'no-plays':
+                return t('stReasonNoPlays');
+            case 'no-opens':
+                return t('stReasonNoOpens');
+            case 'no-hits':
+                return t('stReasonNoHits');
+            case 'stale-access':
+                return t('stReasonStale');
+            default:
+                return reason;
+        }
+    };
     return (
         <div className="flex flex-col gap-4">
             {/* Métricas de la Biblioteca */}
@@ -437,7 +455,7 @@ export function StatsTab({
                                             <div className="flex items-center gap-2 text-[8px] text-white/40 mt-0.5">
                                                 <span className="font-mono text-white/60">{formatStorageBytes(candidate.mediaBytes, locale)}</span>
                                                 {candidate.reasons.length > 0 && (
-                                                    <span>· {candidate.reasons.join(', ')}</span>
+                                                    <span>· {candidate.reasons.map(reasonLabel).join(', ')}</span>
                                                 )}
                                             </div>
                                         </div>

@@ -130,11 +130,12 @@ function fallbackPurgeCandidates(jobs: JobRecord[]): PurgeCandidateUi[] {
             const ageDays = Number.isFinite(lastAccess) ? Math.max(0, (now - lastAccess) / 86_400_000) : 365;
             const recencyScore = Math.max(0, 30 - Math.min(30, ageDays));
             const interestScore = Math.round(playCount * 100 + openCount * 10 + searchHits * 5 + recencyScore);
-            const reasons = ['Fuente marcada online', 'No está protegido'];
-            if (playCount === 0) reasons.push('Sin reproducciones registradas');
-            if (openCount === 0) reasons.push('Sin aperturas de ficha registradas');
-            if (searchHits === 0) reasons.push('Sin coincidencias seleccionadas');
-            if (ageDays > 30) reasons.push('Último acceso antiguo o no registrado');
+            // Códigos de motivo estables; la etiqueta localizada vive en StatsTab.
+            const reasons = ['online-source', 'unprotected'];
+            if (playCount === 0) reasons.push('no-plays');
+            if (openCount === 0) reasons.push('no-opens');
+            if (searchHits === 0) reasons.push('no-hits');
+            if (ageDays > 30) reasons.push('stale-access');
             return {
                 jobId: job.id,
                 title: job.title || job.url || `Job #${job.id}`,
@@ -341,9 +342,9 @@ export function SettingsPanel({
         try {
             setLocalLlmStatus(await getLocalLlmStatus());
         } catch {
-            setLocalLlmMessage('No se pudo consultar el estado de la IA local.');
+            setLocalLlmMessage(t('stLlmStatusFailed'));
         }
-    }, []);
+    }, [t]);
 
     useEffect(() => {
         void refreshLocalLlm();
@@ -450,10 +451,10 @@ export function SettingsPanel({
         setLocalLlmMessage(null);
         try {
             setLocalLlmStatus(await ensureLocalLlm());
-            setLocalLlmMessage('Modelo local verificado y disponible.');
+            setLocalLlmMessage(t('stLlmReady'));
         } catch {
             await refreshLocalLlm();
-            setLocalLlmMessage('La preparación del modelo local no terminó. Revisa el estado e inténtalo de nuevo.');
+            setLocalLlmMessage(t('stLlmUnfinished'));
         } finally {
             setLocalLlmBusy(false);
         }
@@ -463,7 +464,7 @@ export function SettingsPanel({
         await cancelLocalLlmDownload();
         await refreshLocalLlm();
         setLocalLlmBusy(false);
-        setLocalLlmMessage('Descarga cancelada; el archivo parcial puede reanudarse después.');
+        setLocalLlmMessage(t('stLlmCancelled'));
     };
 
     useEffect(() => {
@@ -554,12 +555,12 @@ export function SettingsPanel({
                 return;
             }
             setStorageStatus(null);
-            setStorageMessage('El shell nativo actual todavía no expone la medición detallada de cuota; no se ha eliminado ningún archivo.');
+            setStorageMessage(t('stPurgeNoQuota'));
         } catch (error) {
             setStorageStatus(null);
             setStorageError(error instanceof Error ? error.message : String(error));
         }
-    }, [folder]);
+    }, [folder, t]);
 
     const handlePreviewPurge = async () => {
         setStorageBusy(true);
@@ -571,7 +572,7 @@ export function SettingsPanel({
             if (nativePreview) {
                 setPurgePreview(nativePreview);
                 setPurgeSelection(nativePreview.candidates.filter((candidate) => !candidate.protected).map((candidate) => candidate.jobId));
-                setStorageMessage(nativePreview.message || 'Vista previa calculada por el motor local. Selecciona elementos concretos antes de confirmar.');
+                setStorageMessage(nativePreview.message || t('stPurgePreviewMsg'));
                 return;
             }
 
@@ -579,12 +580,12 @@ export function SettingsPanel({
             setPurgePreview({
                 candidates: fallbackCandidates,
                 native: false,
-                message: 'Vista informativa basada en los datos visibles; el shell actual no expone preview_media_purge, por lo que esta pantalla no puede borrar nada.',
+                message: t('stPurgeInfoMsg'),
             });
             setPurgeSelection(fallbackCandidates.filter((candidate) => !candidate.protected).map((candidate) => candidate.jobId));
             setStorageMessage(fallbackCandidates.length > 0
-                ? 'Se encontraron candidatos orientativos. La purga permanece bloqueada hasta que exista el comando nativo y una confirmación explícita.'
-                : 'No hay candidatos online no protegidos con tamaño reportado. No se ha eliminado ningún archivo.');
+                ? t('stPurgeCandidatesMsg')
+                : t('stPurgeNoCandidates'));
         } finally {
             setStorageBusy(false);
         }
@@ -592,11 +593,11 @@ export function SettingsPanel({
 
     const handleApplyPurge = async () => {
         if (purgeSelection.length === 0) {
-            setStorageError('Selecciona al menos un elemento de la vista previa.');
+            setStorageError(t('stSelectPreview'));
             return;
         }
         if (!isTauriRuntime()) {
-            setStorageError('La purga de medios requiere el shell nativo; no se eliminó nada.');
+            setStorageError(t('stPurgeNeedsShell'));
             return;
         }
         setStorageBusy(true);
@@ -624,10 +625,10 @@ export function SettingsPanel({
             setPurgePreview(null);
             setPurgeSelection([]);
             setPurgeConfirming(false);
-            setStorageMessage('Medios enviados a la papelera interna. El transcript, embeddings, metadata y artifacts no se tocaron.');
+            setStorageMessage(t('stPurgeMoved'));
             await refreshStorageStatus();
         } catch (error) {
-            setStorageError(`La purga no está disponible en este shell; no se eliminó nada. ${error instanceof Error ? error.message : ''}`.trim());
+            setStorageError(`${t('stPurgeUnavailable')}${error instanceof Error && error.message ? ` ${error.message}` : ''}`);
         } finally {
             setStorageBusy(false);
         }
@@ -635,7 +636,7 @@ export function SettingsPanel({
 
     const handleUndoPurge = async () => {
         if (lastPurgeId === null || !isTauriRuntime()) {
-            setStorageError('No hay una purga nativa recuperable en esta sesión.');
+            setStorageError(t('stPurgeNoUndo'));
             return;
         }
         setStorageBusy(true);
@@ -644,10 +645,10 @@ export function SettingsPanel({
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('undo_media_purge', { purgeId: lastPurgeId, path: folder });
             setLastPurgeId(null);
-            setStorageMessage('La última purga se deshizo correctamente.');
+            setStorageMessage(t('stPurgeUndone'));
             await refreshStorageStatus();
         } catch (error) {
-            setStorageError(`No se pudo deshacer la purga; tus datos no se modificaron. ${error instanceof Error ? error.message : ''}`.trim());
+            setStorageError(`${t('stUndoFailed')}${error instanceof Error && error.message ? ` ${error.message}` : ''}`);
         } finally {
             setStorageBusy(false);
         }
@@ -655,7 +656,7 @@ export function SettingsPanel({
 
     const handleEmptyTrash = async () => {
         if (!isTauriRuntime()) {
-            setStorageError('Vaciar la papelera requiere el shell nativo; no se eliminó nada.');
+            setStorageError(t('stTrashNeedsShell'));
             return;
         }
         setStorageBusy(true);
@@ -667,11 +668,11 @@ export function SettingsPanel({
             setLastPurgeId(null);
             setTrashConfirming(false);
             setStorageMessage(Number.isFinite(freedBytes) && freedBytes > 0
-                ? `Papelera vaciada: ${formatStorageBytes(freedBytes, locale)} liberados. El transcript, embeddings, metadata y artifacts permanecen intactos.`
-                : 'La papelera interna ya estaba vacía. No se modificó el conocimiento local.');
+                ? t('stTrashEmptied', { value: formatStorageBytes(freedBytes, locale) })
+                : t('stTrashWasEmpty'));
             await refreshStorageStatus();
         } catch (error) {
-            setStorageError(`No se pudo vaciar la papelera; no se eliminaron datos. ${error instanceof Error ? error.message : ''}`.trim());
+            setStorageError(`${t('stTrashFailed')}${error instanceof Error && error.message ? ` ${error.message}` : ''}`);
         } finally {
             setStorageBusy(false);
         }
@@ -827,7 +828,7 @@ export function SettingsPanel({
         setClusteringError(null);
         try {
             if (!isTauriRuntime()) {
-                setClusteringError('Clustering requires the Tauri desktop app');
+                setClusteringError(t('stClusterNeedsNative'));
                 return;
             }
             const { invoke } = await import('@tauri-apps/api/core');
@@ -854,7 +855,7 @@ export function SettingsPanel({
                 const wordCounts = new Map<string, number>();
                 matched.forEach((job) => String(job.title || '').toLowerCase().split(/[^a-záéíóúñ0-9]+/i).filter((word) => word.length > 3 && !stopWords.has(word)).forEach((word) => wordCounts.set(word, (wordCounts.get(word) || 0) + 1)));
                 const keywords = [...wordCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([word]) => word);
-                const name = keywords.length > 0 ? `Colección IA · ${keywords.join(' / ')}` : `Colección IA ${idx + 1}`;
+                const name = keywords.length > 0 ? t('stClusterName', { keywords: keywords.join(' / ') }) : t('stClusterNameNth', { n: idx + 1 });
                 return { count: matched.length, jobs: matched, name, keywords, jobIds };
             }).filter(g => g.jobs.length > 0);
 
@@ -863,7 +864,7 @@ export function SettingsPanel({
             const persisted: Array<{ id: number; name: string; auto_generated: boolean }> = await invoke('replace_ai_playlists', {
                 groups: groups.map((group, idx) => ({
                     name: group.name,
-                    description: organizationCondition.trim() || 'Organizada por similitud semántica y transcripción.',
+                    description: organizationCondition.trim() || t('stCollectionDefault'),
                     color: ['#8a5cff', '#25f4ee', '#fe2c55'][idx % 3],
                     cover_job_id: group.jobIds[0] ?? null,
                     topic_keywords: group.keywords,
@@ -883,7 +884,7 @@ export function SettingsPanel({
     const handleSave = async () => {
         if (retentionPreviewPending) {
             setActiveTab('stats');
-            setStorageError('Revisa la previsualización y confirma el cambio a «Solo online» antes de guardar. Esta confirmación no elimina medios.');
+            setStorageError(t('stRetentionConfirm'));
             return;
         }
         setSettingsError(null);
