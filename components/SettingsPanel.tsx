@@ -1084,15 +1084,18 @@ export function SettingsPanel({
 
             {/* Sub-Navigation Tabs */}
             <div className={`pulsaria-settings-nav ${embedded ? "px-4 pb-2" : "px-5 pb-3"}`}>
-                <div ref={tablistRef} role="tablist" aria-label="Secciones de ajustes" onKeyDown={handleTablistKeyDown} className="pulsaria-settings-seg grid grid-cols-5 gap-1 p-1 rounded-xl bg-black/40 border border-white/[0.04]" data-active={activeTab}>
+                <div ref={tablistRef} role="tablist" aria-label={t('settingsTablist')} onKeyDown={handleTablistKeyDown} className="pulsaria-settings-seg grid grid-cols-5 gap-1 p-1 rounded-xl bg-black/40 border border-white/[0.04]" data-active={activeTab}>
                     <button
                         type="button"
                         role="tab"
+                        id="settings-tab-general"
                         aria-selected={activeTab === 'general'}
+                        aria-controls="settings-tabpanel"
+                        tabIndex={activeTab === 'general' ? 0 : -1}
                         onClick={() => setActiveTab('general')}
-                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-white/60 ${
                             activeTab === 'general'
-                                ? 'bg-transparent text-white border border-transparent'
+                                ? 'bg-white/10 text-white border border-white/10'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
@@ -1102,11 +1105,14 @@ export function SettingsPanel({
                     <button
                         type="button"
                         role="tab"
+                        id="settings-tab-engine"
                         aria-selected={activeTab === 'engine'}
+                        aria-controls="settings-tabpanel"
+                        tabIndex={activeTab === 'engine' ? 0 : -1}
                         onClick={() => setActiveTab('engine')}
-                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-white/60 ${
                             activeTab === 'engine'
-                                ? 'bg-transparent text-white border border-transparent'
+                                ? 'bg-white/10 text-white border border-white/10'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
@@ -1116,11 +1122,14 @@ export function SettingsPanel({
                     <button
                         type="button"
                         role="tab"
+                        id="settings-tab-ai"
                         aria-selected={activeTab === 'ai'}
+                        aria-controls="settings-tabpanel"
+                        tabIndex={activeTab === 'ai' ? 0 : -1}
                         onClick={() => setActiveTab('ai')}
-                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-white/60 ${
                             activeTab === 'ai'
-                                ? 'bg-transparent text-white border border-transparent'
+                                ? 'bg-white/10 text-white border border-white/10'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
@@ -1130,25 +1139,31 @@ export function SettingsPanel({
                     <button
                         type="button"
                         role="tab"
+                        id="settings-tab-performance"
                         aria-selected={activeTab === 'performance'}
+                        aria-controls="settings-tabpanel"
+                        tabIndex={activeTab === 'performance' ? 0 : -1}
                         onClick={() => setActiveTab('performance')}
-                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-white/60 ${
                             activeTab === 'performance'
-                                ? 'bg-transparent text-white border border-transparent'
+                                ? 'bg-white/10 text-white border border-white/10'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
                         <FaBolt size={11} />
-                        <span className="truncate text-[8.5px] tracking-tight">Rendimiento</span>
+                        <span className="truncate">{t('settingsTabPerformance')}</span>
                     </button>
                     <button
                         type="button"
                         role="tab"
+                        id="settings-tab-stats"
                         aria-selected={activeTab === 'stats'}
+                        aria-controls="settings-tabpanel"
+                        tabIndex={activeTab === 'stats' ? 0 : -1}
                         onClick={() => setActiveTab('stats')}
-                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
+                        className={`pulsaria-settings-tab py-1.5 px-1 flex flex-row items-center justify-center gap-1.5 text-[9px] font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer focus-visible:outline-2 focus-visible:outline-white/60 ${
                             activeTab === 'stats'
-                                ? 'bg-transparent text-white border border-transparent'
+                                ? 'bg-white/10 text-white border border-white/10'
                                 : 'text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent'
                         }`}
                     >
@@ -1162,7 +1177,7 @@ export function SettingsPanel({
             <div className={`pulsaria-settings-divider ${embedded ? 'mx-4' : 'mx-5'} h-px bg-white/[0.04]`} />
 
             {/* Scrollable content */}
-            <div role="tabpanel" aria-label={`Ajustes · ${activeTab}`} className={`pulsaria-settings-content flex-1 overflow-y-auto ${embedded ? 'px-4 py-3' : 'px-5 py-4'} flex flex-col gap-3 custom-scrollbar`}>
+            <div role="tabpanel" id="settings-tabpanel" aria-labelledby={`settings-tab-${activeTab}`} aria-label={`${t('settings')} · ${activeTab === 'performance' ? t('settingsTabPerformance') : t(activeTab)}`} className={`pulsaria-settings-content flex-1 overflow-y-auto ${embedded ? 'px-4 py-3' : 'px-5 py-4'} flex flex-col gap-3 custom-scrollbar`}>
 
                 {activeTab === 'general' && (
                     <GeneralTab
