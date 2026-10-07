@@ -115,6 +115,25 @@ $activeFiles = foreach ($relative in $activeRoots) {
     Get-ChildItem -LiteralPath (Join-Path $ProjectRoot $relative) -Recurse -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -in @('.ts', '.tsx', '.js', '.jsx', '.rs', '.py') }
 }
+
+# Frontend routes and CSS may reference files under Next's public/ directory
+# without creating a module import. Keep those references resolvable so a
+# source merge cannot silently produce a native bundle with missing artwork.
+$frontendAssetFiles = foreach ($relative in @('app', 'components', 'hooks', 'lib')) {
+    Get-ChildItem -LiteralPath (Join-Path $ProjectRoot $relative) -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in @('.ts', '.tsx', '.js', '.jsx', '.css') }
+}
+$publicAssetPattern = '(?<![:/])/(?!(?:_next/|api/))[^"''\s)]+\.(?:png|jpe?g|webp|svg|gif|ico|woff2?|mp3|mp4|webm)'
+foreach ($file in $frontendAssetFiles) {
+    $contents = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
+    foreach ($match in [regex]::Matches($contents, $publicAssetPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+        $relativeAsset = 'public/' + $match.Value.TrimStart('/').Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+        if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot $relativeAsset) -PathType Leaf)) {
+            Add-Blocker "Frontend references a missing public asset in $($file.FullName): $($match.Value)"
+        }
+    }
+}
+
 foreach ($file in $activeFiles) {
     $contents = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
     $normalizedFilePath = $file.FullName.Replace('\\', '/')
