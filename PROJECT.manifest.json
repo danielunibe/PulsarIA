@@ -23,6 +23,18 @@
       "entrypoints": ["QueueService::new", "QueueService::dispatch", "execute_job_with_retries"]
     },
     {
+      "name": "persistent_sources",
+      "path": "src-tauri/src/application/collection_service.rs",
+      "description": "Registration, canonical SQLite persistence, TikTok profile synchronization and source activity; scanning is delegated to the canonical Python worker",
+      "entrypoints": ["register_profile_source", "connect_tiktok_source", "sync_collection_source_by_id", "start_collection_sync_loop"]
+    },
+    {
+      "name": "editorial",
+      "path": "src-tauri/src/application/editorial_compiler.rs",
+      "description": "Single-source and multi-source editorial compilation with evidence provenance, contract validation and persistence through the magazine service",
+      "entrypoints": ["compile_magazine_source", "compile_multi_source_editorial", "retry_magazine_compilation"]
+    },
+    {
       "name": "transcription",
       "path": "src-tauri/src/infrastructure/workers/python_runner.rs",
       "description": "Python worker spawning, stdout event parsing, progress tracking",
@@ -66,7 +78,13 @@
     "persistentSourceModel": "collection_sources + collection_source_items + collection_source_activity",
     "persistentSourceService": "src-tauri/src/application/collection_service.rs",
     "persistentSourceScanner": "python-workers/source_scanner.py",
+    "persistentSourceProjection": "lib/profile-source.ts -> collection_sources records; UI mapping only, no second persisted profile store",
     "singleIngestionQueue": "QueueService",
+    "editorialPersistence": "magazine_* tables in src-tauri/src/db.rs, with source and evidence provenance linked to canonical jobs",
+    "editorialCompilationQueue": "magazine_compilations; separate lifecycle from ingestion QueueService",
+    "editorialStructuredContentParser": "lib/magazines.ts::parseStructuredBlocks -> components/MagazineReader.tsx + components/KioscoReader.tsx",
+    "settingsSharedContracts": "components/settings/types.tsx",
+    "localeMessages": "lib/i18n.tsx",
     "manualProfileFlow": "Task 01 uses register_profile_source and update_profile_source_settings; later discovery delegates to connect_tiktok_source; no parallel profile downloader",
     "zipRole": "reference-only",
     "demoRuntime": "isolated-demo-only",

@@ -1,4 +1,4 @@
-# Revistas / Tomos Inteligentes — Arquitectura (Fases 1 + 2)
+# Revistas / Tomos Inteligentes — Arquitectura (Fases 1–4)
 
 > Estado: **motor editorial funcional** (evidencia → proveedor → validación →
 > detección de conflictos → SQLite). Gemini es el proveedor real y es
@@ -153,10 +153,11 @@ columnas de fuente en `magazine_compilations`, 16→19 comandos IPC,
 compilación/reintento en el Librero con estados reales, ~25 pruebas Rust
 nuevas (todas offline con proveedor mock).
 
-**No tocado:** pipeline Python/Whisper/yt-dlp/ffmpeg, ONNX/HNSW/BM25,
-`QueueService`, `collection_service`, gateway REST, autenticación API,
-i18n, manifiestos de release, `PROJECT.manifest.json` (pendiente registrar
-el dominio `editorial` cuando abra la fase 2).
+**No tocado en la entrega original de Fase 2:** pipeline Python/Whisper/yt-dlp/ffmpeg,
+ONNX/HNSW/BM25, `QueueService`, `collection_service`, gateway REST,
+autenticación API, i18n y manifiestos de release. El manifiesto del proyecto
+quedó entonces pendiente de registrar `editorial`; el registro y la
+consolidación posterior se documentan en la sección 29.
 
 ## 8. Decisiones congeladas
 
@@ -476,4 +477,28 @@ Implementado en `src-tauri/src/application/editorial_evidence.rs`:
     categoría, justificación, confianza y fuentes de soporte sin permitir su uso
     como tomo activo.
   - Alerta en el modal del tomo informando de sugerencias detectadas.
+
+## 29. Base canónica unificada (2026-10-07)
+
+El mapa normativo sigue en `PROJECT_TRUTH.md`; `PROJECT.manifest.json`
+registra ahora los dominios `persistent_sources` y `editorial` junto con sus
+fronteras funcionales.
+
+- Los perfiles TikTok persisten en las tablas `collection_sources`,
+  `collection_source_items` y `collection_source_activity`. El servicio
+  `application/collection_service.rs` registra y sincroniza; el scanner Python
+  descubre contenido; `lib/profile-source.ts` adapta filas para la UI.
+- La capa editorial conserva cada fuente y evidencia ligada a los jobs
+  existentes. Su estado de compilación vive en `magazine_compilations`, separado
+  de la cola de ingestión porque tiene un ciclo de vida distinto.
+- `lib/magazines.ts::parseStructuredBlocks` centraliza la lectura del contenido
+  estructurado y la consumen tanto `MagazineReader` como `KioscoReader`.
+- Las pestañas de Ajustes importan sus contratos compartidos desde
+  `components/settings/types.tsx`; las cadenas es-MX/en-US se mantienen en
+  `lib/i18n.tsx`.
+
+La revalidación automatizada del checkout actual quedó registrada en
+`docs/MVP_STATUS.md`. Ese gate no sustituye la aceptación visual nativa, un
+smoke live desde la aplicación instalada ni la aprobación de artefactos de
+release.
 

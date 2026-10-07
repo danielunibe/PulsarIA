@@ -1,12 +1,27 @@
 # Pulsaria — línea base de cierre del MVP
 
-Estado activo: Beta 3, 2026-09-30. Consulta
+Estado de publicación: Beta 3; corte de lanzamiento descrito en
+`PROJECT_TRUTH.md`. Consulta
 [BETA3_RELEASE_EVIDENCE.md](BETA3_RELEASE_EVIDENCE.md) y
 [BETA3_ACCEPTANCE.md](BETA3_ACCEPTANCE.md) para los resultados actuales y
 pendientes de publicación. La matriz fechada debajo corresponde a la línea
 base histórica de 2026-09-13, no al instalador Beta 3.
 
 Fecha de la línea base histórica: 2026-09-13
+
+## Revalidación local — 2026-10-07
+
+- Checkout validado: `main`, HEAD `6f6b7b07671f250ddba654a26faf75bc64f53419`;
+  `origin/main` estaba 13 commits detrás en `add562e742e6a789606dc972991c29b07ce88da2`.
+- `npm run verify:mvp`: PASS, 13/13 gates. Next.js 16.3.8 compiló y prerenderizó
+  las rutas; TypeScript, lint, locale, Rust fmt/check y contratos de seguridad
+  pasaron.
+- Rust: 279 pruebas PASS, 0 fallos y 5 ignoradas. Python: 32 casos en total,
+  31 PASS y 1 omitido porque esta ejecución no recibió una URL TikTok live.
+- Runtime source manifest: 54/54 archivos presentes; FFmpeg, FFprobe y su aviso
+  de licencia verificados. No se ejecutó aceptación visual nativa ni smoke live
+  desde la aplicación instalada; tampoco se certificó CI o un artefacto de
+  release con esta ejecución local.
 
 Este documento es la matriz operativa del MVP local. El checkout actual contiene
 cambios locales intencionales, archivos nuevos y eliminaciones; no se debe usar

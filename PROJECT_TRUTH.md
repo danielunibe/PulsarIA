@@ -141,10 +141,14 @@ distribución estable a terceros.
 
 ## Fuente canónica
 
-La línea canónica activa es `main` en `origin`. Al iniciar esta propuesta,
-`origin/main` apuntaba a `0b5d02ce`, que ya publicaba los enlaces de la release
-`v0.1.0-eval.3`. La rama `beta2-hardening` es temporal para el PR #2, parte de
-esa punta y no reemplaza a `main` como línea activa.
+La línea canónica activa de desarrollo es `main`. En la revalidación local del
+2026-10-07, `main` está en `6f6b7b07671f250ddba654a26faf75bc64f53419` y lleva
+13 commits sobre `origin/main` (`add562e742e6a789606dc972991c29b07ce88da2`).
+Esos commits locales aún no tienen CI remoto en ese HEAD; la rama
+`beta2-hardening` sigue siendo temporal para el PR #2 y no sustituye a
+`main`. El estado de publicación y los límites de aceptación permanecen en
+la sección de lanzamiento de este documento; la revalidación está en
+`docs/MVP_STATUS.md`.
 
 Las fuentes funcionales únicas son:
 
@@ -157,11 +161,28 @@ Las fuentes funcionales únicas son:
 | SDK | `sdk/typescript/` |
 | Empaquetado | `src-tauri/tauri.conf.json` |
 | Runtime preparado | `src-tauri/resources/`, staging generado y no versionado |
+| Fuentes persistentes de perfiles TikTok | SQLite `collection_sources`, `collection_source_items` y `collection_source_activity`; `src-tauri/src/application/collection_service.rs` |
+| Motor editorial | `src-tauri/src/domain/editorial.rs`, `src-tauri/src/application/magazine_service.rs`, `src-tauri/src/application/editorial_*.rs` y tablas `magazine_*` en `src-tauri/src/db.rs` |
 
 No se aceptan implementaciones paralelas bajo `assets/models/`,
 `src-tauri/assets/models/`, `src-tauri/resources/models/` ni
 `src-tauri/resources/python-workers/*.py`. Los workers que Tauri copia al
 bundle son derivados de `python-workers/` y no son una segunda fuente.
+
+La UI de perfiles presenta proyecciones de `collection_sources`: `lib/profile-source.ts`
+adapta sus registros y `components/TikTokSourcesPanel.tsx` los consume; ninguno
+mantiene otra persistencia de perfiles. `python-workers/source_scanner.py`
+descubre candidatos y la aplicación los registra mediante
+`src-tauri/src/application/collection_service.rs`. `QueueService` sigue siendo la única cola
+de ingestión.
+
+La publicación editorial conserva procedencia hacia los jobs existentes por
+`magazine_sources` y `magazine_evidence`. `magazine_compilations` conserva su
+ciclo editorial propio, separado de la cola de ingestión. En el frontend,
+`lib/magazines.ts::parseStructuredBlocks` es el parser compartido por
+`components/MagazineReader.tsx` y `components/KioscoReader.tsx`. Las pestañas de
+Ajustes comparten contratos y formato de almacenamiento en
+`components/settings/types.tsx`; los mensajes bilingües viven en `lib/i18n.tsx`.
 
 ## Contrato de runtime
 
