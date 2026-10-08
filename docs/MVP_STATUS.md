@@ -2,12 +2,13 @@
 
 ## Revalidación actual — 2026-10-08
 
-- Checkout `main`, commit `fd05733deaadbcac64dbe1a37623bd00504a6232`, subido a
-  `origin/main`. [GitHub Actions](https://github.com/danielunibe/PulsarIA/actions/runs/37760613216)
-  contiene el CI de este commit; su resultado debe leerse en el run enlazado.
-- Gates locales: `verify:mvp` **13/13 PASS**; Rust 279 aprobadas (277 generales
-  y dos tests reales del sidecar), 0 fallidas, 5 ignoradas; Python 31 aprobadas
-  y 1 live omitida sin URL. `npm audit` reportó 0 vulnerabilidades; legal,
+- Checkout `main`, commit `0fb478a778690f6fd6dcea8f2135cc78a5e14b79`, subido a
+  `origin/main`. [GitHub Actions](https://github.com/danielunibe/PulsarIA/actions/runs/37764524583)
+  terminó PASS en tooling, estructura, frontend, Rust source-only y Python.
+- Gates locales: `verify:mvp` **13/13 PASS** en la revalidación previa; el suite
+  Rust de este cierre terminó 278 PASS, 0 fallos y 6 ignoradas. El test de hash
+  Qwen se ejecutó aparte con pesos reales y pasó. Python: 31 PASS y 1 live
+  omitida sin URL. `npm audit` reportó 0 vulnerabilidades; legal,
   SPDX (762/68/42), versiones, iconos, LLM, accesibilidad, sitio, estructura
   canónica y runtime (54/54) pasaron. Ocho iconos Dreamcore tienen paridad de
   hash entre fuente y salida web.
@@ -18,17 +19,19 @@
   aislamiento y datos sintéticos preservados; sin ingestión/búsqueda live.
 - App instalada abierta y health `ok`, `0.1.0-beta.3`. Los logs de desarrollo y
   AppData ya no conservan tokens de sesión; se sanearon 31 valores históricos.
-- Biblioteca AppData restaurada: 31 jobs, 30 completos y 1 con error; 31 medios,
-  30 videos/audios existentes, 30 transcripciones y 29 posters presentes.
-  SQLite `integrity_check=ok`; quedan 174 referencias foráneas heredadas, que
-  se conservaron en vez de borrar historial. El detalle normativo está en
+- Última instantánea inspeccionable: 31 jobs y 31 medios; SQLite
+  `integrity_check=ok` y 174 referencias foráneas. El mapeo del snapshot asocia
+  74 trabajos ausentes con contenido e historial (54 `queued`, 20 `error`). La
+  base activa sigue abierta y no se modificó; restaurar las filas `queued`
+  provocaría reanudación automática. El detalle normativo está en
   [PROJECT_TRUTH.md](../PROJECT_TRUTH.md).
 
-No están cerradas la aceptación visual humana de la ventana, el procesamiento
-TikTok con voz reconocible desde UI/IPC ni la aceptación del artifact exacto de
-Actions en un host limpio. La prueba TikTok de esta revalidación se omitió por
-no recibir URL; un smoke anterior completó el job sin generar transcripción.
-`DIRECT_DOWNLOAD_RELEASE_READY=false`; no se publicó la Beta 3.
+No están cerradas la revisión del WebView nativo (la captura del usuario muestra
+iconos rotos aunque el export web carga 8/8), el procesamiento TikTok con voz
+reconocible desde UI/IPC, la reconciliación de la base viva ni la aceptación del
+artifact exacto en host limpio. La prueba live se omitió por falta de URL; un
+smoke anterior completó sin transcripción. `DIRECT_DOWNLOAD_RELEASE_READY=false`;
+no se publicó la Beta 3.
 
 Estado de publicación: Beta 3; corte de lanzamiento descrito en
 `PROJECT_TRUTH.md`. Consulta

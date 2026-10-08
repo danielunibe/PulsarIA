@@ -9,12 +9,14 @@ Actualizado: 2026-10-08. Versión del candidato: **0.1.0-beta.3**.
 Esta revalidación prevalece sobre los hashes y conteos de los cortes anteriores
 que siguen debajo como historial.
 
-- Código en `main`: `fd05733deaadbcac64dbe1a37623bd00504a6232`, subido a GitHub.
-  [El run de CI asociado](https://github.com/danielunibe/PulsarIA/actions/runs/37760613216)
-  debe consultarse para ver su conclusión actual.
-- `verify:mvp`: **PASS 13/13**; Rust 279 aprobadas (277 generales y dos
-  pruebas reales aisladas), 0 fallidas, 5 ignoradas; Python 31 aprobadas y 1
-  TikTok live omitida al no recibir URL. Auditoría de producción: cero
+- Código en `main`: `0fb478a778690f6fd6dcea8f2135cc78a5e14b79`, subido a GitHub.
+  [Canonical CI run 37764524583](https://github.com/danielunibe/PulsarIA/actions/runs/37764524583)
+  terminó PASS en release tooling, estructura, frontend, Rust source-only y
+  Python. La prueba que requiere el GGUF real se ejecutó aparte en local.
+- `verify:mvp`: **PASS 13/13** en la revalidación local previa. En este cierre,
+  Rust fmt/check PASS y cargo test 278 PASS, 0 fallos, 6 ignoradas; el test de
+  hash Qwen real pasó al correrlo explícitamente con el peso auténtico. Python
+  tuvo 31 PASS y 1 live TikTok omitida por falta de URL. Auditoría de producción: cero
   vulnerabilidades. SPDX: 762 paquetes, 68 archivos, 42 expresiones.
 - `verify:legal-release`, versión, iconos, accesibilidad, LLM local, sitio,
   canonical y runtime pasaron. Runtime: 54/54. Los ocho PNG Dreamcore de
@@ -27,17 +29,22 @@ que siguen debajo como historial.
 - App instalada abierta: `/health` devolvió `ok`, `0.1.0-beta.3`. Los registros
   de desarrollo y AppData fueron saneados (31 valores históricos); el código
   dejó de escribir el token de sesión.
-- AppData: 31 jobs (30 complete, 1 error), 31 medios; existen 30 videos, 30
-  audios, 30/31 transcripciones y 29/29 posters. SQLite `integrity_check=ok`;
-  quedan 174 referencias históricas huérfanas (99 eventos, 74 fuentes y 1 medio),
-  preservadas con respaldos en lugar de borrarlas.
+- Última instantánea legible de AppData: 31 jobs, 31 medios e
+  `integrity_check=ok`; hay 174 referencias históricas huérfanas (99 eventos,
+  74 fuentes y 1 medio). Los 74 job IDs huérfanos mapean uno a uno a sus fuentes
+  y eventos (54 último estado `queued`, 20 `error`). La base viva está bloqueada
+  por la aplicación abierta; no se modificó. Restaurar los 54 en cola los
+  reanudaría al siguiente arranque, así que la acción requiere la decisión
+  registrada en Trello.
 
-Siguen pendientes la aceptación visual humana de iconos/tarjetas en la ventana,
-una prueba TikTok desde UI/IPC con voz reconocible y la aprobación del artifact
-exacto de Actions en host limpio. Un smoke previo del worker marcó el job como
-completado, pero produjo una transcripción vacía; no acredita voz española. El
-gate de `latest.json`/`.sig` corresponde al updater legado y no a la ruta Beta
-de descarga directa. `DIRECT_DOWNLOAD_RELEASE_READY=false`; no hay publicación
+Siguen pendientes la revisión de iconos en el WebView nativo (la captura del
+usuario muestra recursos rotos, aunque el export web carga 8/8), una prueba
+TikTok desde UI/IPC con voz reconocible y la aceptación del artifact exacto de
+Actions en un host limpio. El entorno de Computer Use no expuso la ventana
+nativa. Un smoke previo del worker completó el job pero produjo transcripción
+vacía. Revisión legal y `notice_address` siguen pendientes. El gate de
+`latest.json`/`.sig` corresponde al updater legado y no a la ruta Beta de
+descarga directa. `DIRECT_DOWNLOAD_RELEASE_READY=false`; no hay publicación
 Beta 3.
 
 La tabla y los pendientes fechados debajo describen cortes anteriores; no deben

@@ -6,16 +6,22 @@ actual, las pruebas reproducidas y esta definición de verdad.
 
 ## Revalidación de gates e instalación — 2026-10-08
 
-`main` recibió el commit `fd05733deaadbcac64dbe1a37623bd00504a6232`.
-La ejecución de GitHub Actions asociada es [Pulsaria canonical CI, run
-37760613216](https://github.com/danielunibe/PulsarIA/actions/runs/37760613216);
-consulta el resultado actual del run antes de declarar CI remoto cerrado.
+`main` y `origin/main` están sincronizados en el commit
+`0fb478a778690f6fd6dcea8f2135cc78a5e14b79`. [Pulsaria canonical CI, run
+37764524583](https://github.com/danielunibe/PulsarIA/actions/runs/37764524583)
+terminó **PASS** para tooling de release, estructura canónica, frontend, Rust
+source-only y contratos Python. Los runs 37760613216 y 37762384161 fallaron
+antes: el checkout limpio no trae pesos GGUF, y un fixture vacío no puede pasar
+la prueba de integridad criptográfica. El test que requiere el Qwen real ahora
+queda explícitamente ignorado en CI source-only y se ejecutó aparte en la
+máquina local contra el peso auténtico.
 
-- `npm run verify:mvp`: **PASS 13/13**. Next.js 16.3.8, TypeScript, locale,
-  formato y compilación Rust pasaron. Rust registró 277 pruebas generales y
-  dos pruebas reales del sidecar aisladas (279 aprobadas, 0 fallidas, 5
-  ignoradas); Python, 31 aprobadas y 1 prueba TikTok live omitida porque esta
-  ejecución no recibió URL.
+- `npm run verify:mvp`: **PASS 13/13** en la revalidación local previa. En este
+  cierre, `cargo fmt --check` y `cargo check` pasaron; el suite local terminó con
+  **278 PASS, 0 fallidas y 6 ignoradas**. La prueba ignorada por defecto,
+  `test_qwen_weights_verify_ok`, pasó al ejecutarse aparte contra el GGUF Qwen
+  real. Python tuvo **31 PASS**; la prueba live TikTok fue omitida porque esta
+  ejecución no recibió una URL de prueba.
 - Gates complementarios: `npm audit --omit=dev --audit-level=low` sin
   vulnerabilidades; SPDX **762 paquetes, 68 archivos y 42 expresiones**;
   `verify:legal-release`, versiones, iconos, LLM local, accesibilidad y sitio
@@ -35,25 +41,27 @@ consulta el resultado actual del run antes de declarar CI remoto cerrado.
   reemplazados (16 del perfil de desarrollo y 15 de AppData), con 0 valores
   crudos en la última apertura. `main.rs` ya registra el evento sin guardar la
   credencial.
-- La base de usuario restaurada conserva **31 jobs (30 complete, 1 error) y
-  31 filas media**. Los 30 videos y audios vinculados existen; existen 30/31
-  transcripciones y 29/29 posters referenciados. `PRAGMA integrity_check`
-  devuelve `ok`; `PRAGMA foreign_key_check` conserva **174 referencias
-  históricas huérfanas** (99 eventos, 74 `content_items` y 1 medio). No se
-  borraron ni reasignaron esos registros; la base y sus sidecars se respaldaron.
-  Por tanto, no se afirma una reconciliación relacional completa ni que se
-  hayan recuperado TikToks sin sus archivos locales.
+- La última instantánea legible de la biblioteca conserva **31 jobs y 31 filas
+  media**; `integrity_check=ok`, con **174 referencias foráneas** (99 eventos,
+  74 `content_items` y 1 medio). En esa instantánea, los 74 `job_id` ausentes
+  tienen un mapeo uno a uno a contenido e historial: 54 terminan `queued` y 20
+  `error`. Restaurarlos como estaban reanudaría 54 descargas al abrir la app.
+  La base AppData activa está abierta por Pulsaria y su WAL sigue presente; no
+  se pudo leer consistentemente ni se modificó. Está pendiente confirmar si se
+  deben reponer y reanudar esos trabajos. No se afirma una reconciliación viva.
 - La prueba live de TikTok no se repitió en esta suite: quedó omitida sin URL.
   Un smoke previo llegó a `completed` pero no produjo texto de transcripción;
   no certifica voz española ni aceptación desde la UI/IPC.
 
-La inspección visual humana de los iconos y tarjetas en la ventana nativa sigue
-pendiente: se comprobaron los recursos y la ventana, pero no se obtuvo una
-captura de pantalla verificable en esta ejecución. `DIRECT_DOWNLOAD_RELEASE_READY=false`
-se mantiene hasta revisar el artifact exacto de Actions y completar la
-aceptación externa. La ruta Beta de descarga directa no usa updater ni firma;
-`verify:release-artifacts` sigue siendo un gate legado de `latest.json`/`.sig`
-y no describe esa ruta. No se publicó una release.
+La paridad de los ocho PNG y una inspección en Chromium confirman que el export
+web carga los iconos, pero la captura nativa aportada muestra ranuras rotas. El
+proveedor de Computer Use devolvió `apps=[]`; no se aisló todavía por qué el
+WebView instalado falla ni se certificó su reparación. La captura también
+muestra 30 tarjetas TikTok; eso no acredita que estén todos los elementos ni
+un procesamiento con voz reconocible desde UI/IPC. `DIRECT_DOWNLOAD_RELEASE_READY=false`
+se mantiene hasta revisar el artifact exacto de Actions en un host limpio,
+completar revisión humana/legal y definir `notice_address`. No se publicó ni
+etiquetó una release.
 
 ## Objetivo y alcance
 
