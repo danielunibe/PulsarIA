@@ -357,11 +357,7 @@ async fn main() {
     });
     let api_session_token = match security::create_session_token(&security_config.jwt_secret) {
         Ok(token) => {
-            write_startup_log(
-                &data_dir,
-                "security",
-                &format!("api session token created: {}", token),
-            );
+            write_startup_log(&data_dir, "security", "api session token created");
             token
         }
         Err(e) => {

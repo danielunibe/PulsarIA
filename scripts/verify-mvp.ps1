@@ -42,8 +42,31 @@ try {
     Write-Host '6/13 Rust checks and regression tests'
     cargo check --manifest-path src-tauri/Cargo.toml
     if ($LASTEXITCODE -ne 0) { throw 'Rust check failed' }
-    cargo test --manifest-path src-tauri/Cargo.toml
-    if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed' }
+    # Real sidecar inference tests share a local CPU runtime. Keep the broad
+    # regression suite lightweight, then execute each live model test alone so
+    # sidecar startup and controlled model switching have the full CPU budget.
+    $previousRustTestThreads = $env:RUST_TEST_THREADS
+    $env:RUST_TEST_THREADS = '1'
+    try {
+        cargo test --manifest-path src-tauri/Cargo.toml -- --test-threads=1 --skip test_8_real_llama_server_runtime_execution --skip test_16_real_runtime_controlled_model_switch
+        if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed' }
+
+        $realRuntimeTests = @(
+            'application::routed_execution::tests::test_8_real_llama_server_runtime_execution',
+            'application::routed_execution::tests::test_16_real_runtime_controlled_model_switch'
+        )
+        foreach ($test in $realRuntimeTests) {
+            Write-Host "Running isolated live runtime test: $test"
+            cargo test --manifest-path src-tauri/Cargo.toml $test -- --exact --nocapture --test-threads=1
+            if ($LASTEXITCODE -ne 0) { throw "Rust live runtime test failed: $test" }
+        }
+    } finally {
+        if ($null -eq $previousRustTestThreads) {
+            Remove-Item Env:RUST_TEST_THREADS -ErrorAction SilentlyContinue
+        } else {
+            $env:RUST_TEST_THREADS = $previousRustTestThreads
+        }
+    }
 
     Write-Host '7/13 Offline Python and packaging contracts'
     npm run test:python

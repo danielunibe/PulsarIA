@@ -3686,8 +3686,9 @@ pub fn data_dir_path() -> std::path::PathBuf {
     }
 
     // Keep the repository layout convenient during development when the
-    // compile-time root is unavailable, without writing beside an installed
-    // executable in a protected directory.
+    // compile-time root is unavailable. An installed release must always use
+    // the per-user data directory, regardless of the shell's working folder.
+    #[cfg(debug_assertions)]
     if let Ok(current_dir) = std::env::current_dir() {
         if current_dir.join("package.json").exists() && current_dir.join("src-tauri").is_dir() {
             return current_dir.join("data");
