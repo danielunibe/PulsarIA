@@ -60,6 +60,24 @@ jobs:
           # to Git. The signed release build uses the full prepared bundle.
           New-Item -ItemType Directory -Force -Path 'src-tauri/resources/python' | Out-Null
           New-Item -ItemType Directory -Force -Path 'src-tauri/resources/assets' | Out-Null
+
+          # Router and orchestration contract tests use MockModelRunner but
+          # still need registry filenames to classify models as available and
+          # resolve paths. Supply empty, unverified, ignored fixture files;
+          # real GGUF weights stay outside source-only CI and real sidecar tests
+          # continue to skip when llama-server.exe is not staged.
+          $modelFixtureRoot = 'data/llm-models'
+          New-Item -ItemType Directory -Force -Path $modelFixtureRoot | Out-Null
+          $modelFixtureNames = @(
+            'qwen2.5-1.5b-instruct-q4_k_m.gguf'
+            'qwen2.5-3b-instruct-q4_k_m.gguf'
+            'gemma-2-2b-it-Q4_K_M.gguf'
+          )
+          foreach ($filename in $modelFixtureNames) {
+            $modelPath = Join-Path $modelFixtureRoot $filename
+            [System.IO.File]::WriteAllBytes($modelPath, [byte[]]@())
+          }
+
           cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
           if ($LASTEXITCODE -ne 0) { throw 'Rust formatting failed.' }
           cargo check --manifest-path src-tauri/Cargo.toml
