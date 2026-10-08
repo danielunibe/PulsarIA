@@ -10,6 +10,8 @@ try {
     Write-Host '2/13 TypeScript contract'
     npm run typecheck
     if ($LASTEXITCODE -ne 0) { throw 'TypeScript contract failed' }
+    node --test scripts/tests/window-controls.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Window close/reopen regression tests failed' }
 
     Write-Host '3/13 Spanish/English locale contract'
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-locale.ps1

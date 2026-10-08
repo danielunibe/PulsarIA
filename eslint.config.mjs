@@ -63,6 +63,10 @@ export default defineConfig([
         "target/**",
         "target-*/**",
         "src-tauri/target*/**",
+        // Derived Python/model runtime and personal library artifacts are not
+        // frontend source. Avoid traversing them on every canonical lint run.
+        "src-tauri/resources/**",
+        "data/**",
     ]),
     {
         ...sharedConfig,

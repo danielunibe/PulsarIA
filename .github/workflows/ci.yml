@@ -30,7 +30,7 @@ jobs:
 
       - name: Verify release tooling regressions
         run: |
-          node --test scripts/tests/release-version.test.mjs scripts/tests/tauri-frontend.test.mjs scripts/tests/spdx-license-expression.test.mjs
+          node --test scripts/tests/release-version.test.mjs scripts/tests/tauri-frontend.test.mjs scripts/tests/spdx-license-expression.test.mjs scripts/tests/window-controls.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Release tooling regression tests failed.' }
           & ./scripts/tests/direct-release-artifacts.tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Release artifact regression tests failed.' }

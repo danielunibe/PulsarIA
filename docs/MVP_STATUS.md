@@ -2,16 +2,23 @@
 
 ## Revalidación actual — 2026-10-08
 
-- Checkout `main`, commit `0fb478a778690f6fd6dcea8f2135cc78a5e14b79`, subido a
-  `origin/main`. [GitHub Actions](https://github.com/danielunibe/PulsarIA/actions/runs/37764524583)
+- La reparación del lateral y el panel de carga está documentada en
+  [SIDEBAR_REPAIR_2026-10-08.md](SIDEBAR_REPAIR_2026-10-08.md). La evidencia
+  registrada incluye `verify:mvp` **13/13 PASS**, Chromium a 1280 × 800 y
+  860 × 640, y una comprobación nativa parcial de cierre/reapertura. La
+  inspección visual nativa completa y el procesamiento live desde UI/IPC siguen
+  pendientes.
+- En la revalidación local registrada antes de esa reparación, `main` estaba
+  en `0fb478a778690f6fd6dcea8f2135cc78a5e14b79`, subido a `origin/main`.
+  [GitHub Actions](https://github.com/danielunibe/PulsarIA/actions/runs/37764524583)
   terminó PASS en tooling, estructura, frontend, Rust source-only y Python.
-- Gates locales: `verify:mvp` **13/13 PASS** en la revalidación previa; el suite
-  Rust de este cierre terminó 278 PASS, 0 fallos y 6 ignoradas. El test de hash
-  Qwen se ejecutó aparte con pesos reales y pasó. Python: 31 PASS y 1 live
-  omitida sin URL. `npm audit` reportó 0 vulnerabilidades; legal,
-  SPDX (762/68/42), versiones, iconos, LLM, accesibilidad, sitio, estructura
-  canónica y runtime (54/54) pasaron. Ocho iconos Dreamcore tienen paridad de
-  hash entre fuente y salida web.
+  Es evidencia de ese commit; no sustituye los gates ejecutados sobre el árbol
+  posterior.
+### Evidencia anterior a la reparación del 2026-10-08
+
+Los datos siguientes conservan la referencia de la instalación y el bundle
+anteriores; para la reparación más reciente consulta el informe enlazado arriba.
+
 - NSIS Release `Pulsaria_0.1.0-beta.3_x64-setup.exe`: 690,403,441 bytes,
   SHA-256 `057580000AA8DE9D872756697C9321ECF9DDF7DFE6351158867BE6E24D0CBF77`,
   `NotSigned` según la ruta de descarga directa. Smoke instalado: install/uninstall
@@ -26,12 +33,10 @@
   provocaría reanudación automática. El detalle normativo está en
   [PROJECT_TRUTH.md](../PROJECT_TRUTH.md).
 
-No están cerradas la revisión del WebView nativo (la captura del usuario muestra
-iconos rotos aunque el export web carga 8/8), el procesamiento TikTok con voz
-reconocible desde UI/IPC, la reconciliación de la base viva ni la aceptación del
-artifact exacto en host limpio. La prueba live se omitió por falta de URL; un
-smoke anterior completó sin transcripción. `DIRECT_DOWNLOAD_RELEASE_READY=false`;
-no se publicó la Beta 3.
+No están cerradas la inspección visual nativa completa, el procesamiento TikTok
+con voz reconocible desde UI/IPC, la reconciliación de la base viva ni la
+aceptación del artifact exacto en host limpio. Un smoke anterior completó sin
+transcripción. `DIRECT_DOWNLOAD_RELEASE_READY=false`; no se publicó la Beta 3.
 
 Estado de publicación: Beta 3; corte de lanzamiento descrito en
 `PROJECT_TRUTH.md`. Consulta

@@ -164,8 +164,12 @@ export function useWindowControls(onClose?: () => Promise<void> | void): WindowC
             const { getCurrentWindow } = await import('@tauri-apps/api/window');
             await getCurrentWindow().close();
         } catch (error) {
-            if (typeof document !== 'undefined') delete document.documentElement.dataset.leaving;
             reportWindowError(t('windowVerbClose'), error);
+        } finally {
+            // A native close may only hide the window to the tray. The same
+            // document is reused when it opens again, so never retain the
+            // transparent, non-interactive exit state after the request.
+            if (typeof document !== 'undefined') delete document.documentElement.dataset.leaving;
         }
     };
 

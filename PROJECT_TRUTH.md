@@ -28,7 +28,7 @@ máquina local contra el peso auténtico.
   pasaron. `verify:canonical` informa cero copias duplicadas y el manifiesto
   runtime valida **54/54** archivos. Las ocho imágenes Dreamcore de navegación
   coinciden byte por byte entre `public` y `out`.
-- Instalador local NSIS: `Pulsaria_0.1.0-beta.3_x64-setup.exe`, **690,403,441
+- Smoke previo a la reparación del lateral, NSIS: `Pulsaria_0.1.0-beta.3_x64-setup.exe`, **690,403,441
   bytes**, SHA-256
   `057580000AA8DE9D872756697C9321ECF9DDF7DFE6351158867BE6E24D0CBF77`, versión
   `0.1.0-beta.3`, Authenticode `NotSigned`. `verify:installed` pasó instalación
@@ -53,12 +53,23 @@ máquina local contra el peso auténtico.
   Un smoke previo llegó a `completed` pero no produjo texto de transcripción;
   no certifica voz española ni aceptación desde la UI/IPC.
 
-La paridad de los ocho PNG y una inspección en Chromium confirman que el export
-web carga los iconos, pero la captura nativa aportada muestra ranuras rotas. El
-proveedor de Computer Use devolvió `apps=[]`; no se aisló todavía por qué el
-WebView instalado falla ni se certificó su reparación. La captura también
-muestra 30 tarjetas TikTok; eso no acredita que estén todos los elementos ni
-un procesamiento con voz reconocible desde UI/IPC. `DIRECT_DOWNLOAD_RELEASE_READY=false`
+La revisión del lateral del 2026-10-08 aisló tres regresiones: el fondo fijo de
+la biblioteca tapaba visualmente el panel de carga; flex lo reducía a 206.66 px
+a 860 × 640; y cerrar hacia bandeja retenía el estado de salida transparente
+sin clics. Se corrigieron orden de capas, mínimo de 292 px y limpieza del cierre.
+El export final pasó inspección visual y navegación en Chromium a 1280 × 800 y
+860 × 640, con nueve imágenes decodificadas y cero excepciones JavaScript.
+La suite MVP pasó 13/13, incluidas cuatro regresiones de cierre/reapertura. La
+lectura IPC nativa con la biblioteca original confirmó 30 trabajos completos;
+eso no acredita procesamiento con voz reconocible desde UI/IPC. Véase
+`docs/SIDEBAR_REPAIR_2026-10-08.md` para evidencia y límites.
+El ejecutable instalado fue actualizado y coincide con la nueva compilación
+Release, SHA-256 `51DD38F84CD8D99100119F5A016C960807B3F1D4AC3F81D5AB9F9E2B84D33FA9`.
+Pasaron cierre hacia bandeja/reapertura, health, preflight sin faltantes y
+Whisper Tiny configurado/listo. El NSIS nuevo terminó con exit 0, 690,377,499
+bytes y SHA-256 `F2A10D8BA36478D8A9AC04A6C4C9EA9D7512BA20A3DBB92C88981ABAB0B75F65`;
+continúa sin firma y no recibió smoke de instalación desde ese paquete exacto.
+`DIRECT_DOWNLOAD_RELEASE_READY=false`
 se mantiene hasta revisar el artifact exacto de Actions en un host limpio,
 completar revisión humana/legal y definir `notice_address`. No se publicó ni
 etiquetó una release.
@@ -200,11 +211,10 @@ distribución estable a terceros.
 
 ## Fuente canónica
 
-La línea canónica activa de desarrollo es `main`. En la revalidación local del
-2026-10-07, `main` está en `6f6b7b07671f250ddba654a26faf75bc64f53419` y lleva
-13 commits sobre `origin/main` (`add562e742e6a789606dc972991c29b07ce88da2`).
-Esos commits locales aún no tienen CI remoto en ese HEAD; la rama
-`beta2-hardening` sigue siendo temporal para el PR #2 y no sustituye a
+La línea canónica activa de desarrollo es `main`, sincronizada con
+`origin/main` en la revisión local del 2026-10-08. Los cambios en curso se
+publican sobre esta línea mediante avance normal; no se reescribe la historia.
+La rama `beta2-hardening` sigue siendo temporal para el PR #2 y no sustituye a
 `main`. El estado de publicación y los límites de aceptación permanecen en
 la sección de lanzamiento de este documento; la revalidación está en
 `docs/MVP_STATUS.md`.
