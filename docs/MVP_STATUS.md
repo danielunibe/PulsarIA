@@ -1,5 +1,35 @@
 # Pulsaria — línea base de cierre del MVP
 
+## Revalidación actual — 2026-10-08
+
+- Checkout `main`, commit `fd05733deaadbcac64dbe1a37623bd00504a6232`, subido a
+  `origin/main`. [GitHub Actions](https://github.com/danielunibe/PulsarIA/actions/runs/37760613216)
+  contiene el CI de este commit; su resultado debe leerse en el run enlazado.
+- Gates locales: `verify:mvp` **13/13 PASS**; Rust 279 aprobadas (277 generales
+  y dos tests reales del sidecar), 0 fallidas, 5 ignoradas; Python 31 aprobadas
+  y 1 live omitida sin URL. `npm audit` reportó 0 vulnerabilidades; legal,
+  SPDX (762/68/42), versiones, iconos, LLM, accesibilidad, sitio, estructura
+  canónica y runtime (54/54) pasaron. Ocho iconos Dreamcore tienen paridad de
+  hash entre fuente y salida web.
+- NSIS Release `Pulsaria_0.1.0-beta.3_x64-setup.exe`: 690,403,441 bytes,
+  SHA-256 `057580000AA8DE9D872756697C9321ECF9DDF7DFE6351158867BE6E24D0CBF77`,
+  `NotSigned` según la ruta de descarga directa. Smoke instalado: install/uninstall
+  0, health y reinicio correctos, recursos 54/54, 13 documentos legales,
+  aislamiento y datos sintéticos preservados; sin ingestión/búsqueda live.
+- App instalada abierta y health `ok`, `0.1.0-beta.3`. Los logs de desarrollo y
+  AppData ya no conservan tokens de sesión; se sanearon 31 valores históricos.
+- Biblioteca AppData restaurada: 31 jobs, 30 completos y 1 con error; 31 medios,
+  30 videos/audios existentes, 30 transcripciones y 29 posters presentes.
+  SQLite `integrity_check=ok`; quedan 174 referencias foráneas heredadas, que
+  se conservaron en vez de borrar historial. El detalle normativo está en
+  [PROJECT_TRUTH.md](../PROJECT_TRUTH.md).
+
+No están cerradas la aceptación visual humana de la ventana, el procesamiento
+TikTok con voz reconocible desde UI/IPC ni la aceptación del artifact exacto de
+Actions en un host limpio. La prueba TikTok de esta revalidación se omitió por
+no recibir URL; un smoke anterior completó el job sin generar transcripción.
+`DIRECT_DOWNLOAD_RELEASE_READY=false`; no se publicó la Beta 3.
+
 Estado de publicación: Beta 3; corte de lanzamiento descrito en
 `PROJECT_TRUTH.md`. Consulta
 [BETA3_RELEASE_EVIDENCE.md](BETA3_RELEASE_EVIDENCE.md) y
@@ -9,7 +39,7 @@ base histórica de 2026-09-13, no al instalador Beta 3.
 
 Fecha de la línea base histórica: 2026-09-13
 
-## Revalidación local — 2026-10-07
+## Revalidación local histórica — 2026-10-07
 
 - Checkout validado: `main`, HEAD `6f6b7b07671f250ddba654a26faf75bc64f53419`;
   `origin/main` estaba 13 commits detrás en `add562e742e6a789606dc972991c29b07ce88da2`.

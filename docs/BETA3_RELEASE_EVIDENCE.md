@@ -1,8 +1,47 @@
 # Pulsaria Beta 3 — evidencia y pendientes de cierre
 
-Actualizado: 2026-10-01. Versión del candidato: **0.1.0-beta.3**.
+Actualizado: 2026-10-08. Versión del candidato: **0.1.0-beta.3**.
 
 **Estado: preparación técnica; publicación bloqueada por entradas y aceptación pendientes.** La última descarga pública sigue siendo `v0.1.0-eval.3`. No existe una release pública Beta 3 ni se ha creado su tag.
+
+## Revalidación local actual — 2026-10-08
+
+Esta revalidación prevalece sobre los hashes y conteos de los cortes anteriores
+que siguen debajo como historial.
+
+- Código en `main`: `fd05733deaadbcac64dbe1a37623bd00504a6232`, subido a GitHub.
+  [El run de CI asociado](https://github.com/danielunibe/PulsarIA/actions/runs/37760613216)
+  debe consultarse para ver su conclusión actual.
+- `verify:mvp`: **PASS 13/13**; Rust 279 aprobadas (277 generales y dos
+  pruebas reales aisladas), 0 fallidas, 5 ignoradas; Python 31 aprobadas y 1
+  TikTok live omitida al no recibir URL. Auditoría de producción: cero
+  vulnerabilidades. SPDX: 762 paquetes, 68 archivos, 42 expresiones.
+- `verify:legal-release`, versión, iconos, accesibilidad, LLM local, sitio,
+  canonical y runtime pasaron. Runtime: 54/54. Los ocho PNG Dreamcore de
+  navegación coinciden entre `public` y `out`.
+- NSIS local: `Pulsaria_0.1.0-beta.3_x64-setup.exe`, 690,403,441 bytes,
+  SHA-256 `057580000AA8DE9D872756697C9321ECF9DDF7DFE6351158867BE6E24D0CBF77`,
+  Authenticode `NotSigned`. El smoke instalado pasó instalación/desinstalación,
+  runtime y documentos legales, health antes/después de reinicio y preservación
+  de datos aislados. No ejecutó ingestión ni búsqueda.
+- App instalada abierta: `/health` devolvió `ok`, `0.1.0-beta.3`. Los registros
+  de desarrollo y AppData fueron saneados (31 valores históricos); el código
+  dejó de escribir el token de sesión.
+- AppData: 31 jobs (30 complete, 1 error), 31 medios; existen 30 videos, 30
+  audios, 30/31 transcripciones y 29/29 posters. SQLite `integrity_check=ok`;
+  quedan 174 referencias históricas huérfanas (99 eventos, 74 fuentes y 1 medio),
+  preservadas con respaldos en lugar de borrarlas.
+
+Siguen pendientes la aceptación visual humana de iconos/tarjetas en la ventana,
+una prueba TikTok desde UI/IPC con voz reconocible y la aprobación del artifact
+exacto de Actions en host limpio. Un smoke previo del worker marcó el job como
+completado, pero produjo una transcripción vacía; no acredita voz española. El
+gate de `latest.json`/`.sig` corresponde al updater legado y no a la ruta Beta
+de descarga directa. `DIRECT_DOWNLOAD_RELEASE_READY=false`; no hay publicación
+Beta 3.
+
+La tabla y los pendientes fechados debajo describen cortes anteriores; no deben
+interpretarse como una segunda medición del 8 de octubre.
 
 ## Fuente y cambios
 

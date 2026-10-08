@@ -4,9 +4,60 @@ Este es el único documento normativo técnico y operativo de Pulsaria. Si otro
 reporte, plan, auditoría o README contradice este archivo, prevalecen el código
 actual, las pruebas reproducidas y esta definición de verdad.
 
+## Revalidación de gates e instalación — 2026-10-08
+
+`main` recibió el commit `fd05733deaadbcac64dbe1a37623bd00504a6232`.
+La ejecución de GitHub Actions asociada es [Pulsaria canonical CI, run
+37760613216](https://github.com/danielunibe/PulsarIA/actions/runs/37760613216);
+consulta el resultado actual del run antes de declarar CI remoto cerrado.
+
+- `npm run verify:mvp`: **PASS 13/13**. Next.js 16.3.8, TypeScript, locale,
+  formato y compilación Rust pasaron. Rust registró 277 pruebas generales y
+  dos pruebas reales del sidecar aisladas (279 aprobadas, 0 fallidas, 5
+  ignoradas); Python, 31 aprobadas y 1 prueba TikTok live omitida porque esta
+  ejecución no recibió URL.
+- Gates complementarios: `npm audit --omit=dev --audit-level=low` sin
+  vulnerabilidades; SPDX **762 paquetes, 68 archivos y 42 expresiones**;
+  `verify:legal-release`, versiones, iconos, LLM local, accesibilidad y sitio
+  pasaron. `verify:canonical` informa cero copias duplicadas y el manifiesto
+  runtime valida **54/54** archivos. Las ocho imágenes Dreamcore de navegación
+  coinciden byte por byte entre `public` y `out`.
+- Instalador local NSIS: `Pulsaria_0.1.0-beta.3_x64-setup.exe`, **690,403,441
+  bytes**, SHA-256
+  `057580000AA8DE9D872756697C9321ECF9DDF7DFE6351158867BE6E24D0CBF77`, versión
+  `0.1.0-beta.3`, Authenticode `NotSigned`. `verify:installed` pasó instalación
+  y desinstalación (exit 0), recursos 54/54, 13 documentos legales, health
+  antes y después del reinicio, aislamiento de WebView2/AppData y conservación
+  del marcador de datos. Fue un smoke offline: no probó ingestión ni búsqueda.
+- La app Release instalada se abrió desde `AppData\Local\Programs\Pulsaria`;
+  `/health` respondió `ok`, versión `0.1.0-beta.3`, y se confirmó una ventana
+  nativa. Ambos `startup.log` fueron saneados: 31 valores históricos
+  reemplazados (16 del perfil de desarrollo y 15 de AppData), con 0 valores
+  crudos en la última apertura. `main.rs` ya registra el evento sin guardar la
+  credencial.
+- La base de usuario restaurada conserva **31 jobs (30 complete, 1 error) y
+  31 filas media**. Los 30 videos y audios vinculados existen; existen 30/31
+  transcripciones y 29/29 posters referenciados. `PRAGMA integrity_check`
+  devuelve `ok`; `PRAGMA foreign_key_check` conserva **174 referencias
+  históricas huérfanas** (99 eventos, 74 `content_items` y 1 medio). No se
+  borraron ni reasignaron esos registros; la base y sus sidecars se respaldaron.
+  Por tanto, no se afirma una reconciliación relacional completa ni que se
+  hayan recuperado TikToks sin sus archivos locales.
+- La prueba live de TikTok no se repitió en esta suite: quedó omitida sin URL.
+  Un smoke previo llegó a `completed` pero no produjo texto de transcripción;
+  no certifica voz española ni aceptación desde la UI/IPC.
+
+La inspección visual humana de los iconos y tarjetas en la ventana nativa sigue
+pendiente: se comprobaron los recursos y la ventana, pero no se obtuvo una
+captura de pantalla verificable en esta ejecución. `DIRECT_DOWNLOAD_RELEASE_READY=false`
+se mantiene hasta revisar el artifact exacto de Actions y completar la
+aceptación externa. La ruta Beta de descarga directa no usa updater ni firma;
+`verify:release-artifacts` sigue siendo un gate legado de `latest.json`/`.sig`
+y no describe esa ruta. No se publicó una release.
+
 ## Objetivo y alcance
 
-### Estado activo de lanzamiento — 2026-10-01
+### Estado del lanzamiento — corte histórico de 2026-10-01
 
 El candidato activo del PR #2 es **Beta 3, `0.1.0-beta.3`**. `main` sigue
 siendo canónico y la rama temporal conserva el nombre `beta2-hardening`.
