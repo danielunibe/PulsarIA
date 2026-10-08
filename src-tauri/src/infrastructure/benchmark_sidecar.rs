@@ -378,6 +378,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the real verified Qwen GGUF weights; source-only CI provides presence fixtures"]
     fn test_qwen_weights_verify_ok() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
