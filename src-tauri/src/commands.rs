@@ -3611,6 +3611,9 @@ pub struct ConnectTikTokSourceInput {
 pub struct RegisterProfileSourceInput {
     pub profile_url: String,
     pub selected_sources: ProfileSourceSelection,
+    #[serde(default)]
+    pub auto_enqueue: bool,
+    pub history_limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3655,46 +3658,20 @@ pub async fn connect_tiktok_source(
 pub async fn register_profile_source(
     input: RegisterProfileSourceInput,
     state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
 ) -> Result<RegisterProfileSourceResult, String> {
-    let result = {
-        let connection = state
-            .db
-            .lock()
-            .map_err(|_| "Database mutex poisoned".to_string())?;
-        crate::application::collection_service::register_profile_source(
-            &connection,
-            &input.profile_url,
-            &input.selected_sources,
-        )?
-    };
-
-    // Ensure channels exist in database
-    {
-        if let Ok(connection) = state.db.lock() {
-            let _ = db::ensure_profile_channels(
-                &connection,
-                result.source.id,
-                &result.source.watch_config_json,
-            );
-        }
-    }
-
-    // Trigger initial discovery in background
-    let discovery_service =
-        crate::application::profile_discovery_service::ProfileDiscoveryService::new(
-            state.db.clone(),
-            state.queue.clone(),
-            app_handle,
-        );
-    let source_id = result.source.id;
-    tokio::spawn(async move {
-        if let Err(err) = discovery_service.discover_profile(source_id, false).await {
-            tracing::warn!("Initial profile discovery error for source {source_id}: {err}");
-        }
-    });
-
-    Ok(result)
+    let browser = state.worker_config.read().await.cookies_browser.clone();
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::collection_service::register_profile_source_with_options(
+        &connection,
+        &input.profile_url,
+        &input.selected_sources,
+        input.auto_enqueue,
+        input.history_limit.unwrap_or(0),
+        (!browser.is_empty()).then_some(browser.as_str()),
+    )
 }
 
 #[tauri::command]
@@ -3713,7 +3690,8 @@ pub async fn update_profile_source_settings(
         &input.selected_sources,
         input.auto_enqueue,
     )?;
-    let _ = db::ensure_profile_channels(&connection, source_id, &source.watch_config_json);
+    db::ensure_profile_channels(&connection, source_id, &source.watch_config_json)
+        .map_err(|error| error.to_string())?;
     Ok(source)
 }
 
@@ -3866,31 +3844,7 @@ pub async fn sync_collection_source_now(
                 app_handle,
             );
         let report = discovery_service.discover_profile(source_id, true).await?;
-        let mut summary = crate::application::collection_service::SourceSyncSummary {
-            source_id,
-            found_count: report.total_discovered,
-            queued_count: report.total_queued,
-            duplicate_count: report.total_duplicates,
-            ignored_count: 0,
-            error_count: 0,
-            unavailable_categories: Vec::new(),
-            partial: false,
-            message: "Sincronización de perfil completada".into(),
-            categories: std::collections::HashMap::new(),
-        };
-        for ch in report.channels {
-            summary.categories.insert(
-                ch.channel_kind.clone(),
-                crate::application::collection_service::SourceCategorySummary {
-                    available: ch.status != "unsupported" && ch.status != "requires_auth",
-                    enabled: true,
-                    discovered: ch.discovered_count,
-                    queued: ch.queued_count,
-                    state: ch.status,
-                },
-            );
-        }
-        return Ok(summary);
+        return Ok(report.to_sync_summary());
     }
 
     sync_collection_source_by_id(state.db.clone(), state.queue.clone(), source_id, app_handle).await
@@ -4066,8 +4020,7 @@ fn legal_consent_is_current(consent: &LegalConsent) -> bool {
         && consent.content_policy_version == CURRENT_CONTENT_POLICY_VERSION
 }
 
-#[tauri::command]
-pub async fn get_legal_consent() -> Result<LegalConsent, String> {
+fn load_current_legal_consent() -> LegalConsent {
     let path = settings_data_dir().join("legal-consent.json");
     let mut consent = fs::read_to_string(path)
         .ok()
@@ -4076,11 +4029,27 @@ pub async fn get_legal_consent() -> Result<LegalConsent, String> {
     if !legal_consent_is_current(&consent) {
         consent.accepted_at = None;
     }
+    consent
+}
+
+pub(crate) fn has_current_legal_consent() -> bool {
+    legal_consent_is_current(&load_current_legal_consent())
+}
+
+#[tauri::command]
+pub async fn get_legal_consent(state: State<'_, AppState>) -> Result<LegalConsent, String> {
+    let consent = load_current_legal_consent();
+    state
+        .queue
+        .set_profile_processing_authorized(legal_consent_is_current(&consent));
     Ok(consent)
 }
 
 #[tauri::command]
-pub async fn save_legal_consent(input: LegalConsentInput) -> Result<LegalConsent, String> {
+pub async fn save_legal_consent(
+    input: LegalConsentInput,
+    state: State<'_, AppState>,
+) -> Result<LegalConsent, String> {
     if input.eula_version != CURRENT_EULA_VERSION
         || input.terms_version != CURRENT_TERMS_VERSION
         || input.privacy_version != CURRENT_PRIVACY_VERSION
@@ -4103,6 +4072,7 @@ pub async fn save_legal_consent(input: LegalConsentInput) -> Result<LegalConsent
     fs::create_dir_all(settings_data_dir()).map_err(|error| error.to_string())?;
     let serialized = serde_json::to_vec_pretty(&consent).map_err(|error| error.to_string())?;
     atomic_write(&settings_data_dir().join("legal-consent.json"), &serialized)?;
+    state.queue.set_profile_processing_authorized(true);
     Ok(consent)
 }
 

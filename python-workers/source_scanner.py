@@ -187,7 +187,7 @@ def scan_tiktok_source(
     if not requested:
         requested = list(ACTIVITY_SUFFIXES)
 
-    fetch_limit = max(1, min(1000, limit or 200))
+    fetch_limit = 0 if limit == 0 else max(1, min(1000, limit or 200))
     result = {
         "profile": profile_identity(profile_url),
         "categories": {},
@@ -203,8 +203,8 @@ def scan_tiktok_source(
                 "status": "available",
                 "reason": None,
                 "auth_required": False,
-                "truncated": len(raw_entries) >= fetch_limit,
-                "items": entries[:fetch_limit],
+                "truncated": fetch_limit > 0 and len(raw_entries) >= fetch_limit,
+                "items": entries if fetch_limit == 0 else entries[:fetch_limit],
             }
         except Exception as error:
             diagnosis = classify_category_error(category, str(error))

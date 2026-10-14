@@ -41,4 +41,4 @@ La interfaz de Pulsaria destaca por su estética AAA (Aurora WebGL, Glassmorphis
 
 ---
 
-*Siguiente documento: [06_AUDITORIA_BACKEND_RUST.md](06_AUDITORIA_BACKEND_RUST.md)*
+*Siguiente documento: [06_AUDITORIA_BACKEND_RUST.md](./06_AUDITORIA_BACKEND_RUST.md)*

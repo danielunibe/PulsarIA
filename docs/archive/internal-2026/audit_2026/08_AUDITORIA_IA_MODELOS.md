@@ -51,4 +51,4 @@ El proyecto ya cuenta con la dependencia `@google/genai: ^1.17.0` instalada en `
 
 ---
 
-*Siguiente documento: [09_FEATURES_FALTANTES.md](09_FEATURES_FALTANTES.md)*
+*Siguiente documento: [09_FEATURES_FALTANTES.md](./09_FEATURES_FALTANTES.md)*

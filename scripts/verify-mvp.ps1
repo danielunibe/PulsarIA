@@ -10,8 +10,8 @@ try {
     Write-Host '2/13 TypeScript contract'
     npm run typecheck
     if ($LASTEXITCODE -ne 0) { throw 'TypeScript contract failed' }
-    node --test scripts/tests/window-controls.test.mjs
-    if ($LASTEXITCODE -ne 0) { throw 'Window close/reopen regression tests failed' }
+    node --test scripts/tests/window-controls.test.mjs scripts/tests/profile-sources.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Window or profile flow regression tests failed' }
 
     Write-Host '3/13 Spanish/English locale contract'
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-locale.ps1
@@ -85,6 +85,12 @@ try {
     Write-Host '10/13 Canonical source and artifact structure'
     npm run verify:canonical
     if ($LASTEXITCODE -ne 0) { throw 'Canonical structure gate failed' }
+    node --test scripts/tests/release-version.test.mjs scripts/tests/release-contact.test.mjs scripts/tests/tauri-frontend.test.mjs scripts/tests/spdx-license-expression.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Release tooling regression tests failed' }
+    foreach ($testScript in @('direct-release-artifacts.tests.ps1', 'candidate-staging.tests.ps1', 'installed-bundle-selection.tests.ps1', 'runtime-bootstrap.tests.ps1')) {
+        powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "tests/$testScript")
+        if ($LASTEXITCODE -ne 0) { throw "Release artifact regression failed: $testScript" }
+    }
 
     Write-Host '11/13 Release bundle resource contract'
     $config = Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json

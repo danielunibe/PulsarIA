@@ -1,6 +1,6 @@
 {
     "name": "pulsaria",
-    "version": "0.1.0-beta.3",
+    "version": "0.1.0-beta.4",
     "private": true,
     "scripts": {
         "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-next.ps1",
@@ -30,7 +30,7 @@
         "verify:frontend-a11y": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-frontend-a11y-contract.ps1",
         "verify:website": "npm --prefix website run build",
         "prepare:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-runtime.ps1",
-        "clean": "next clean",
+        "clean": "node scripts/clean-next-cache.mjs",
         "tauri": "tauri"
     },
     "dependencies": {

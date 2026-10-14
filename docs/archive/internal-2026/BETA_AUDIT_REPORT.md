@@ -10,7 +10,7 @@
 > **Estado del documento:** esta auditoría es la línea base histórica del
 > 2026-09-14. La reconciliación de los hallazgos sobre la implementación Beta 2
 > actual y sus gates reproducibles está en
-> [BETA2_RELEASE_EVIDENCE.md](BETA2_RELEASE_EVIDENCE.md) y en la sección
+> [BETA2_RELEASE_EVIDENCE.md](./BETA2_RELEASE_EVIDENCE.md) y en la sección
 > `Verificación Beta 2` de `PROJECT_TRUTH.md`.
 
 > **Aviso:** Este informe documenta el estado verificado de la beta v0.1.0-beta.2 de

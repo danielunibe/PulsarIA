@@ -18,6 +18,8 @@ import { toast } from 'sonner';
 import { useSemanticIO } from '@/hooks/useSemanticIO';
 import { apiFetch } from '@/lib/api-client';
 import { useI18n } from '@/lib/i18n';
+import { TikTokOnlinePlayer } from '@/components/TikTokOnlinePlayer';
+import { tiktokPlayerUrl } from '@/lib/tiktok-player';
 
 // ============================================================
 // ExpandedVideoModal — AAA Multimodal Knowledge Hub
@@ -189,6 +191,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
 
     const sourceState: SourceState = video.sourceState || (video.videoSrc ? 'local' : 'unavailable');
     const transcriptOnly = !video.videoSrc;
+    const onlinePlayable = !video.videoSrc && sourceState === 'online' && Boolean(tiktokPlayerUrl(video.originalUrl));
     const sourceStateLabel = sourceState === 'local'
         ? t('detailSourceLocal')
         : sourceState === 'online'
@@ -854,6 +857,8 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                                 </span>
                             </div>
                             </>
+                        ) : onlinePlayable ? (
+                            <TikTokOnlinePlayer originalUrl={video.originalUrl!} title={video.title || 'Video de TikTok'} />
                         ) : (
                             <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-3 overflow-hidden p-8 text-center">
                                 <div className="flex max-w-sm flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/55 p-6 backdrop-blur-md">

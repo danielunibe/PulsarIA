@@ -85,4 +85,4 @@
 
 ---
 
-*Siguiente documento: [05_AUDITORIA_UI_UX.md](05_AUDITORIA_UI_UX.md)*
+*Siguiente documento: [05_AUDITORIA_UI_UX.md](./05_AUDITORIA_UI_UX.md)*

@@ -9,6 +9,9 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
 } else {
     $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 }
+. (Join-Path $ProjectRoot 'scripts/resolve-installed-bundle.ps1')
+$tauriConfig = Get-Content -LiteralPath (Join-Path $ProjectRoot 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json
+Assert-InstallerHostIsIsolated -ProductName ([string]$tauriConfig.productName)
 
 $runnerTempRaw = [Environment]::GetEnvironmentVariable('RUNNER_TEMP')
 if ([string]::IsNullOrWhiteSpace($runnerTempRaw) -or -not (Test-Path -LiteralPath $runnerTempRaw -PathType Container)) {
@@ -40,6 +43,7 @@ if (Test-Path -LiteralPath $bootstrapRoot) {
 }
 
 $bootstrapRootCreated = $false
+$bootstrapInstallationStarted = $false
 try {
     New-Item -ItemType Directory -Path $bootstrapRoot -ErrorAction Stop | Out-Null
     $bootstrapRootCreated = $true
@@ -47,11 +51,12 @@ try {
     $bootstrapUrl = "https://github.com/danielunibe/PulsarIA/releases/download/$bootstrapRelease/$bootstrapInstallerName"
     Write-Host "Downloading pinned runtime bootstrap $bootstrapRelease/$bootstrapInstallerName"
     Invoke-WebRequest -Uri $bootstrapUrl -OutFile $bootstrapInstallerPath
-    $actualHash = (Get-FileHash -LiteralPath $bootstrapInstallerPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    $actualHash = Get-PulsariaSha256 -Path $bootstrapInstallerPath
     if ($actualHash -ne $bootstrapSha256) {
         throw "Pinned runtime bootstrap SHA-256 mismatch. Expected $bootstrapSha256; got $actualHash."
     }
 
+    $bootstrapInstallationStarted = $true
     $install = Start-Process -FilePath $bootstrapInstallerPath -ArgumentList @('/S', "/D=$bootstrapInstallRoot") -WindowStyle Hidden -Wait -PassThru
     if ($install.ExitCode -notin @(0, 3010)) {
         throw "Runtime bootstrap installer failed with exit code $($install.ExitCode)."
@@ -80,6 +85,23 @@ try {
 } finally {
     if ($bootstrapRootCreated -and (Test-Path -LiteralPath $bootstrapRoot)) {
         Assert-OwnedRunnerTempPath $bootstrapRoot
+        if ($bootstrapInstallationStarted) {
+            # NSIS registers the product even with /D pointing into RUNNER_TEMP.
+            # Removing the directory alone leaves a stale registration and
+            # shortcuts. Only uninstall the bootstrap created by this run.
+            $uninstaller = Get-ChildItem -LiteralPath $bootstrapInstallRoot -Filter '*uninstall*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -ne $uninstaller) {
+                Assert-OwnedRunnerTempPath $uninstaller.FullName
+                # _?= prevents NSIS from spawning a temporary uninstaller and
+                # returning before the actual uninstall and its exit code.
+                $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList @('/S', "_?=$bootstrapInstallRoot") -WindowStyle Hidden -Wait -PassThru
+                if ($uninstall.ExitCode -ne 0) {
+                    throw "Runtime bootstrap uninstall failed with exit code $($uninstall.ExitCode); preserving its directory for inspection."
+                }
+            }
+            Assert-InstallerHostIsIsolated -ProductName ([string]$tauriConfig.productName)
+            Write-Host 'PULSARIA PINNED RUNTIME BOOTSTRAP UNINSTALL: PASS'
+        }
         try {
             Remove-Item -LiteralPath $bootstrapRoot -Recurse -Force -ErrorAction Stop
             Write-Host 'PULSARIA PINNED RUNTIME BOOTSTRAP CLEANUP: PASS'

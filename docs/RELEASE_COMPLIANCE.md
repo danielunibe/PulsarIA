@@ -7,7 +7,11 @@ advice or a signed review by the rights holder and counsel.
 
 - [ ] Clean, reviewed checkout; no unrelated worktree changes.
 - [ ] Canonical public name is Pulsaria.
-- [ ] Full legal name, notice address, and contact email are present.
+- [x] Public contact is limited to the owner name, city, and contact email
+      confirmed from the authorized CV; no postal/street address is included.
+- [ ] A qualified legal reviewer confirms that the city and electronic email
+      are sufficient for notices in the target jurisdictions. Keep this gate
+      blocked until the reviewer records approval outside the public repository.
 - [ ] Source-visible proprietary license reviewed.
 - [ ] EULA, Terms, Privacy, Content, Copyright, and Security documents are
       present in Spanish and English where applicable.

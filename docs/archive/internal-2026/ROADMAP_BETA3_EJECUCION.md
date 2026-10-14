@@ -1,10 +1,10 @@
 # Pulsaria Beta 3 (0.1.0-beta.3) — Auditoría Técnica y Roadmap Maestro de Ejecución
 
-**Fecha de auditoría:** 2026-10-01  
-**Versión objetivo:** `0.1.0-beta.3`  
-**Rama activa de trabajo:** `beta2-hardening` (PR [#2](https://github.com/danielunibe/PulsarIA/pull/2) contra `origin/main`)  
-**Autoridad normativa:** [PROJECT_TRUTH.md](../PROJECT_TRUTH.md)  
-**Destinatario de ejecución:** Gemini 3.8 Flash (High) / Agentes de ingeniería autónoma / Daniel Unibe  
+**Fecha de auditoría:** 2026-10-01
+**Versión objetivo:** `0.1.0-beta.3`
+**Rama activa de trabajo:** `beta2-hardening` (PR [#2](https://github.com/danielunibe/PulsarIA/pull/2) contra `origin/main`)
+**Autoridad normativa:** [PROJECT_TRUTH.md](../../../PROJECT_TRUTH.md)
+**Destinatario de ejecución:** Gemini 3.8 Flash (High) / Agentes de ingeniería autónoma / Daniel Unibe
 
 ---
 
@@ -116,7 +116,7 @@ Este roadmap está diseñado para que un modelo avanzado (Gemini 3.8 Flash High)
 ---
 
 ### FASE 1: Resolución del Gate Legal y Cumplimiento de Atribuciones
-**Objetivo:** Lograr que `npm run verify:legal-release` termine en **`PASS`** sin vulnerar la privacidad del titular.  
+**Objetivo:** Lograr que `npm run verify:legal-release` termine en **`PASS`** sin vulnerar la privacidad del titular.
 **Estado:** ✅ **COMPLETADO (PASS 100%, 0 hallazgos)**
 
 - [x] **Tarea 1.1:** Estandarización de contacto oficial `danielunibe10@gmail.com` y retiro de marcadores temporales en los 6 documentos legales (`EULA`, `TERMS_OF_USE`, `PRIVACY`).
@@ -227,7 +227,7 @@ Este roadmap está diseñado para que un modelo avanzado (Gemini 3.8 Flash High)
 ---
 
 ### FASE 5: Reconstrucción de Empaquetado NSIS y Verificación Instalada
-**Objetivo:** Construir el instalador definitivo y verificar el ciclo completo de instalación en Windows.  
+**Objetivo:** Construir el instalador definitivo y verificar el ciclo completo de instalación en Windows.
 **Estado:** ✅ **COMPLETADO (PASS 100%, exit 0)**
 
 - [x] **Tarea 5.1:** Compilación de Release: Generado `Pulsaria_0.1.0-beta.3_x64-setup.exe` (`687,948,065` bytes, SHA-256 `2542261B65353615588C6ED1A56F76E51D3992EAB3F84EF84DDFCF495F7D7D55`).

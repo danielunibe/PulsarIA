@@ -4,6 +4,8 @@ param(
     [string]$Bundle = 'nsis',
     [ValidateSet('debug', 'release')]
     [string]$Configuration = 'debug',
+    [string]$InstallerPath,
+    [ValidatePattern('^$|^[A-Fa-f0-9]{64}$')][string]$ExpectedSha256,
     [switch]$RunLive,
     [string]$ApiToken,
     [string]$TikTokUrl = 'https://www.tiktok.com/@scout2015/video/6718335390845095173',
@@ -18,15 +20,9 @@ $tauriConfigPath = Join-Path $projectRoot 'src-tauri/tauri.conf.json'
 $tauriConfig = Get-Content -LiteralPath $tauriConfigPath -Raw | ConvertFrom-Json
 $expectedVersion = [string]$tauriConfig.version
 $bundleRoot = Join-Path $projectRoot "target-tauri/$Configuration/bundle"
-$bundlePath = if ($Bundle -eq 'nsis') {
-    (Get-ChildItem -LiteralPath (Join-Path $bundleRoot 'nsis') -Filter 'pulsaria_*_x64-setup.exe' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).FullName
-} else {
-    (Get-ChildItem -LiteralPath (Join-Path $bundleRoot 'msi') -Filter 'pulsaria_*_x64_en-US.msi' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).FullName
-}
-
-if ([string]::IsNullOrWhiteSpace($bundlePath) -or -not (Test-Path -LiteralPath $bundlePath -PathType Leaf)) {
-    throw "Bundle not found under $bundleRoot for $Bundle"
-}
+. (Join-Path $PSScriptRoot 'resolve-installed-bundle.ps1')
+$bundlePath = Resolve-InstalledBundlePath -BundleRoot $bundleRoot -ReleaseVersion $expectedVersion -Bundle $Bundle -InstallerPath $InstallerPath -ExpectedSha256 $ExpectedSha256
+Assert-InstallerHostIsIsolated -ProductName ([string]$tauriConfig.productName)
 
 function Get-JobList {
     param([object]$Body)
@@ -204,7 +200,7 @@ $result = [ordered]@{
 
 try {
     if ($RunLive) {
-        throw 'RunLive is not a validated acceptance path: the legacy script does not send or refresh process-scoped IPC credentials. Use the installed native UI and docs/BETA3_ACCEPTANCE.md. Offline installation smoke remains available without RunLive.'
+        throw 'RunLive is not a validated acceptance path: the legacy script does not send or refresh process-scoped IPC credentials. Use the installed native UI and docs/BETA4_ACCEPTANCE.md. Offline installation smoke remains available without RunLive.'
     }
     New-Item -ItemType Directory -Path $installDir, $appDataRoot, $downloadsDir, $webViewDataDir -Force | Out-Null
     if ($Bundle -eq 'msi') {
@@ -513,7 +509,7 @@ try {
         $uninstallerPath = (Get-ChildItem -LiteralPath $installDir -Filter '*uninstall*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
         if ($uninstallerPath -and (Test-Path -LiteralPath $uninstallerPath -PathType Leaf)) {
         try {
-            $uninstallResult = Start-Process -FilePath $uninstallerPath -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru
+            $uninstallResult = Start-Process -FilePath $uninstallerPath -ArgumentList @('/S', "_?=$installDir") -WindowStyle Hidden -Wait -PassThru
             $result.uninstallExit = $uninstallResult.ExitCode
             $result.userDataPreservedAfterUninstall =
                 $uninstallResult.ExitCode -eq 0 -and

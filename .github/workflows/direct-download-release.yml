@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Reviewed tag already merged into main, for example v0.1.0-beta.3'
+        description: 'Reviewed tag already merged into main, for example v0.1.0-beta.4'
         required: true
         type: string
 
@@ -93,8 +93,8 @@ jobs:
           $materialsRoot = Join-Path $env:RUNNER_TEMP 'pulsaria-third-party-materials'
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-direct-release-materials.ps1 -DestinationRoot $materialsRoot
           if ($LASTEXITCODE -ne 0) { throw 'Third-party source/build preparation failed.' }
-          npm run verify:legal-release -- -RequireSbom -SbomPath $sbomPath -MaterialsRoot $materialsRoot
-          if ($LASTEXITCODE -ne 0) { throw 'Legal and component review gate failed.' }
+          npm run verify:legal-release -- -CandidateOnly -RequireSbom -SbomPath $sbomPath -MaterialsRoot $materialsRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate materials gate failed; no public release approval is implied.' }
           npm run verify:local-llm
           if ($LASTEXITCODE -ne 0) { throw 'Local model and sidecar gate failed.' }
           npm run verify:mvp
@@ -113,7 +113,10 @@ jobs:
 
       - name: Smoke test installed NSIS bundle
         run: |
-          npm run verify:installed -- -Configuration release -Bundle nsis -ApiPort 8080
+          $version = $env:PULSARIA_RELEASE_TAG -replace '^v', ''
+          $installer = Join-Path $env:GITHUB_WORKSPACE "target-tauri/release/bundle/nsis/Pulsaria_${version}_x64-setup.exe"
+          $installerHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+          npm run verify:installed -- -Configuration release -Bundle nsis -InstallerPath $installer -ExpectedSha256 $installerHash -ApiPort 8080
           if ($LASTEXITCODE -ne 0) { throw 'Installed NSIS smoke failed.' }
 
       - name: Stage and verify public assets
@@ -178,6 +181,8 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $env:SOURCE_COMMIT) { throw 'Release tag changed after construction.' }
           git merge-base --is-ancestor $env:SOURCE_COMMIT refs/remotes/origin/main
           if ($LASTEXITCODE -ne 0) { throw 'Accepted source must remain integrated in main.' }
+          node scripts/verify-release-contact.mjs --manifest legal/release-manifest.json --expected-version ($env:PULSARIA_RELEASE_TAG -replace '^v', '')
+          if ($LASTEXITCODE -ne 0) { throw 'Legal review of the public contact disclosure is required before publication.' }
 
       - name: Download the immutable artifact by its build output ID
         uses: actions/download-artifact@v8
@@ -197,10 +202,10 @@ jobs:
         run: |
           $version = $env:PULSARIA_RELEASE_TAG -replace '^v', ''
           $notesPath = Join-Path $env:RUNNER_TEMP 'pulsaria-direct-release-notes.md'
-          if (-not (Select-String -LiteralPath docs/BETA3_RELEASE_NOTES.md -Pattern $version -SimpleMatch -Quiet)) { throw 'Release notes must match the accepted version.' }
-          Copy-Item -LiteralPath docs/BETA3_RELEASE_NOTES.md -Destination $notesPath
+          if (-not (Select-String -LiteralPath docs/BETA4_RELEASE_NOTES.md -Pattern $version -SimpleMatch -Quiet)) { throw 'Release notes must match the accepted version.' }
+          Copy-Item -LiteralPath docs/BETA4_RELEASE_NOTES.md -Destination $notesPath
           $assets = @(Get-ChildItem -LiteralPath ./accepted-assets -File | Sort-Object Name | ForEach-Object { $_.FullName })
-          $arguments = @('release', 'create', $env:PULSARIA_RELEASE_TAG, '--repo', 'danielunibe/PulsarIA', '--title', 'Pulsaria Beta 3', '--notes-file', $notesPath, '--prerelease', '--verify-tag')
+          $arguments = @('release', 'create', $env:PULSARIA_RELEASE_TAG, '--repo', 'danielunibe/PulsarIA', '--title', 'Pulsaria Beta 4', '--notes-file', $notesPath, '--prerelease', '--verify-tag')
           $arguments += $assets
           & gh @arguments
           if ($LASTEXITCODE -ne 0) { throw 'GitHub prerelease publication failed.' }

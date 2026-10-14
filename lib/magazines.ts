@@ -580,7 +580,7 @@ export async function fetchMagazineSourceMedia(
 
 /* ---------------- Contenido estructurado (parser único) ---------------- */
 
-/** Bloque de contenido normalizado (fuente única para MagazineReader y KioscoReader). */
+/** Bloque de contenido normalizado (fuente única del lector Kiosco). */
 export interface StructuredContentBlock {
   kind: string;
   text?: string;

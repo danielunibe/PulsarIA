@@ -303,6 +303,11 @@ async fn main() {
         search_service.clone(),
         maintenance_lock,
     ));
+    let profile_processing_authorized = commands::has_current_legal_consent();
+    queue_service.set_profile_processing_authorized(profile_processing_authorized);
+    if !profile_processing_authorized {
+        tracing::info!("Profile discovery and processing are waiting for current rights consent");
+    }
     match queue_service.resume_pending_jobs().await {
         Ok(resumed) if resumed > 0 => {
             tracing::info!(

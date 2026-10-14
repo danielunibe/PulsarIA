@@ -362,6 +362,8 @@ pub struct JobMessage {
     pub whisper_model: String,
     pub whisper_device: String,
     pub whisper_compute_type: String,
+    /// Profile videos share the queue but execute one at a time.
+    pub profile_background: bool,
 }
 
 // ========================================================================

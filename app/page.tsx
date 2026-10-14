@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import dynamic from 'next/dynamic';
@@ -223,6 +223,13 @@ export default function Page() {
 
     const [selectedPlaylistId, setSelectedPlaylistId] = useState<number | null>(null);
     const [selectedSourceCollection, setSelectedSourceCollection] = useState<SourceCollectionRecord | null>(null);
+    const [selectedProfile, setSelectedProfile] = useState<import('@/lib/profile-source').ProfileSource | null>(null);
+    const [selectedProfileChannel, setSelectedProfileChannel] = useState<string>('all');
+    const sourceCollectionFilter = useMemo(() => selectedProfile ? {
+        sourceId: selectedProfile.id, channelKind: selectedProfileChannel,
+    } : selectedSourceCollection ? {
+        sourceId: selectedSourceCollection.profile_source_id, channelKind: selectedSourceCollection.channel_kind,
+    } : undefined, [selectedProfile, selectedProfileChannel, selectedSourceCollection]);
     const [pageConfig, setPageConfig] = useState<PageConfig>(loadPageConfig);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [playlistPickerTarget, setPlaylistPickerTarget] = useState<{ jobId?: number; contentId?: number } | null>(null);
@@ -304,6 +311,7 @@ export default function Page() {
     const handlePlaylistSelect = useCallback((id: number | null) => {
         setSelectedPlaylistId(id);
         setSelectedSourceCollection(null);
+        setSelectedProfile(null);
         setActiveVideoId(null);
         setCinemaOpen(false);
         setCinemaPhase('idle');
@@ -324,6 +332,7 @@ export default function Page() {
 
     const handleSourceCollectionSelect = useCallback((collection: SourceCollectionRecord | null) => {
         setSelectedSourceCollection(collection);
+        setSelectedProfile(null);
         setSelectedPlaylistId(null);
         setActiveVideoId(null);
         setCinemaOpen(false);
@@ -342,6 +351,12 @@ export default function Page() {
         setGeminiError(null);
         setGeminiLoading(false);
     }, []);
+
+    const handleProfileSelect = useCallback((profile: import('@/lib/profile-source').ProfileSource | null, channelKind: string = 'all') => {
+        handleSourceCollectionSelect(null);
+        setSelectedProfile(profile);
+        setSelectedProfileChannel(channelKind);
+    }, [handleSourceCollectionSelect]);
 
     const isSearchView = isSearching || searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null || geminiAnswer !== null || geminiError !== null;
     // Cinema se puede abrir desde la biblioteca, pero no desde una vista de
@@ -412,6 +427,7 @@ export default function Page() {
                     setActiveSection('home');
                     setSelectedPlaylistId(null);
                     setSelectedSourceCollection(null);
+                    setSelectedProfile(null);
                     setActiveVideoId(selected.videoId);
                 }
                 break;
@@ -657,6 +673,7 @@ export default function Page() {
         if (section !== 'library') {
             setSelectedPlaylistId(null);
             setSelectedSourceCollection(null);
+            setSelectedProfile(null);
         }
     }, [handleClearSearch, handleReturnHome]);
 
@@ -1119,7 +1136,7 @@ export default function Page() {
 
                             {activeSection === 'profiles' && (
                                 <div className="pulsaria-context-pane__scroll custom-scrollbar">
-                                    <AddLinks mode="profiles" onSubmitLinks={enqueueLinks} />
+                                    <AddLinks mode="profiles" onSubmitLinks={enqueueLinks} onProfileSelect={handleProfileSelect} selectedProfileId={selectedProfile?.id ?? null} />
                                 </div>
                             )}
 
@@ -1140,6 +1157,7 @@ export default function Page() {
                                              setActiveSection('home');
                                              setSelectedPlaylistId(null);
                                              setSelectedSourceCollection(null);
+                                             setSelectedProfile(null);
                                              setActiveVideoId(jobId);
                                         }}
                                     />
@@ -1176,12 +1194,14 @@ export default function Page() {
                                     </div>
                                 </div>
                             )}
-                            {(selectedPlaylistId !== null || selectedSourceCollection !== null) && (
+                            {(selectedPlaylistId !== null || selectedSourceCollection !== null || selectedProfile !== null) && (
                                 <div className="mx-8 mt-2 mb-1 px-4 py-3 rounded-2xl border border-[#8a5cff]/25 bg-[#8a5cff]/10 flex items-center justify-between gap-4">
                                     <div className="flex items-center gap-3 min-w-0">
                                         <span className="w-2 h-2 rounded-full bg-[#8a5cff] shadow-[0_0_10px_#8a5cff] shrink-0" />
                                         <span className="text-xs text-white/80 truncate">
-                                            {selectedSourceCollection
+                                            {selectedProfile
+                                                ? `Mostrando ${selectedProfile.displayName || selectedProfile.handle} · ${({ all: 'Todo el contenido', posts: 'Publicaciones', reposts: 'Reposts', saved: 'Guardados', favorites: 'Me gusta' } as Record<string, string>)[selectedProfileChannel] || selectedProfileChannel}`
+                                                : selectedSourceCollection
                                                 ? `Mostrando ${selectedSourceCollection.name} · ${selectedSourceCollection.channel_kind}`
                                                 : 'Mostrando los videos de la playlist seleccionada'}
                                         </span>
@@ -1207,10 +1227,7 @@ export default function Page() {
                                     onVideoPlayStop={handlePlayStop}
                                     sortKey={pageConfig.sortKey}
                                     playlistId={selectedPlaylistId ?? undefined}
-                                    sourceCollection={selectedSourceCollection ? {
-                                        sourceId: selectedSourceCollection.profile_source_id,
-                                        channelKind: selectedSourceCollection.channel_kind,
-                                    } : undefined}
+                                    sourceCollection={sourceCollectionFilter}
                                     layout={pageConfig.layout}
                                     columns={pageConfig.columns}
                                     showOnlyCompleted={pageConfig.showOnlyCompleted}

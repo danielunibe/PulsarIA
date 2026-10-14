@@ -4,7 +4,7 @@
 
 **Corte de revisión:** 8 de octubre de 2026
 **Base revisada:** checkout de `main` sobre `HEAD ebfb5209`, con cambios de trabajo locales de la reparación del lateral y su documentación.
-**Estado de publicación:** según [PROJECT_TRUTH.md](../../PROJECT_TRUTH.md) y [README.md](../../README.md), la última versión pública documentada es `v0.1.0-eval.3`; Beta 3 sigue sin publicarse. Este catálogo describe el árbol local actual y no afirma que todas sus funciones estén en Eval.3.
+**Estado de publicación — 2026-10-09:** la descarga pública vigente sigue siendo `v0.1.0-eval.3`. `0.1.0-beta.4` es candidata y aún no está publicada. Este catálogo describe funciones presentes en el árbol actual; su disponibilidad en una descarga requiere aceptación del artefacto correspondiente.
 
 ## Posicionamiento
 
@@ -28,7 +28,7 @@ Pasar de guardar clips sueltos a consultar una colección audiovisual personal d
 - Permite pegar varios enlaces o cargar listas de URLs desde archivos `.txt` y `.csv`.
 - Revisa el formato y la validez de los enlaces antes de enviarlos a la cola.
 - La importación por perfil permite elegir categorías disponibles —publicaciones, republicaciones, favoritos y guardados— y sincronizar la fuente.
-- En fuentes conectadas se puede elegir entre una modalidad centrada en conservar medios localmente o una modalidad streaming-first con descarga bajo demanda.
+- Al agregar un perfil se guardan identidad y opciones sin iniciar descargas. La consulta posterior carga todo el contenido disponible o un límite elegido por fuente. El detalle y Cinema reproducen online el video seleccionado mediante el reproductor oficial de TikTok. Al activar el procesamiento gradual, la misma cola trabaja con un video a la vez y espera 30 segundos entre videos.
 
 **Ángulo de marketing:** incorpora el contenido que el usuario elige a una biblioteca propia y consultable. La disponibilidad de cada fuente depende de TikTok y, cuando se necesita, de una sesión local autorizada del navegador.
 
@@ -159,7 +159,7 @@ Guardamos muchos videos y luego cuesta recordar cuál tenía la receta, la recom
 - Transcripción siempre correcta, reconocimiento garantizado de español, traducción automática u OCR avanzado.
 - Chat conversacional RAG, playlists inteligentes automáticas o reconocimiento general de objetos y escenas.
 - Procesamiento completamente offline: importar y sincronizar contenido, descargar modelos y solicitar Gemini requieren red.
-- Beta 3 publicada, versión estable firmada, Authenticode o actualizaciones automáticas públicas.
+- Beta 4 publicada, versión estable firmada, Authenticode o actualizaciones automáticas públicas.
 
 ## Referencias internas para actualizar el catálogo
 

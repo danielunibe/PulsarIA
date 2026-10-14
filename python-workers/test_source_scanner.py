@@ -8,6 +8,14 @@ from source_scanner import scan_tiktok_source
 
 
 class SourceScannerTests(unittest.TestCase):
+    def test_all_available_does_not_truncate_inventory_to_a_fixed_batch(self):
+        entries = [{"url": f"https://www.tiktok.com/@creator/video/{index}", "id": str(index)} for index in range(1200)]
+        with patch("source_scanner.profile_identity", return_value={}), patch("source_scanner.extract_playlist_entries", return_value=entries) as extractor:
+            result = scan_tiktok_source("https://www.tiktok.com/@creator", ["posts"], limit=0)
+        extractor.assert_called_once_with("https://www.tiktok.com/@creator", 0)
+        self.assertEqual(len(result["categories"]["posts"]["items"]), 1200)
+        self.assertFalse(result["categories"]["posts"]["truncated"])
+
     def test_scans_requested_categories_without_downloading(self):
         def entries_for(url, _limit):
             suffix = url.rsplit("/", 1)[-1]

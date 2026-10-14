@@ -567,7 +567,7 @@ async fn get_source_collection_items_handler(
             "Database mutex poisoned".to_string(),
         )
     })?;
-    crate::db::get_channel_content_views(&connection, source_id, &channel_kind, 500)
+    crate::db::get_channel_content_views(&connection, source_id, &channel_kind, 0)
         .map(Json)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
 }

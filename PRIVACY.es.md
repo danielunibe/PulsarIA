@@ -48,12 +48,17 @@ El beta puede conectarse a Internet únicamente para:
 - consultar o descargar un release o actualización de GitHub cuando tú lo
   solicitas;
 - acceder a la URL de contenido que tú importas.
-- explorar inicialmente los perfiles TikTok que registres y revisar sus
-  canales habilitados mientras la fuente siga activa. Con Pulsaria abierta,
+- consultar los perfiles TikTok cuando inicies su primera consulta y revisar sus
+  canales habilitados mientras la fuente siga activa. Agregar el registro no
+  inicia descargas. Después de la primera consulta, con Pulsaria abierta,
   las fuentes activas se revisan cada 15 minutos por defecto. El contenido
   nuevo que cumpla las reglas de la fuente se añade a tu cola local para
   procesarlo. Puedes pausar o reactivar cada perfil en Ajustes; las fuentes
   pausadas se excluyen de las revisiones periódicas.
+- reproducir desde el reproductor oficial de TikTok el video online que abras.
+  Esta acción conecta con TikTok y comunica datos de red como la dirección IP
+  y los datos habituales del navegador. Se carga el reproductor del video
+  seleccionado; no se descargan todos los videos para poder ver el perfil.
 - enviar a Google los fragmentos que incluyas explícitamente en una solicitud
   manual de síntesis Gemini, únicamente si has configurado una clave en el
   proceso nativo.

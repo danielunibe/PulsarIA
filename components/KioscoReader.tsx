@@ -8,9 +8,11 @@ import React, {
   useState,
 } from 'react';
 import { EvidenceSourceInspector } from '@/components/EvidenceSourceInspector';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type TranslationKey } from '@/lib/i18n';
 import {
+  fetchMagazineArticles,
   fetchMagazineArticleDetails,
+  fetchMagazineChapters,
   formatTimestamp,
   contentItemText,
   parseStructuredBlocks,
@@ -18,8 +20,9 @@ import {
   presentEditorialState,
   presentEvidenceKind,
   type MagazineArticleDetails,
+  type MagazineArticleRecord,
+  type MagazineChapterRecord,
   type MagazineEvidenceRecord,
-  type MagazineEvidenceTarget,
   type MagazineVolumeView,
   type RecipeBlockLabels,
 } from '@/lib/magazines';
@@ -51,20 +54,30 @@ import styles from '@/components/KioscoMagazine.module.css';
 
 interface KioscoReaderProps {
   volume: MagazineVolumeView;
-  articleId: string;
-  initialTarget?: MagazineEvidenceTarget | null;
+  isPreview: boolean;
   onBack: () => void;
 }
 
 type PageKind =
-  | 'cover'
   | 'index'
   | 'content'
   | 'evidence'
   | 'sources'
   | 'conflicts'
   | 'versions'
-  | 'colophon';
+  | 'colophon'
+  | 'status';
+
+const MAGAZINE_CATEGORY_KEYS: Record<string, TranslationKey> = {
+  recipes: 'magazineCategoryRecipes',
+  tech: 'magazineCategoryTech',
+  guides: 'magazineCategoryGuides',
+  lifestyle: 'magazineCategoryLifestyle',
+};
+
+type VolumeIndexEntry =
+  | { kind: 'chapter'; id: string; title: string }
+  | { kind: 'article'; id: string; article: MagazineArticleRecord };
 
 interface KioscoPage {
   kind: PageKind;
@@ -72,6 +85,9 @@ interface KioscoPage {
   blocks?: KioscoBlock[];
   evidenceStart?: number;
   first?: boolean;
+  indexEntries?: VolumeIndexEntry[];
+  status?: 'loading' | 'error';
+  error?: string;
 }
 
 function pad(value: number): string {
@@ -170,11 +186,18 @@ function BlockView({ block }: { block: KioscoBlock }) {
   }
 }
 
-export function KioscoReader({ volume, articleId, initialTarget, onBack }: KioscoReaderProps) {
+export function KioscoReader({ volume, isPreview, onBack }: KioscoReaderProps) {
   const { t, locale } = useI18n();
+  const [articles, setArticles] = useState<MagazineArticleRecord[]>([]);
+  const [chapters, setChapters] = useState<MagazineChapterRecord[]>([]);
+  const [isLoadingVolume, setIsLoadingVolume] = useState(true);
+  const [articleListError, setArticleListError] = useState<string | null>(null);
+  const [chapterListError, setChapterListError] = useState<string | null>(null);
+  const [activeArticleId, setActiveArticleId] = useState<string | null>(null);
   const [details, setDetails] = useState<MagazineArticleDetails | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoadingArticle, setIsLoadingArticle] = useState(false);
+  const [articleError, setArticleError] = useState<string | null>(null);
+  const [articleRetry, setArticleRetry] = useState(0);
   const [idx, setIdx] = useState(0);
   const [busy, setBusy] = useState(true);
   const [single, setSingle] = useState(false);
@@ -186,22 +209,31 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
   const [bumpKey, setBumpKey] = useState(0);
 
   const leafRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const indexArticleButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const touchXRef = useRef<number | null>(null);
   const bumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openFinishTimerRef = useRef<number | null>(null);
+  const listRequestRef = useRef(0);
   const idxRef = useRef(0);
   const busyRef = useRef(true);
   const singleRef = useRef(false);
+  const activeArticleIdRef = useRef<string | null>(null);
   const pagesRef = useRef<KioscoPage[]>([]);
   const closingRef = useRef(false);
   const onBackRef = useRef(onBack);
   onBackRef.current = onBack;
+  idxRef.current = idx;
+  busyRef.current = busy;
+  singleRef.current = single;
+  activeArticleIdRef.current = activeArticleId;
 
-  const seed = useMemo(() => hashSeed(articleId), [articleId]);
+  const seed = useMemo(() => hashSeed(volume.id), [volume.id]);
   const hue = useMemo(() => seed % 360, [seed]);
   const coverSvg = useMemo(() => coverArtSVG(seed, hue), [seed, hue]);
   const colophonSvg = useMemo(() => softArtSVG(seed + 7, hue), [seed, hue]);
   const coverBg = useMemo(
-    () => `linear-gradient(168deg, hsl(${hue} 34% 22%), hsl(${hue} 26% 12%) 62%, hsl(${hue} 30% 16%))`,
+    () => 'linear-gradient(168deg, hsl(' + hue + ' 34% 22%), hsl(' + hue + ' 26% 12%) 62%, hsl(' + hue + ' 30% 16%))',
     [hue],
   );
   const recipeLabels = useMemo<RecipeBlockLabels>(
@@ -218,102 +250,262 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
   );
   const flipMs = reducedMotion ? 1 : KIOSCO_FLIP_MS;
 
-  idxRef.current = idx;
-  busyRef.current = busy;
-  singleRef.current = single;
+  const loadVolumeContents = useCallback(async () => {
+    const sequence = ++listRequestRef.current;
+    setIsLoadingVolume(true);
+    setArticles([]);
+    setChapters([]);
+    setArticleListError(null);
+    setChapterListError(null);
 
-  /* Carga real del artículo (una llamada IPC agregada). */
+    if (isPreview) {
+      setIsLoadingVolume(false);
+      return;
+    }
+
+    try {
+      const [articleResult, chapterResult] = await Promise.allSettled([
+        fetchMagazineArticles(volume.id),
+        fetchMagazineChapters(volume.id),
+      ]);
+      if (sequence !== listRequestRef.current) return;
+
+      if (articleResult.status === 'fulfilled') {
+        setArticles(articleResult.value);
+      } else {
+        setArticleListError(
+          articleResult.reason instanceof Error
+            ? articleResult.reason.message
+            : t('magazineArticleListLoadError'),
+        );
+      }
+
+      if (chapterResult.status === 'fulfilled') {
+        setChapters(chapterResult.value);
+      } else {
+        setChapterListError(
+          chapterResult.reason instanceof Error
+            ? chapterResult.reason.message
+            : t('magazineChapterLoadError'),
+        );
+      }
+    } finally {
+      if (sequence === listRequestRef.current) setIsLoadingVolume(false);
+    }
+  }, [isPreview, t, volume.id]);
+
+  useEffect(() => {
+    void loadVolumeContents();
+    return () => {
+      listRequestRef.current += 1;
+    };
+  }, [loadVolumeContents]);
+
   useEffect(() => {
     let live = true;
-    setIsLoading(true);
-    setLoadError(null);
+    if (!activeArticleId) {
+      setDetails(null);
+      setArticleError(null);
+      setIsLoadingArticle(false);
+      return () => {
+        live = false;
+      };
+    }
+
     setDetails(null);
-    setIdx(0);
-    fetchMagazineArticleDetails(articleId, locale)
+    setArticleError(null);
+    setIsLoadingArticle(true);
+    fetchMagazineArticleDetails(activeArticleId, locale)
       .then((loaded) => {
-        if (live) setDetails(loaded);
+        if (!live) return;
+        if (loaded.article.id !== activeArticleId) {
+          setArticleError(t('magazineLoadError'));
+          setIsLoadingArticle(false);
+          return;
+        }
+        setDetails(loaded);
+        setIsLoadingArticle(false);
       })
       .catch((error: unknown) => {
-        if (live) setLoadError(error instanceof Error ? error.message : t('magazineLoadError'));
-      })
-      .finally(() => {
-        if (live) setIsLoading(false);
+        if (!live) return;
+        setArticleError(error instanceof Error ? error.message : t('magazineLoadError'));
+        setIsLoadingArticle(false);
       });
+
     return () => {
       live = false;
     };
-  }, [articleId, locale, t]);
+  }, [activeArticleId, articleRetry, locale, t]);
 
-  /* Páginas desde el contenido real. */
-  const pages = useMemo<KioscoPage[]>(() => {
-    if (!details) return [];
-    const sectionLabel = (kind: PageKind): string => {
-      switch (kind) {
-        case 'cover':
-          return t('kioscoSectionCover');
-        case 'index':
-          return t('kioscoIndex');
-        case 'content':
-          return details.article.title;
-        case 'evidence':
-          return t('magazineEvidence');
-        case 'sources':
-          return t('magazineSources');
-        case 'conflicts':
-          return t('magazineConflicts');
-        case 'versions':
-          return t('magazineVersions');
-        case 'colophon':
-          return t('kioscoColophon');
-      }
-    };
-    const list: KioscoPage[] = [{ kind: 'cover', section: sectionLabel('cover') }];
-    const blocks = parseStructuredBlocks(details.article.structured_content_json, recipeLabels, { textFallback: true }).blocks;
-    const contentPages = paginateBlocks(blocks);
-    list.push({ kind: 'index', section: sectionLabel('index') });
-    contentPages.forEach((group, groupIndex) => {
-      list.push({ kind: 'content', section: details.article.title, blocks: group, first: groupIndex === 0 });
-    });
-    if (details.evidence.length > 0) {
-      for (let start = 0; start < details.evidence.length; start += 2) {
-        list.push({ kind: 'evidence', section: sectionLabel('evidence'), evidenceStart: start });
+  const indexEntries = useMemo<VolumeIndexEntry[]>(() => {
+    const entries: VolumeIndexEntry[] = [];
+    const assignedArticles = new Set<string>();
+
+    if (!chapterListError) {
+      for (const chapter of chapters) {
+        entries.push({
+          kind: 'chapter',
+          id: String(chapter.id),
+          title: chapter.title,
+        });
+        for (const article of articles) {
+          if (article.chapter_id === chapter.id) {
+            entries.push({ kind: 'article', id: article.id, article });
+            assignedArticles.add(article.id);
+          }
+        }
       }
     }
-    list.push({ kind: 'sources', section: sectionLabel('sources') });
-    if (details.conflicts.length > 0) list.push({ kind: 'conflicts', section: sectionLabel('conflicts') });
-    if (details.versions.length > 1) list.push({ kind: 'versions', section: sectionLabel('versions') });
-    list.push({ kind: 'colophon', section: sectionLabel('colophon') });
+
+    const uncategorized = chapterListError
+      ? articles
+      : articles.filter((article) => !assignedArticles.has(article.id));
+    if (!chapterListError && uncategorized.length > 0) {
+      entries.push({ kind: 'chapter', id: 'uncategorized', title: t('shelfNoChapter') });
+    }
+    for (const article of uncategorized) {
+      entries.push({ kind: 'article', id: article.id, article });
+    }
+    return entries;
+  }, [articles, chapterListError, chapters, t]);
+
+  const indexPageEntries = useMemo(() => {
+    const chunks: VolumeIndexEntry[][] = [];
+    for (let start = 0; start < indexEntries.length; start += 6) {
+      chunks.push(indexEntries.slice(start, start + 6));
+    }
+    return chunks.length > 0 ? chunks : [[]];
+  }, [indexEntries]);
+
+  const activeDetails = details?.article.id === activeArticleId ? details : null;
+
+  const pages = useMemo<KioscoPage[]>(() => {
+    const list: KioscoPage[] = indexPageEntries.map((entries) => ({
+        kind: 'index' as const,
+        section: t('kioscoIndex'),
+        indexEntries: entries,
+      }));
+
+    if (!activeArticleId) return list;
+    if (isLoadingArticle) {
+      list.push({ kind: 'status', section: t('magazineContent'), status: 'loading' });
+      return list;
+    }
+    if (articleError) {
+      list.push({ kind: 'status', section: t('magazineContent'), status: 'error', error: articleError });
+      return list;
+    }
+    if (!activeDetails) return list;
+
+    const blocks = parseStructuredBlocks(
+      activeDetails.article.structured_content_json,
+      recipeLabels,
+      { textFallback: true },
+    ).blocks;
+    const contentPages = paginateBlocks(blocks);
+    const safeContentPages = contentPages.length > 0 ? contentPages : [[]];
+    safeContentPages.forEach((group, groupIndex) => {
+      list.push({
+        kind: 'content',
+        section: activeDetails.article.title,
+        blocks: group,
+        first: groupIndex === 0,
+      });
+    });
+    if (activeDetails.evidence.length > 0) {
+      for (let start = 0; start < activeDetails.evidence.length; start += 2) {
+        list.push({
+          kind: 'evidence',
+          section: t('magazineEvidence'),
+          evidenceStart: start,
+        });
+      }
+    }
+    list.push({ kind: 'sources', section: t('magazineSources') });
+    if (activeDetails.conflicts.length > 0) {
+      list.push({ kind: 'conflicts', section: t('magazineConflicts') });
+    }
+    if (activeDetails.versions.length > 1) {
+      list.push({ kind: 'versions', section: t('magazineVersions') });
+    }
+    list.push({ kind: 'colophon', section: t('kioscoColophon') });
     return list;
-  }, [details, recipeLabels, t]);
+  }, [
+    activeArticleId,
+    activeDetails,
+    articleError,
+    indexPageEntries,
+    isLoadingArticle,
+    recipeLabels,
+    t,
+  ]);
   pagesRef.current = pages;
 
   const step = flipStep(single);
   const maxIndex = flipMax(pages.length, single);
 
-  /* Salto inicial a la evidencia enlazada. */
-  useEffect(() => {
-    if (!details || !initialTarget || pages.length === 0) return;
-    const evIndex = details.evidence.findIndex((item) => item.id === initialTarget.evidenceId);
-    if (evIndex < 0) return;
-    const contentCount = pages.filter((page) => page.kind === 'content').length;
-    const pageIndex = 2 + contentCount + Math.floor(evIndex / 2);
-    if (pageIndex < pages.length) {
-      const target = single ? pageIndex : Math.min(pageIndex - (pageIndex % 2 === 0 ? 0 : 1), Math.max(0, pages.length - 2));
-      setIdx(clamp(target, 0, Math.max(0, pages.length - 1)));
-    }
-  }, [details, initialTarget, pages, single]);
+  const openIndexPageForArticle = useCallback((articleId: string | null) => {
+    if (!articleId) return 0;
+    const pageIndex = pagesRef.current.findIndex(
+      (page) => page.kind === 'index'
+        && page.indexEntries?.some((entry) => entry.kind === 'article' && entry.id === articleId),
+    );
+    return pageIndex >= 0 ? pageIndex : 0;
+  }, []);
 
-  /* Responsive simple/doble. */
+  const selectArticle = useCallback((article: MagazineArticleRecord, pageIndex: number) => {
+    setActiveArticleId(article.id);
+    setDetails(null);
+    setArticleError(null);
+    setIsLoadingArticle(true);
+    setIdx(pageIndex);
+  }, []);
+
+  const retryArticle = useCallback(() => {
+    setArticleRetry((value) => value + 1);
+  }, []);
+
+  const backToIndex = useCallback(() => {
+    setInspectorEvidence(null);
+    const articleId = activeArticleIdRef.current;
+    setIdx(openIndexPageForArticle(articleId));
+    if (articleId) {
+      window.requestAnimationFrame(() => indexArticleButtonRefs.current.get(articleId)?.focus());
+    }
+  }, [openIndexPageForArticle]);
+
   useEffect(() => {
-    const query = () => setSingle(window.innerWidth < 760);
-    query();
+    if (!activeArticleId) return;
+    if (isLoadingArticle) {
+      const statusPageIndex = pages.findIndex((page) => page.kind === 'status');
+      if (statusPageIndex >= 0) setIdx(statusPageIndex);
+      return;
+    }
+    if (activeDetails) {
+      const contentPageIndex = pages.findIndex((page) => page.kind === 'content');
+      if (contentPageIndex >= 0) setIdx(contentPageIndex);
+      requestAnimationFrame(() => articleHeadingRef.current?.focus());
+    }
+  }, [activeArticleId, activeDetails, isLoadingArticle, pages]);
+
+  const articleHeadingRef = useRef<HTMLHeadingElement | null>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
+
+  /* Responsive page spread; keep the index visible after a narrow resize. */
+  useEffect(() => {
+    const updateLayout = () => {
+      const nextSingle = window.innerWidth < 760;
+      setSingle(nextSingle);
+      setIdx((current) => clamp(current, 0, flipMax(pagesRef.current.length, nextSingle)));
+    };
+    updateLayout();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const onResize = () => {
-      query();
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        setIdx((current) => clamp(current, 0, flipMax(pagesRef.current.length, window.innerWidth < 760)));
-      }, 170);
+      timer = setTimeout(updateLayout, 170);
     };
     window.addEventListener('resize', onResize);
     return () => {
@@ -322,35 +514,43 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
     };
   }, []);
 
-  /* Etiqueta viva desde updated_at real. */
+  /* Open the physical cover once the volume index has loaded. */
+  const didOpenRef = useRef(false);
   useEffect(() => {
-    if (!details) return;
-    const update = () => setLiveLabel(`${t('kioscoUpdated')} ${timeAgo(details.article.updated_at, locale)}`);
-    update();
-    const timer = window.setInterval(update, 15000);
-    return () => window.clearInterval(timer);
-  }, [details, locale, t]);
-
-  /* Animación de apertura: la portada gira y revela la página 0. */
-  useEffect(() => {
-    if (!details || pages.length === 0) return;
+    if (isLoadingVolume || didOpenRef.current) return;
+    didOpenRef.current = true;
+    const firstVisiblePage = 0;
     setBusy(true);
-    setIdx(0);
+    setIdx(firstVisiblePage);
     const openTimer = window.setTimeout(() => {
-      setLeaf({ front: -1, back: 0 });
+      setLeaf({ front: -1, back: firstVisiblePage });
       setTurning(true);
       requestAnimationFrame(() => {
         if (leafRef.current) leafRef.current.style.transform = 'rotateY(-180deg)';
       });
-      window.setTimeout(() => {
+      openFinishTimerRef.current = window.setTimeout(() => {
+        openFinishTimerRef.current = null;
         setLeaf(null);
         setTurning(false);
         setBusy(false);
       }, flipMs + 40);
     }, 60);
-    return () => window.clearTimeout(openTimer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [details !== null, pages.length]);
+    return () => {
+      window.clearTimeout(openTimer);
+      if (openFinishTimerRef.current !== null) {
+        window.clearTimeout(openFinishTimerRef.current);
+        openFinishTimerRef.current = null;
+      }
+    };
+  }, [flipMs, isLoadingVolume]);
+
+  useEffect(() => {
+    if (!activeDetails) return;
+    const update = () => setLiveLabel(t('kioscoUpdated') + ' ' + timeAgo(activeDetails.article.updated_at, locale));
+    update();
+    const timer = window.setInterval(update, 15000);
+    return () => window.clearInterval(timer);
+  }, [activeDetails, locale, t]);
 
   const finalizeFlip = useCallback((target: number) => {
     window.setTimeout(() => {
@@ -369,12 +569,12 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
     if (busyRef.current || closingRef.current || total === 0) return;
     const target = current + direction * flipStep(isSingle);
     if (target < 0 || target > flipMax(total, isSingle)) {
-      // Rebote de borde sin remontar el spread.
       setBumpKey(1);
       if (bumpTimerRef.current) clearTimeout(bumpTimerRef.current);
       bumpTimerRef.current = setTimeout(() => setBumpKey(0), 420);
       return;
     }
+
     setBusy(true);
     setTurning(true);
     const leafNode = leafRef.current;
@@ -405,7 +605,12 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
   }, [finalizeFlip]);
 
   const closeReader = useCallback(() => {
-    if (busyRef.current || closingRef.current) return;
+    if (closingRef.current) return;
+    if (busyRef.current) {
+      closingRef.current = true;
+      onBackRef.current();
+      return;
+    }
     closingRef.current = true;
     setBusy(true);
     setTurning(true);
@@ -423,9 +628,9 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
     window.setTimeout(() => onBackRef.current(), flipMs + 90);
   }, [flipMs]);
 
-  /* Teclado: flechas + Escape. */
   useEffect(() => {
-    const handler = (event: KeyboardEvent) => {      if (inspectorEvidence) {
+    const handler = (event: KeyboardEvent) => {
+      if (inspectorEvidence) {
         if (event.key === 'Escape') setInspectorEvidence(null);
         return;
       }
@@ -443,29 +648,32 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
       window.removeEventListener('keydown', handler);
       if (bumpTimerRef.current) clearTimeout(bumpTimerRef.current);
     };
-  }, [flip, closeReader, inspectorEvidence]);
+  }, [closeReader, flip, inspectorEvidence]);
 
   const renderPage = useCallback((pageIndex: number): React.ReactNode => {
-    const page = pagesRef.current[pageIndex];
-    if (!details) return null;
-    if (pageIndex === -1 || page?.kind === 'cover') {
+    if (pageIndex === -1) {
+      const category = volume.category.toLowerCase();
+      const categoryKey = Object.prototype.hasOwnProperty.call(MAGAZINE_CATEGORY_KEYS, category)
+        ? MAGAZINE_CATEGORY_KEYS[category]
+        : undefined;
       return (
         <div className={styles.coverface}>
-          <div className={styles.cvBg} style={{ background: coverBg }} />
+          <div className={styles.cvBg} style={{ background: volume.coverGradient || coverBg }} />
           <div className={styles.cvArt} style={{ opacity: 0.62 }} dangerouslySetInnerHTML={{ __html: coverSvg }} />
           <div className={styles.cvVeil} />
           <div className={styles.cvTop}>
-            <span className={styles.cvLive}><i />{t('kioscoCoverLive')}</span>
             <span className={styles.cvCode}>{volume.volumeNumber}</span>
+            <span className={styles.cvCode}>{presentEditorialState(volume.editorialState, locale)}</span>
           </div>
           <div className={styles.cvMast}>
-            <b>{details.article.title}</b>
-            <span>{presentArticleType(details.article.article_type, locale)}</span>
+            <b>{volume.title}</b>
+            <span>{volume.subtitle}</span>
           </div>
+          {volume.description && <p className={styles.cvDescription}>{volume.description}</p>}
           <div className={styles.cvBot}>
             <div className={styles.cvRow}>
-              <span>{volume.title}</span>
-              <span>v{details.article.active_version}</span>
+              <span>{t('shelfCategory')} · {categoryKey ? t(categoryKey) : volume.category.replace(/[-_]+/g, ' ')}</span>
+              <span>{t('shelfArticleMany', { count: volume.articleCount })}</span>
             </div>
             <div className={styles.bar}><i style={{ width: '100%' }} /></div>
           </div>
@@ -473,42 +681,84 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         </div>
       );
     }
+
+    const page = pagesRef.current[pageIndex];
     if (!page) return null;
+    const active = activeDetails;
     const shell = (inner: React.ReactNode) => (
       <div className={styles.pgIn}>
         <header className={styles.pf}>{volume.title} · {volume.volumeNumber}</header>
-        <div className={`${styles.pb}${page.first ? ` ${styles.dropcap}` : ''}`}>{inner}</div>
+        <div className={styles.pb + (page.first ? ' ' + styles.dropcap : '')}>{inner}</div>
         <footer className={styles.pft}>
           <span>{page.section}</span>
           <span className={styles.num}>{pad(pageIndex + 1)}</span>
         </footer>
       </div>
     );
+
     switch (page.kind) {
-      case 'index': {
-        const contentCount = pagesRef.current.filter((p) => p.kind === 'content').length;
-        const rows: Array<[string, string, string]> = [
-          [t('magazineContent'), details.article.title, t('kioscoPages', { count: contentCount })],
-          [t('magazineEvidence'), t('kioscoTraceablePieces', { count: details.evidence.length }), `${details.evidence.length}`],
-          [t('magazineSources'), t('kioscoLinked', { count: details.sources.length }), `${details.sources.length}`],
-          [t('magazineConflicts'), details.conflicts.length > 0 ? t('kioscoToResolveCount', { count: details.conflicts.length }) : t('kioscoNone'), `${details.conflicts.length}`],
-          [t('magazineVersions'), t('kioscoActiveVersion', { version: details.article.active_version }), `${details.versions.length}`],
-        ];
+      case 'index':
         return shell(
           <>
             <p className={styles.ki}>{t('kioscoIndex')}</p>
-            <h2 className={styles.hl}>{t('kioscoInArticle')}</h2>
-            <div className={styles.toc}>
-              {rows.map(([label, text, count]) => (
-                <div key={label}><b>{count}</b><i>{text}</i><em>{label}</em></div>
-              ))}
-            </div>
+            {isLoadingVolume ? (
+              <p className={styles.body} role="status">{t('kioscoLoadingVolume')}</p>
+            ) : articleListError ? (
+              <div className={styles.readerStatus} role="alert">
+                <p>{t('magazineArticleListLoadError')}</p>
+                <button type="button" onClick={() => void loadVolumeContents()}>{t('kioscoRetry')}</button>
+              </div>
+            ) : (
+              <>
+                {chapterListError && (
+                  <p className={styles.readerNote} role="alert">{t('magazineChapterLoadError')}</p>
+                )}
+                {isPreview ? (
+                  <p className={styles.body}>{t('shelfPreviewArticles')}</p>
+                ) : articles.length === 0 ? (
+                  <p className={styles.body}>{t('shelfEmptyArticles')}</p>
+                ) : (
+                  <div className={styles.indexList}>
+                    {(page.indexEntries ?? []).map((entry) => {
+                      if (entry.kind === 'chapter') {
+                        return <h3 key={'chapter-' + entry.id} className={styles.indexChapter}>{entry.title}</h3>;
+                      }
+                      return (
+                        <button
+                          key={entry.article.id}
+                          ref={(node) => {
+                            if (node) indexArticleButtonRefs.current.set(entry.article.id, node);
+                            else indexArticleButtonRefs.current.delete(entry.article.id);
+                          }}
+                          type="button"
+                          className={styles.indexArticle}
+                          onClick={() => selectArticle(entry.article, pageIndex)}
+                        >
+                          <span className={styles.indexArticleTitle}>{entry.article.title}</span>
+                          <span className={styles.indexArticleMeta}>
+                            {presentArticleType(entry.article.article_type, locale)}
+                            {' · '}
+                            {presentEditorialState(entry.article.editorial_state, locale)}
+                            {' · v'}
+                            {entry.article.active_version}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
           </>,
         );
-      }
       case 'content':
         return shell(
           <>
+            {page.first && active && (
+              <h2 ref={articleHeadingRef} tabIndex={-1} className={styles.hl + ' ' + styles.hlSm}>
+                {active.article.title}
+              </h2>
+            )}
             {(page.blocks ?? []).map((block, index) => (
               <BlockView key={index} block={block} />
             ))}
@@ -517,19 +767,33 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
             )}
           </>,
         );
+      case 'status':
+        return shell(
+          <div className={styles.readerStatus} role={page.status === 'error' ? 'alert' : 'status'}>
+            {page.status === 'loading' ? (
+              <p>{t('kioscoLoadingArticle')}</p>
+            ) : (
+              <>
+                <p>{page.error || t('magazineLoadError')}</p>
+                <button type="button" onClick={retryArticle}>{t('kioscoRetry')}</button>
+              </>
+            )}
+          </div>,
+        );
       case 'evidence': {
-        const items = details.evidence.slice(page.evidenceStart ?? 0, (page.evidenceStart ?? 0) + 2);
+        if (!active) return shell(<p className={styles.body}>{t('kioscoEmptyPage')}</p>);
+        const items = active.evidence.slice(page.evidenceStart ?? 0, (page.evidenceStart ?? 0) + 2);
         return shell(
           <>
             <p className={styles.ki}>{t('kioscoTraceable')}</p>
-            <h2 className={`${styles.hl} ${styles.hlMd}`}>{t('kioscoSustains')}</h2>
+            <h2 className={styles.hl + ' ' + styles.hlMd}>{t('kioscoSustains')}</h2>
             {items.map((item) => (
               <div key={item.id} className={styles.evCard}>
                 {item.transcript_text && <q>{item.transcript_text}</q>}
                 {item.extracted_fact && <p>{item.extracted_fact}</p>}
                 <div className={styles.evMeta}>
                   <span>{presentEvidenceKind(item.evidence_kind, locale)}</span>
-                  {(item.timestamp_start !== null && item.timestamp_start !== undefined) && (
+                  {item.timestamp_start !== null && item.timestamp_start !== undefined && (
                     <span>{formatTimestamp(item.timestamp_start)}</span>
                   )}
                   <span>{Math.round(item.confidence * 100)}%</span>
@@ -546,12 +810,12 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         return shell(
           <>
             <p className={styles.ki}>{t('magazineSources')}</p>
-            <h2 className={`${styles.hl} ${styles.hlMd}`}>{t('kioscoSourceVideos')}</h2>
-            {details.sources.length === 0 ? (
+            <h2 className={styles.hl + ' ' + styles.hlMd}>{t('kioscoSourceVideos')}</h2>
+            {!active || active.sources.length === 0 ? (
               <p className={styles.body}>{t('magazineNoSources')}</p>
             ) : (
               <div className={styles.toc}>
-                {details.sources.map((source) => (
+                {active.sources.map((source) => (
                   <div key={source.id}>
                     <b>#{source.job_id}</b>
                     <i>{source.citation_label ?? source.source_role}</i>
@@ -566,9 +830,9 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         return shell(
           <>
             <p className={styles.ki}>{t('magazineConflicts')}</p>
-            <h2 className={`${styles.hl} ${styles.hlMd}`}>{t('kioscoToResolve')}</h2>
+            <h2 className={styles.hl + ' ' + styles.hlMd}>{t('kioscoToResolve')}</h2>
             <div className={styles.body}>
-              {details.conflicts.map((conflict) => (
+              {active?.conflicts.map((conflict) => (
                 <p key={conflict.id}>
                   <strong>{conflict.fact_key}:</strong> {conflict.description} ({conflict.resolution_state})
                 </p>
@@ -580,9 +844,9 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
         return shell(
           <>
             <p className={styles.ki}>{t('magazineVersions')}</p>
-            <h2 className={`${styles.hl} ${styles.hlMd}`}>{t('kioscoHistory')}</h2>
+            <h2 className={styles.hl + ' ' + styles.hlMd}>{t('kioscoHistory')}</h2>
             <div className={styles.toc}>
-              {details.versions.map((version) => (
+              {active?.versions.map((version) => (
                 <div key={version.id}>
                   <b>v{version.version_number}</b>
                   <i>{version.change_summary ?? version.title}</i>
@@ -603,7 +867,8 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
             </div>
             <div className={styles.rule} />
             <p className={styles.credit} style={{ textAlign: 'center' }}>
-              {volume.volumeNumber} · v{details.article.active_version} · {presentEditorialState(details.article.editorial_state, locale)}
+              {volume.volumeNumber}
+              {active ? ' · v' + active.article.active_version + ' · ' + presentEditorialState(active.article.editorial_state, locale) : ''}
             </p>
             <figure style={{ margin: '1em 0 0', height: '7em', overflow: 'hidden', borderRadius: 2 }} aria-hidden="true">
               <span dangerouslySetInnerHTML={{ __html: colophonSvg }} style={{ display: 'block', height: '100%' }} />
@@ -611,58 +876,69 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
           </>,
         );
     }
-  }, [details, volume, coverSvg, colophonSvg, coverBg, t, locale]);
+  }, [
+    activeDetails,
+    articles.length,
+    articleListError,
+    chapterListError,
+    colophonSvg,
+    coverBg,
+    coverSvg,
+    isLoadingVolume,
+    isPreview,
+    loadVolumeContents,
+    locale,
+    retryArticle,
+    selectArticle,
+    t,
+    volume,
+  ]);
 
   const total = pages.length;
   const counter = total === 0
     ? '—'
     : single
       ? pad(idx + 1)
-      : `${pad(idx + 1)}–${pad(Math.min(idx + 2, total))}`;
+      : pad(idx + 1) + '–' + pad(Math.min(idx + 2, total));
   const progressPct = total <= 1 ? 100 : Math.round(((idx + step) / total) * 100);
-
-  if (isLoading) {
-    return (
-      <div className={styles.reader} aria-label={t('kioscoLoadingArticle')}>
-        <div className={styles.stage}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 620, width: '100%', margin: '0 auto' }}>
-            <div style={{ height: 36, borderRadius: 10 }} className={styles.shimmer} />
-            <div style={{ height: 402, borderRadius: 8 }} className={styles.shimmer} />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (loadError || !details) {
-    return (
-      <div className={styles.reader}>
-        <div className={styles.stage}>
-          <div className={styles.topbar}>
-            <b>{volume.title}</b>
-            <span className={styles.sp} />
-            <button type="button" className={styles.xbtn} onClick={onBack} aria-label={t('kioscoClose')}>×</button>
-          </div>
-          <p style={{ color: '#a49cb0', fontSize: 13, textAlign: 'center' }}>
-            {t('magazineOpenError')} {loadError ?? t('magazineNoData')}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className={styles.reader} role="dialog" aria-modal="false" aria-label={t('kioscoReaderTitle', { title: details.article.title })}>
+    <section className={styles.reader} aria-label={t('kioscoReaderTitle', { title: volume.title })}>
       <div className={styles.stage}>
         <div className={styles.topbar}>
-          <b>{details.article.title}</b>
-          <span className={styles.sub}>{volume.volumeNumber} · {presentArticleType(details.article.article_type, locale)} · v{details.article.active_version} · {presentEditorialState(details.article.editorial_state, locale)}</span>
           <span className={styles.sp} />
-          <span className={styles.livetag}><i />{liveLabel || t('kioscoUpdatedEmpty')}</span>
+          {isPreview && <span className={styles.previewTag}>{t('shelfPreviewBadge')}</span>}
+          {liveLabel && <span className={styles.livetag}><i />{liveLabel}</span>}
           <span className={styles.rctl}>
-            <button type="button" onClick={() => setFontScale((v) => clamp(Math.round((v - 0.08) * 100) / 100, 0.85, 1.5))} title={t('kioscoDecreaseText')} aria-label={t('kioscoDecreaseText')}>A−</button>
-            <button type="button" onClick={() => setFontScale((v) => clamp(Math.round((v + 0.08) * 100) / 100, 0.85, 1.5))} title={t('kioscoIncreaseText')} aria-label={t('kioscoIncreaseText')}>A+</button>
-            <button type="button" className={styles.xbtn} onClick={closeReader} aria-label={t('kioscoCloseReader')}>×</button>
+            {activeArticleId && (
+              <button type="button" className={styles.indexBtn} onClick={backToIndex} aria-label={t('kioscoBackToIndex')}>
+                {t('kioscoIndex')}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setFontScale((value) => clamp(Math.round((value - 0.08) * 100) / 100, 0.85, 1.5))}
+              title={t('kioscoDecreaseText')}
+              aria-label={t('kioscoDecreaseText')}
+            >
+              A−
+            </button>
+            <button
+              type="button"
+              onClick={() => setFontScale((value) => clamp(Math.round((value + 0.08) * 100) / 100, 0.85, 1.5))}
+              title={t('kioscoIncreaseText')}
+              aria-label={t('kioscoIncreaseText')}
+            >
+              A+
+            </button>
+            <button
+              ref={closeButtonRef}
+              type="button"
+              className={styles.xbtn}
+              onClick={closeReader}
+              aria-label={t('kioscoCloseReader')}
+            >
+              ×
+            </button>
           </span>
         </div>
 
@@ -680,30 +956,30 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
           }}
         >
           <div
-            className={`${styles.spread}${single ? ` ${styles.single}` : ''}${bumpKey > 0 ? ` ${styles.bump}` : ''}`}
-            style={{ '--kiosco-u': `${(16 * fontScale).toFixed(2)}px` } as React.CSSProperties}
+            className={styles.spread + (single ? ' ' + styles.single : '') + (bumpKey > 0 ? ' ' + styles.bump : '')}
+            style={{ '--kiosco-u': (16 * fontScale).toFixed(2) + 'px' } as React.CSSProperties}
           >
-            <div className={`${styles.pg} ${styles.pgLeft}`}>
+            <div className={styles.pg + ' ' + styles.pgLeft}>
               {!single && (
-                <div key={`l-${idx}`} className={styles.pageSwap} style={{ position: 'absolute', inset: 0 }}>
+                <div key={'l-' + idx} className={styles.pageSwap} style={{ position: 'absolute', inset: 0 }}>
                   {renderPage(idx)}
                 </div>
               )}
               <span className={styles.pgSpine} />
             </div>
-            <div className={`${styles.pg} ${styles.pgRight}`}>
-              <div key={`r-${single ? idx : idx + 1}`} className={styles.pageSwap} style={{ position: 'absolute', inset: 0 }}>
+            <div className={styles.pg + ' ' + styles.pgRight}>
+              <div key={'r-' + (single ? idx : idx + 1)} className={styles.pageSwap} style={{ position: 'absolute', inset: 0 }}>
                 {renderPage(single ? idx : idx + 1)}
               </div>
               <span className={styles.pgSpine} />
             </div>
             {leaf && (
-              <div ref={leafRef} className={`${styles.leaf} ${styles.on}${turning ? ` ${styles.turning}` : ''}`} aria-hidden="true">
-                <div className={`${styles.pg} ${styles.leafFront}`}>
+              <div ref={leafRef} className={styles.leaf + ' ' + styles.on + (turning ? ' ' + styles.turning : '')} aria-hidden="true">
+                <div className={styles.pg + ' ' + styles.leafFront}>
                   {renderPage(leaf.front)}
                   <div className={styles.shade} />
                 </div>
-                <div className={`${styles.pg} ${styles.leafBack}`}>
+                <div className={styles.pg + ' ' + styles.leafBack}>
                   {renderPage(leaf.back)}
                   <div className={styles.shade} />
                 </div>
@@ -716,19 +992,21 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
           <button type="button" onClick={() => flip(-1)} disabled={idx <= 0} aria-label={t('kioscoPrevPage')}>
             <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
           </button>
-          <span className={styles.ctr}><b>{counter}</b> / <span>{pad(Math.max(1, total))}</span></span>
+          <span className={styles.ctr} aria-live="polite">
+            <b>{counter}</b> / <span>{pad(Math.max(1, total))}</span>
+          </span>
           <button type="button" onClick={() => flip(1)} disabled={idx >= maxIndex} aria-label={t('kioscoNextPage')}>
             <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" /></svg>
           </button>
         </div>
         <div className={styles.progress} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPct} aria-label={t('kioscoReadingProgress')}>
-          <i style={{ width: `${progressPct}%` }} />
+          <i style={{ width: progressPct + '%' }} />
         </div>
       </div>
 
-      {inspectorEvidence && (
+      {inspectorEvidence && activeDetails && (
         <div
-          style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(6,5,10,.9)', overflowY: 'auto', padding: 24 }}
+          className={styles.inspectorOverlay}
           role="dialog"
           aria-modal="true"
           aria-label={t('kioscoEvidenceSource')}
@@ -736,16 +1014,16 @@ export function KioscoReader({ volume, articleId, initialTarget, onBack }: Kiosc
             if (event.target === event.currentTarget) setInspectorEvidence(null);
           }}
         >
-          <div style={{ maxWidth: 720, margin: '0 auto' }}>
+          <div className={styles.inspectorContent}>
             <EvidenceSourceInspector
-              articleId={details.article.id}
+              articleId={activeDetails.article.id}
               evidence={inspectorEvidence}
-              sources={details.sources}
+              sources={activeDetails.sources}
               onClose={() => setInspectorEvidence(null)}
             />
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }

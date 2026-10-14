@@ -3451,7 +3451,7 @@ pub fn get_playlist_content_views(
             author_id: row.get(4)?,
             author_handle: row.get(5)?,
             title: row.get(6)?,
-            published_at: row.get(7)?,
+            published_at: read_content_publication_date(row, 7)?,
             discovered_at: row.get(8)?,
             updated_at: row.get(9)?,
             availability: row.get(10)?,
@@ -3476,31 +3476,38 @@ pub fn get_channel_content_views(
     limit: i64,
 ) -> Result<Vec<ContentViewRecord>> {
     let mut statement = conn.prepare(
-        "SELECT c.id, c.platform, c.platform_content_id, c.canonical_url,
+        "SELECT DISTINCT c.id, c.platform, c.platform_content_id, c.canonical_url,
                 c.author_id, c.author_handle, c.title, c.published_at,
                 c.discovered_at, c.updated_at, c.availability, c.job_id
          FROM content_items c
          INNER JOIN content_relationships r ON c.id = r.content_id
-         WHERE r.profile_source_id = ?1 AND r.channel_kind = ?2 AND r.active = 1
+         WHERE r.profile_source_id = ?1 AND (?2 = 'all' OR r.channel_kind = ?2) AND r.active = 1
          ORDER BY c.published_at DESC, c.discovered_at DESC
          LIMIT ?3",
     )?;
-    let rows = statement.query_map(params![profile_source_id, channel_kind, limit], |row| {
-        Ok(ContentItemRecord {
-            id: row.get(0)?,
-            platform: row.get(1)?,
-            platform_content_id: row.get(2)?,
-            canonical_url: row.get(3)?,
-            author_id: row.get(4)?,
-            author_handle: row.get(5)?,
-            title: row.get(6)?,
-            published_at: row.get(7)?,
-            discovered_at: row.get(8)?,
-            updated_at: row.get(9)?,
-            availability: row.get(10)?,
-            job_id: row.get(11)?,
-        })
-    })?;
+    let rows = statement.query_map(
+        params![
+            profile_source_id,
+            channel_kind,
+            if limit == 0 { -1 } else { limit }
+        ],
+        |row| {
+            Ok(ContentItemRecord {
+                id: row.get(0)?,
+                platform: row.get(1)?,
+                platform_content_id: row.get(2)?,
+                canonical_url: row.get(3)?,
+                author_id: row.get(4)?,
+                author_handle: row.get(5)?,
+                title: row.get(6)?,
+                published_at: read_content_publication_date(row, 7)?,
+                discovered_at: row.get(8)?,
+                updated_at: row.get(9)?,
+                availability: row.get(10)?,
+                job_id: row.get(11)?,
+            })
+        },
+    )?;
 
     rows.map(|row| content_view_for_item(conn, row?)).collect()
 }
@@ -4456,9 +4463,9 @@ pub fn register_profile_source(
             profile_url,
             username,
             active,
-            if active { "ready" } else { "paused" },
+            if active { "pending" } else { "paused" },
             watch_config_json,
-            DEFAULT_SOURCE_RULES,
+            r#"{"ignoreDuplicates":true,"autoEnqueue":false}"#,
         ],
     )?;
     Ok((conn.last_insert_rowid(), false))
@@ -4476,9 +4483,10 @@ pub fn update_profile_source_settings_with_rules(
             "UPDATE collection_sources SET
                 watch_config_json = ?1,
                 active = ?2,
-                status = CASE WHEN ?2 = 1 THEN 'ready' ELSE 'paused' END,
+                status = CASE WHEN ?2 = 0 THEN 'paused'
+                    WHEN last_sync_at IS NULL THEN 'pending'
+                    WHEN status = 'paused' THEN 'active' ELSE status END,
                 rules_json = ?3,
-                last_error = NULL,
                 updated_at = CURRENT_TIMESTAMP
              WHERE id = ?4 AND platform = 'tiktok' AND source_type = 'profile'",
             params![watch_config_json, active, rules, source_id],
@@ -4488,8 +4496,9 @@ pub fn update_profile_source_settings_with_rules(
             "UPDATE collection_sources SET
                 watch_config_json = ?1,
                 active = ?2,
-                status = CASE WHEN ?2 = 1 THEN 'ready' ELSE 'paused' END,
-                last_error = NULL,
+                status = CASE WHEN ?2 = 0 THEN 'paused'
+                    WHEN last_sync_at IS NULL THEN 'pending'
+                    WHEN status = 'paused' THEN 'active' ELSE status END,
                 updated_at = CURRENT_TIMESTAMP
              WHERE id = ?3 AND platform = 'tiktok' AND source_type = 'profile'",
             params![watch_config_json, active, source_id],
@@ -4601,7 +4610,8 @@ pub fn get_collection_sources(conn: &Connection) -> Result<Vec<CollectionSourceR
 pub fn get_collection_sources_to_sync(conn: &Connection) -> Result<Vec<CollectionSourceRecord>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {} FROM collection_sources
-         WHERE active = 1 AND coalesce(status, 'active') IN ('active', 'checking')
+         WHERE active = 1 AND coalesce(status, 'active') IN ('active', 'partial', 'needs_auth', 'error', 'checking')
+           AND (source_type != 'profile' OR last_sync_at IS NOT NULL)
            AND (next_sync_at IS NULL OR next_sync_at <= datetime('now'))
          ORDER BY id ASC",
         COLLECTION_SOURCE_COLUMNS
@@ -4620,6 +4630,7 @@ pub fn set_collection_source_active(conn: &Connection, source_id: i64, active: b
             active = ?1,
             status = CASE
                 WHEN ?1 = 0 THEN 'paused'
+                WHEN source_type = 'profile' AND last_sync_at IS NULL THEN 'pending'
                 WHEN status IN ('needs_auth', 'error') THEN 'checking'
                 ELSE 'active'
             END,
@@ -5388,7 +5399,7 @@ pub fn ensure_profile_channels(
     for (kind, enabled) in channels {
         conn.execute(
             "INSERT INTO profile_channels (profile_source_id, kind, enabled, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'idle', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             VALUES (?1, ?2, ?3, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
              ON CONFLICT(profile_source_id, kind) DO UPDATE SET
                  enabled = excluded.enabled,
                  updated_at = CURRENT_TIMESTAMP",
@@ -5435,6 +5446,85 @@ pub fn get_profile_channels(
         records.push(row?);
     }
     Ok(records)
+}
+
+/// Counts durable, distinct relationships; repeated scans never inflate inventory.
+pub fn count_profile_content(conn: &Connection, source_id: i64, kind: &str) -> Result<i64> {
+    conn.query_row(
+        "SELECT COUNT(DISTINCT content_id) FROM content_relationships
+         WHERE profile_source_id = ?1 AND (?2 = 'all' OR channel_kind = ?2) AND active = 1",
+        params![source_id, kind],
+        |row| row.get(0),
+    )
+}
+
+pub fn is_profile_job(conn: &Connection, job_id: i64) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM content_items c
+         JOIN content_relationships r ON r.content_id = c.id
+         JOIN collection_sources s ON s.id = r.profile_source_id
+         WHERE c.job_id = ?1 AND r.active = 1 AND s.source_type = 'profile')",
+        params![job_id],
+        |row| row.get(0),
+    )
+}
+
+pub fn get_pending_profile_jobs(conn: &Connection) -> Result<Vec<(i64, String)>> {
+    let mut statement = conn.prepare(
+        "SELECT DISTINCT j.id, j.url FROM jobs j
+         JOIN content_items c ON c.job_id = j.id
+         JOIN content_relationships r ON r.content_id = c.id
+         JOIN collection_sources s ON s.id = r.profile_source_id
+         JOIN profile_channels ch ON ch.profile_source_id = s.id AND ch.kind = r.channel_kind
+         WHERE j.status = 'queued' AND r.active = 1 AND s.active = 1 AND ch.enabled = 1
+           AND s.source_type = 'profile' AND s.status != 'checking'
+           AND coalesce(json_extract(s.rules_json, '$.autoEnqueue'), json_extract(s.rules_json, '$.auto_enqueue'), 0) = 1
+         ORDER BY j.id ASC",
+    )?;
+    let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    rows.collect()
+}
+
+pub fn configure_profile_discovery(
+    conn: &Connection,
+    source_id: i64,
+    auto_enqueue: bool,
+    history_limit: i64,
+    browser: Option<&str>,
+) -> Result<()> {
+    let rows = conn.execute(
+        "UPDATE collection_sources SET rules_json = ?2, history_limit = ?3,
+            browser = ?4, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+        params![
+            source_id,
+            serde_json::json!({"autoEnqueue": auto_enqueue, "ignoreDuplicates": true}).to_string(),
+            history_limit,
+            browser
+        ],
+    )?;
+    require_rows_changed(rows)
+}
+
+pub fn finish_profile_discovery(
+    conn: &Connection,
+    source_id: i64,
+    status: &str,
+    summary_json: &str,
+    error: Option<&str>,
+) -> Result<()> {
+    let count = count_profile_content(conn, source_id, "all")?;
+    let rows = conn.execute(
+        "UPDATE collection_sources SET
+            status = CASE WHEN active = 0 THEN 'paused' ELSE ?2 END,
+            last_sync_at = datetime('now'), last_synced_at = datetime('now'),
+            last_success_at = CASE WHEN ?2 IN ('active', 'partial') THEN datetime('now') ELSE last_success_at END,
+            last_sync_summary_json = ?3, last_error = ?4, discovered_count = ?5,
+            consecutive_failures = CASE WHEN ?4 IS NULL THEN 0 ELSE consecutive_failures + 1 END,
+            next_sync_at = datetime('now', '+' || interval_minutes || ' minutes'),
+            updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+        params![source_id, status, summary_json, error, count],
+    )?;
+    require_rows_changed(rows)
 }
 
 pub fn update_profile_channel_status(
@@ -5495,6 +5585,25 @@ pub fn update_profile_channel_checkpoint(
     Ok(())
 }
 
+fn normalize_content_publication_date(value: &str) -> String {
+    chrono::NaiveDate::parse_from_str(value, "%Y%m%d")
+        .map(|date| date.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|_| value.to_string())
+}
+
+fn read_content_publication_date(row: &rusqlite::Row<'_>, index: usize) -> Result<Option<String>> {
+    use rusqlite::types::ValueRef;
+    match row.get_ref(index)? {
+        ValueRef::Null => Ok(None),
+        ValueRef::Integer(value) => {
+            Ok(Some(normalize_content_publication_date(&value.to_string())))
+        }
+        _ => row
+            .get::<_, Option<String>>(index)
+            .map(|value| value.map(|value| normalize_content_publication_date(&value))),
+    }
+}
+
 pub fn upsert_content_item(
     conn: &Connection,
     platform: &str,
@@ -5506,6 +5615,7 @@ pub fn upsert_content_item(
     published_at: Option<&str>,
     job_id: Option<i64>,
 ) -> Result<(i64, bool)> {
+    let published_at = published_at.map(normalize_content_publication_date);
     let existing: Option<(i64, Option<i64>)> = conn
         .query_row(
             "SELECT id, job_id FROM content_items WHERE platform = ?1 AND platform_content_id = ?2",
@@ -5618,7 +5728,7 @@ pub fn find_content_item_by_platform_id(
                 author_id: row.get(4)?,
                 author_handle: row.get(5)?,
                 title: row.get(6)?,
-                published_at: row.get(7)?,
+                published_at: read_content_publication_date(row, 7)?,
                 discovered_at: row.get(8)?,
                 updated_at: row.get(9)?,
                 availability: row.get(10)?,
@@ -5668,7 +5778,7 @@ pub fn get_channel_content_items(
             author_id: row.get(4)?,
             author_handle: row.get(5)?,
             title: row.get(6)?,
-            published_at: row.get(7)?,
+            published_at: read_content_publication_date(row, 7)?,
             discovered_at: row.get(8)?,
             updated_at: row.get(9)?,
             availability: row.get(10)?,
@@ -7291,7 +7401,7 @@ mod tests {
         .unwrap();
         assert!(!first.duplicate);
         assert_eq!(first.source.profile_url, "https://www.tiktok.com/@daniel");
-        assert_eq!(first.source.status, "ready");
+        assert_eq!(first.source.status, "pending");
 
         let duplicate = crate::application::collection_service::register_profile_source(
             &conn,
@@ -7376,7 +7486,7 @@ mod tests {
         {
             let connection = init_db().unwrap();
             let stored = get_collection_source(&connection, source_id).unwrap();
-            assert_eq!(stored.status, "ready");
+            assert_eq!(stored.status, "pending");
             assert_eq!(stored.username.as_deref(), Some("@persisted"));
             crate::application::collection_service::update_profile_source_settings(
                 &connection,
@@ -7389,7 +7499,7 @@ mod tests {
 
         let reopened = init_db().unwrap();
         let stored = get_collection_source(&reopened, source_id).unwrap();
-        assert_eq!(stored.status, "ready");
+        assert_eq!(stored.status, "pending");
         assert_eq!(
             stored.watch_config_json,
             r#"{"posts":false,"likes":false,"saved":true,"reposts":false}"#
@@ -7422,11 +7532,11 @@ mod tests {
 
         let initial = get_collection_source(&conn, registered.source.id).unwrap();
         assert_eq!(
-            initial.rules_json,
-            r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#
+            serde_json::from_str::<serde_json::Value>(&initial.rules_json).unwrap()["autoEnqueue"],
+            false
         );
 
-        // Switch to streaming mode (auto_enqueue = false)
+        // Keep references without automatically downloading (auto_enqueue = false).
         let updated = crate::application::collection_service::update_profile_source_settings(
             &conn,
             registered.source.id,
@@ -7457,6 +7567,250 @@ mod tests {
             updated_back.rules_json,
             r#"{"ignoreDuplicates":true,"autoEnqueue":true}"#
         );
+    }
+
+    #[test]
+    fn profile_registration_preserves_options_without_starting_work_or_overwriting_duplicates() {
+        use crate::application::collection_service::{
+            register_profile_source_with_options, ProfileSourceSelection,
+        };
+        let conn = memory_db();
+        let selection = ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let added = register_profile_source_with_options(
+            &conn,
+            "@creator",
+            &selection,
+            true,
+            50,
+            Some("edge"),
+        )
+        .unwrap();
+        assert_eq!(added.source.history_limit, Some(50));
+        assert_eq!(added.source.status, "pending");
+        assert_eq!(added.source.browser.as_deref(), Some("edge"));
+        assert!(get_collection_sources_to_sync(&conn).unwrap().is_empty());
+        assert!(get_all_jobs(&conn).unwrap().is_empty());
+        assert!(get_profile_channels(&conn, added.source.id)
+            .unwrap()
+            .iter()
+            .all(|channel| channel.status == "pending"));
+        let duplicate = register_profile_source_with_options(
+            &conn,
+            "https://tiktok.com/@creator/",
+            &selection,
+            false,
+            20,
+            None,
+        )
+        .unwrap();
+        assert!(duplicate.duplicate);
+        assert_eq!(duplicate.source.id, added.source.id);
+        assert_eq!(duplicate.source.history_limit, Some(50));
+        assert_eq!(duplicate.source.rules_json, added.source.rules_json);
+        assert!(
+            register_profile_source_with_options(&conn, "@other", &selection, true, 101, None)
+                .is_err()
+        );
+        assert_eq!(get_collection_sources(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn profile_discovery_respects_auto_download_and_keeps_distinct_inventory_and_real_failures() {
+        use crate::application::collection_service::{
+            register_profile_source, update_profile_source_settings, ProfileSourceSelection,
+        };
+        use crate::application::profile_discovery_service::persist_discovered_item;
+        use crate::application::queue_service::SourceScanItem;
+        let conn = memory_db();
+        let selection = ProfileSourceSelection {
+            posts: true,
+            reposts: true,
+            saved: false,
+            favorites: false,
+        };
+        let source = register_profile_source(&conn, "@creator", &selection)
+            .unwrap()
+            .source;
+        let item = SourceScanItem {
+            url: "https://www.tiktok.com/@creator/video/740011223344".into(),
+            id: None,
+            upload_date: None,
+            timestamp: None,
+            title: None,
+        };
+        for kind in ["posts", "posts", "reposts"] {
+            persist_discovered_item(&conn, source.id, kind, &item, "run-1").unwrap();
+        }
+        assert!(
+            get_all_jobs(&conn).unwrap().is_empty(),
+            "query-only discovery must not create jobs"
+        );
+        assert_eq!(count_profile_content(&conn, source.id, "posts").unwrap(), 1);
+        assert_eq!(count_profile_content(&conn, source.id, "all").unwrap(), 1);
+        let content = get_channel_content_views(&conn, source.id, "all", 100).unwrap();
+        assert_eq!(
+            content.len(),
+            1,
+            "all-channel view must deduplicate shared videos"
+        );
+        assert!(content[0].job_id.is_none());
+        conn.execute("UPDATE content_items SET published_at = 20261012", [])
+            .unwrap();
+        assert_eq!(
+            get_channel_content_views(&conn, source.id, "all", 0).unwrap()[0]
+                .job
+                .created_at,
+            "2026-10-12"
+        );
+        assert_eq!(
+            get_channel_content_views(&conn, source.id, "all", 0)
+                .unwrap()
+                .len(),
+            1
+        );
+        update_profile_source_settings(&conn, source.id, &selection, Some(true)).unwrap();
+        for kind in ["posts", "reposts"] {
+            persist_discovered_item(&conn, source.id, kind, &item, "run-2").unwrap();
+        }
+        assert_eq!(
+            get_all_jobs(&conn).unwrap().len(),
+            1,
+            "download admission must use canonical deduplication"
+        );
+        assert_eq!(get_pending_profile_jobs(&conn).unwrap().len(), 1);
+        let profile_job = get_all_jobs(&conn).unwrap()[0].id;
+        assert!(is_profile_job(&conn, profile_job).unwrap());
+        update_collection_source_scan(&conn, source.id, "{}", "checking", None, None, None)
+            .unwrap();
+        assert!(
+            get_pending_profile_jobs(&conn).unwrap().is_empty(),
+            "inventory must finish before processing starts"
+        );
+        finish_profile_discovery(&conn, source.id, "active", "{}", None).unwrap();
+        update_profile_source_settings(&conn, source.id, &selection, Some(false)).unwrap();
+        let newer = SourceScanItem {
+            url: "https://www.tiktok.com/@creator/video/740011223355".into(),
+            ..item
+        };
+        persist_discovered_item(&conn, source.id, "posts", &newer, "run-3").unwrap();
+        assert_eq!(
+            get_all_jobs(&conn).unwrap().len(),
+            1,
+            "a toggle must affect the next discovered item"
+        );
+        assert!(
+            get_pending_profile_jobs(&conn).unwrap().is_empty(),
+            "disabling automatic processing must stop unclaimed jobs"
+        );
+        finish_profile_discovery(
+            &conn,
+            source.id,
+            "needs_auth",
+            "{\"partial\":true}",
+            Some("Requiere sesión"),
+        )
+        .unwrap();
+        let failed = get_collection_source(&conn, source.id).unwrap();
+        assert_eq!(failed.status, "needs_auth");
+        assert!(
+            failed.last_success_at.is_some(),
+            "the previous successful query is preserved"
+        );
+        assert_eq!(failed.discovered_count, 2);
+        assert!(failed.last_sync_summary_json.unwrap().contains("true"));
+        update_profile_source_settings(&conn, source.id, &selection, Some(false)).unwrap();
+        assert_eq!(
+            get_collection_source(&conn, source.id)
+                .unwrap()
+                .last_error
+                .as_deref(),
+            Some("Requiere sesión")
+        );
+        force_collection_source_due(&conn, source.id).unwrap();
+        assert_eq!(
+            get_collection_sources_to_sync(&conn).unwrap().len(),
+            1,
+            "completed attempts may retry after their timer"
+        );
+        set_collection_source_active(&conn, source.id, false).unwrap();
+        update_profile_source_settings(&conn, source.id, &selection, Some(true)).unwrap();
+        assert!(
+            !get_collection_source(&conn, source.id).unwrap().active,
+            "editing a paused profile must not resume monitoring"
+        );
+        assert!(get_collection_sources_to_sync(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires an authorized live scan file and an explicitly isolated data directory"]
+    fn authorized_profile_inventory_and_queue_backlog() {
+        use crate::application::collection_service::{
+            register_profile_source_with_options, ProfileSourceSelection,
+        };
+        use crate::application::profile_discovery_service::persist_discovered_item;
+        use crate::application::queue_service::SourceScanResult;
+        let scan_path =
+            std::env::var("PULSARIA_PROFILE_SCAN_FILE").expect("authorized scan file required");
+        let data_path = std::env::var("PULSAR_DATA_DIR").expect("isolated data directory required");
+        assert!(std::path::Path::new(&data_path).is_absolute());
+        assert!(
+            !std::path::Path::new(&data_path).join("library.db").exists(),
+            "use a fresh isolated database"
+        );
+        let bytes = fs::read(scan_path).unwrap();
+        let scan: SourceScanResult =
+            serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))
+                .unwrap();
+        let category = &scan.categories["posts"];
+        assert!(category.available && !category.truncated);
+        let conn = init_db().unwrap();
+        let selection = ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let source = register_profile_source_with_options(
+            &conn,
+            &scan.profile.profile_url,
+            &selection,
+            true,
+            0,
+            None,
+        )
+        .unwrap()
+        .source;
+        for item in &category.items {
+            persist_discovered_item(&conn, source.id, "posts", item, "authorized-live-inventory")
+                .unwrap();
+        }
+        update_profile_channel_checkpoint(
+            &conn,
+            source.id,
+            "posts",
+            "idle",
+            category.items.len() as i64,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        finish_profile_discovery(&conn, source.id, "active", "{}", None).unwrap();
+        let views = get_channel_content_views(&conn, source.id, "all", 0).unwrap();
+        assert_eq!(views.len(), category.items.len());
+        assert_eq!(
+            get_pending_profile_jobs(&conn).unwrap().len(),
+            category.items.len()
+        );
+        assert!(views
+            .iter()
+            .all(|item| item.job.source_state == "online" && item.job.video_path.is_none()));
+        println!("Authorized inventory: {} online references, {} durable queued jobs; no downloader executed", views.len(), get_pending_profile_jobs(&conn).unwrap().len());
     }
 
     #[test]

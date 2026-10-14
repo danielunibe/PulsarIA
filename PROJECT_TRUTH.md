@@ -4,79 +4,120 @@ Este es el único documento normativo técnico y operativo de Pulsaria. Si otro
 reporte, plan, auditoría o README contradice este archivo, prevalecen el código
 actual, las pruebas reproducidas y esta definición de verdad.
 
-## Revalidación de gates e instalación — 2026-10-08
+## Lector de tomos e instalación local de Beta 4 — 2026-10-14
 
-`main` y `origin/main` están sincronizados en el commit
-`0fb478a778690f6fd6dcea8f2135cc78a5e14b79`. [Pulsaria canonical CI, run
-37764524583](https://github.com/danielunibe/PulsarIA/actions/runs/37764524583)
-terminó **PASS** para tooling de release, estructura canónica, frontend, Rust
-source-only y contratos Python. Los runs 37760613216 y 37762384161 fallaron
-antes: el checkout limpio no trae pesos GGUF, y un fixture vacío no puede pasar
-la prueba de integridad criptográfica. El test que requiere el Qwen real ahora
-queda explícitamente ignorado en CI source-only y se ejecutó aparte en la
-máquina local contra el peso auténtico.
+El catálogo abre los tomos como libros y usa un solo lector para portada,
+índice y artículos. Se retiró el modal editorial y el lector antiguo. La
+compilación de producción terminó y `npm run verify:mvp` pasó **13/13** con el
+lector integrado: 283 pruebas Rust, siete ignoradas y dos runtime ejecutadas
+por separado; Python terminó con el skip live esperado por falta de URL. Pasaron
+lint, TypeScript, accesibilidad, versiones, iconos, estructura canónica,
+secretos del frontend y el manifiesto de runtime 54/54.
 
-- `npm run verify:mvp`: **PASS 13/13** en la revalidación local previa. En este
-  cierre, `cargo fmt --check` y `cargo check` pasaron; el suite local terminó con
-  **278 PASS, 0 fallidas y 6 ignoradas**. La prueba ignorada por defecto,
-  `test_qwen_weights_verify_ok`, pasó al ejecutarse aparte contra el GGUF Qwen
-  real. Python tuvo **31 PASS**; la prueba live TikTok fue omitida porque esta
-  ejecución no recibió una URL de prueba.
-- Gates complementarios: `npm audit --omit=dev --audit-level=low` sin
-  vulnerabilidades; SPDX **762 paquetes, 68 archivos y 42 expresiones**;
-  `verify:legal-release`, versiones, iconos, LLM local, accesibilidad y sitio
-  pasaron. `verify:canonical` informa cero copias duplicadas y el manifiesto
-  runtime valida **54/54** archivos. Las ocho imágenes Dreamcore de navegación
-  coinciden byte por byte entre `public` y `out`.
-- Smoke previo a la reparación del lateral, NSIS: `Pulsaria_0.1.0-beta.3_x64-setup.exe`, **690,403,441
-  bytes**, SHA-256
-  `057580000AA8DE9D872756697C9321ECF9DDF7DFE6351158867BE6E24D0CBF77`, versión
-  `0.1.0-beta.3`, Authenticode `NotSigned`. `verify:installed` pasó instalación
-  y desinstalación (exit 0), recursos 54/54, 13 documentos legales, health
-  antes y después del reinicio, aislamiento de WebView2/AppData y conservación
-  del marcador de datos. Fue un smoke offline: no probó ingestión ni búsqueda.
-- La app Release instalada se abrió desde `AppData\Local\Programs\Pulsaria`;
-  `/health` respondió `ok`, versión `0.1.0-beta.3`, y se confirmó una ventana
-  nativa. Ambos `startup.log` fueron saneados: 31 valores históricos
-  reemplazados (16 del perfil de desarrollo y 15 de AppData), con 0 valores
-  crudos en la última apertura. `main.rs` ya registra el evento sin guardar la
-  credencial.
-- La última instantánea legible de la biblioteca conserva **31 jobs y 31 filas
-  media**; `integrity_check=ok`, con **174 referencias foráneas** (99 eventos,
-  74 `content_items` y 1 medio). En esa instantánea, los 74 `job_id` ausentes
-  tienen un mapeo uno a uno a contenido e historial: 54 terminan `queued` y 20
-  `error`. Restaurarlos como estaban reanudaría 54 descargas al abrir la app.
-  La base AppData activa está abierta por Pulsaria y su WAL sigue presente; no
-  se pudo leer consistentemente ni se modificó. Está pendiente confirmar si se
-  deben reponer y reanudar esos trabajos. No se afirma una reconciliación viva.
-- La prueba live de TikTok no se repitió en esta suite: quedó omitida sin URL.
-  Un smoke previo llegó a `completed` pero no produjo texto de transcripción;
-  no certifica voz española ni aceptación desde la UI/IPC.
+El NSIS Beta 4 actual se compiló localmente con salida 0: 692,195,350 bytes,
+SHA-256 `897A9FA12D4B0630676D9344DD4CF53C052E32A6AD9C8D28534FFF4000FDDEA7`,
+Authenticode `NotSigned`. Se instaló encima de Beta 3 en el equipo del usuario;
+el registro y `pulsaria.exe` reportan `0.1.0-beta.4` en
+`%LOCALAPPDATA%\Programs\Pulsaria`. Las carpetas locales existentes
+`%LOCALAPPDATA%\Pulsaria` y `%LOCALAPPDATA%\com.pulsaria.app` permanecieron
+presentes con sus fechas previas. No se inició Beta 4 ni se ejecutó el smoke
+aislado sobre el perfil personal; esto acredita instalación local, no
+aceptación limpia, funcional o visual.
 
-La revisión del lateral del 2026-10-08 aisló tres regresiones: el fondo fijo de
-la biblioteca tapaba visualmente el panel de carga; flex lo reducía a 206.66 px
-a 860 × 640; y cerrar hacia bandeja retenía el estado de salida transparente
-sin clics. Se corrigieron orden de capas, mínimo de 292 px y limpieza del cierre.
-El export final pasó inspección visual y navegación en Chromium a 1280 × 800 y
-860 × 640, con nueve imágenes decodificadas y cero excepciones JavaScript.
-La suite MVP pasó 13/13, incluidas cuatro regresiones de cierre/reapertura. La
-lectura IPC nativa con la biblioteca original confirmó 30 trabajos completos;
-eso no acredita procesamiento con voz reconocible desde UI/IPC. Véase
-`docs/SIDEBAR_REPAIR_2026-10-08.md` para evidencia y límites.
-El ejecutable instalado fue actualizado y coincide con la nueva compilación
-Release, SHA-256 `51DD38F84CD8D99100119F5A016C960807B3F1D4AC3F81D5AB9F9E2B84D33FA9`.
-Pasaron cierre hacia bandeja/reapertura, health, preflight sin faltantes y
-Whisper Tiny configurado/listo. El NSIS nuevo terminó con exit 0, 690,377,499
-bytes y SHA-256 `F2A10D8BA36478D8A9AC04A6C4C9EA9D7512BA20A3DBB92C88981ABAB0B75F65`;
-continúa sin firma y no recibió smoke de instalación desde ese paquete exacto.
-`DIRECT_DOWNLOAD_RELEASE_READY=false`
-se mantiene hasta revisar el artifact exacto de Actions en un host limpio,
-completar revisión humana/legal y definir `notice_address`. No se publicó ni
-etiquetó una release.
+`npm run clean` se corrigió para eliminar solo `.next`; la comprobación
+confirmó que `.next-dev` sigue presente. El build de MSI no aplica al candidato
+con versión `0.1.0-beta.4`: Tauri lo rechaza porque el identificador prerelease
+no es numérico; el workflow de descarga directa de Beta 4 construye NSIS.
+
+`npm run verify:legal-release` permanece **BLOCKED** hasta la aprobación legal
+del contacto público. Siguen externos el artifact exacto de Actions, Windows
+limpio, recorrido humano nativo, TikTok autorizado con voz española y revisión
+legal/materiales. `DIRECT_DOWNLOAD_RELEASE_READY=false`; no se creó tag ni
+release pública.
+
+## Reparación y revalidación local de Beta 4 — 2026-10-12
+
+La reparación posterior de **Perfiles** separa agregar de consultar contenido,
+respeta `autoEnqueue`, conecta la selección con la biblioteca y usa los estados
+de `profile_channels`. El registro queda pendiente; el timer espera la primera
+consulta. La evidencia y revalidación están en
+[docs/BETA4_PROFILE_REPAIR_EVIDENCE.md](./docs/BETA4_PROFILE_REPAIR_EVIDENCE.md).
+El instalador y los hashes descritos a continuación son anteriores a esta
+reparación y no certifican su inclusión.
+
+La rama existente `codex/pulsaria-beta4-prep` pasó `npm run verify:mvp`
+**13/13** en una ejecución completa, con 278 pruebas Rust ejecutadas (incluidas
+dos de inferencia real), seis casos Rust ignorados y 31 pruebas Python PASS
+más un skip live por falta de URL. Pasaron también versiones, accesibilidad,
+iconos, estructura canónica, runtime 54/54, SPDX agregado, materiales del
+candidato y auditoría npm de producción con cero vulnerabilidades.
+
+Se corrigieron staging de candidatas con contacto pendiente, lectura de JSON
+con BOM, selección del instalador por versión/hash, protección de instalaciones
+existentes, limpieza del registro del bootstrap y hashing en PowerShell
+anidado. La CI y el MVP incluyen sus regresiones. El procedimiento permite
+construir y conservar el candidato antes de aceptar su hash, manteniendo los
+gates de publicación. La evidencia y los límites están en
+[docs/BETA4_REPAIR_EVIDENCE.md](./docs/BETA4_REPAIR_EVIDENCE.md).
+
+Estos resultados son locales sobre cambios sin integrar. La lectura de GitHub
+confirmó `main` en `d743d1d5` y `DIRECT_DOWNLOAD_RELEASE_READY=false`; la
+descarga publicada sigue en Eval.3. Faltan el artifact exacto de Actions,
+Windows limpio, el recorrido humano nativo, TikTok con voz española desde
+UI/IPC y las revisiones externas del contacto/materiales. El gate público de
+contacto permanece bloqueado. La instalación de Beta 3 y la biblioteca
+personal de AppData se preservaron.
+
+El NSIS local `Pulsaria_0.1.0-beta.4_x64-setup.exe` se construyó con salida 0:
+692,197,765 bytes, SHA-256
+`01C0A3282D4447B03D75A1E82EAA627FFAFB48F181F8D4352353E752A83607A6`,
+Authenticode `NotSigned`. El ejecutable Release pasó arranque/reinicio en un
+perfil temporal, `/health` Beta 4, rechazo 401 sin credenciales y SQLite
+íntegra. Este resultado no es un smoke instalado ni aceptación visual/humana.
+
+## Preparación de Beta 4 — antecedente de 2026-10-09
+
+La autoridad inicial de esta fase es `main` / `origin/main` en
+`d743d1d5d06f1f43fc49eb0f3c672149b9ce5d91`. [Pulsaria canonical CI, run
+37821192428](https://github.com/danielunibe/PulsarIA/actions/runs/37821192428)
+terminó **success** para ese commit. La preparación local está aislada en
+`codex/pulsaria-beta4-prep`; esos resultados de CI no certifican los cambios de
+esta rama.
+
+- La versión candidata se sincronizó a `0.1.0-beta.4` en npm, Cargo, Tauri y
+  los manifiestos del proyecto. Las verificaciones de la rama deben repetirse
+  antes de integrarla.
+- La release pública continúa en Eval.3. No se ha creado el tag ni el instalador
+  Beta 4; el workflow de publicación sigue protegido por
+  `DIRECT_DOWNLOAD_RELEASE_READY=false` y el Environment `direct-download`.
+- El README, el catálogo de marketing, las notas y la hoja de aceptación se
+  actualizaron para Beta 4. Las funciones se describen con sus condiciones de
+  uso y no se presentan como verificadas en un instalador hasta probar el
+  artifact exacto.
+- Se añadió un gate de contacto público ligado a la versión: permite preparar
+  un artifact candidato con nombre, ciudad y correo, pero rechaza la publicación
+  mientras no exista aprobación legal de ese contacto. No se incluye domicilio
+  postal. El checklist pide que la decisión se archive fuera del repositorio.
+- Faltan el URL de TikTok autorizado, con voz clara en español, y la prueba por
+  UI/IPC de una transcripción reconocible. No se reutiliza el smoke anterior que
+  terminó sin texto.
+- Siguen pendientes el build NSIS de Actions, la aceptación del mismo `.exe` en
+  Windows x64 limpio, la inspección humana nativa completa y la aprobación del
+  SHA-256 final. Un build local o CI de fuente no los sustituye.
+- La biblioteca personal de AppData quedó explícitamente fuera de alcance; no
+  se leyó ni se modificó durante esta preparación.
+
+La aceptación operativa se registra en [docs/BETA4_ACCEPTANCE.md](./docs/BETA4_ACCEPTANCE.md).
+La descripción promocional lista para la release está en
+[docs/BETA4_RELEASE_NOTES.md](./docs/BETA4_RELEASE_NOTES.md), basada en el
+[catálogo de funciones](./docs/marketing/PULSARIA_CATALOGO_FUNCIONES_MARKETING_ES.md).
 
 ## Objetivo y alcance
 
-### Estado del lanzamiento — corte histórico de 2026-10-01
+### Estado del lanzamiento — registro histórico de 2026-10-01
+
+Este corte de Beta 3 queda preservado por trazabilidad y fue reemplazado por la
+revalidación Beta 4 de 2026-10-09. No representa el estado vigente del release.
 
 El candidato activo del PR #2 es **Beta 3, `0.1.0-beta.3`**. `main` sigue
 siendo canónico y la rama temporal conserva el nombre `beta2-hardening`.
@@ -426,19 +467,26 @@ IPC; `npm run tauri build` queda reservado para una build de release.
 ### Fuentes TikTok persistentes
 
 `collection_sources` es la única autoridad persistente para perfiles conectados.
-`collection_source_items` relaciona cada URL descubierta con su categoría y el
-job real; `collection_source_activity` conserva el historial compacto visible.
-`src-tauri/src/application/collection_service.rs` ejecuta el ciclo de
-descubrimiento y reutiliza `QueueService`; no existe un downloader ni una cola
-paralela para fuentes.
+`profile_channels` conserva la selección y el estado de consulta de cada canal;
+`content_items` y `content_relationships` relacionan videos con perfiles y
+pestañas, incluyendo referencias sin job. `ProfileDiscoveryService` ejecuta
+tanto la consulta manual como el timer y reutiliza `QueueService`; no existe
+otro downloader ni una cola paralela. Las colecciones históricas conservan el
+adaptador de `collection_source_items` y su actividad.
 
-La pestaña visible es `Fuentes` aunque conserva la clave interna `cuenta` para
-no romper navegación existente. La conexión acepta perfiles TikTok o handles,
+La sección visible es `Perfiles` y conserva la clave interna `cuenta`.
+El registro acepta perfiles TikTok o handles,
 usa únicamente el selector existente de cookies de Chrome, Edge o Firefox,
 nunca embebe un login ni guarda credenciales. El scanner
 `python-workers/source_scanner.py` enumera sin descargar, distingue categorías
-vacías de categorías inaccesibles y deja deshabilitada toda capacidad no
-confirmada. `new_only` registra un baseline; `history` aplica el límite elegido.
+vacías de categorías inaccesibles. Los canales sin consulta permanecen
+pendientes; los que requieren sesión o no están disponibles se muestran como
+tales. La consulta acepta todo lo disponible (sin límite local) o 20/50/100
+videos recientes por fuente. La disponibilidad la determina TikTok. El perfil
+se puede ver online mediante su reproductor oficial; al activar el proceso
+gradual, los jobs se admiten uno a la vez en QueueService y esperan 30 segundos
+entre videos. La espera no ocupa workers normales. El adaptador histórico de colecciones
+conserva sus modalidades `new_only` y `history`.
 La deduplicación final usa `jobs.canonical_url`, y eliminar una fuente nunca
 elimina videos de la biblioteca.
 
@@ -450,13 +498,17 @@ que haya descubierto, deduplicado y enviado elementos reales al pipeline.
 ### Task 01 — registro canónico de perfil
 
 La fase inicial de perfiles usa register_profile_source para validar y
-persistir identidad + selección en collection_sources sin lanzar scanner,
-descarga ni sincronización. update_profile_source_settings conserva la
+persistir identidad, selección, límite y descarga automática (desactivada por
+defecto) en collection_sources sin lanzar scanner, descarga ni sincronización.
+El usuario inicia la primera consulta desde la tarjeta; después el timer revisa
+las fuentes activas cada 15 minutos mientras la app está abierta.
+update_profile_source_settings conserva la pausa y la
 selección independiente de posts, reposts, saved y favorites, mapeando
 favorites al contrato histórico likes de SQLite. La tarjeta reconstruida en
 components/TikTokSourcesPanel.tsx representa metadata ausente como pendiente;
 no fabrica avatar, portada, verificación, métricas ni contadores. La
-normalización estricta vive en lib/profile-source.ts y
+selección abre el perfil o su canal en la biblioteca. La normalización estricta
+vive en lib/profile-source.ts y
 src-tauri/src/url_utils.rs; la interfaz TikTokProfileMetadataProvider queda
 preparada para una integración autorizada posterior.
 
@@ -496,10 +548,10 @@ force push ni se escribieron commits directamente en `main`.
 
 La matriz vigente de reparación, los gates repetidos y los bloqueos para
 publicar una descarga del código actual se mantienen en
-[docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md](docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md).
+[docs/PLAN_REPARACION_PUBLICACION_GRATUITA.md](./docs/archive/internal-2026/PLAN_REPARACION_PUBLICACION_GRATUITA.md).
 La auditoría de producto, los hallazgos del preview web y la secuencia general
 de reparación, actualizados al 2026-09-28, están en
-[docs/AUDITORIA_INTEGRAL_Y_FASES.md](docs/AUDITORIA_INTEGRAL_Y_FASES.md).
+[docs/AUDITORIA_INTEGRAL_Y_FASES.md](./docs/archive/internal-2026/AUDITORIA_INTEGRAL_Y_FASES.md).
 Este seguimiento suplementa las tablas históricas: la descarga GitHub más
 reciente todavía es `v0.1.0-eval.3`; el último NSIS local reconstruido desde
 el código de aplicación `6dd02497` pasó un smoke aislado offline, no equivale

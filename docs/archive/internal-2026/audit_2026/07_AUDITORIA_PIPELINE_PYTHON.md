@@ -49,4 +49,4 @@ python-workers/
 
 ---
 
-*Siguiente documento: [08_AUDITORIA_IA_MODELOS.md](08_AUDITORIA_IA_MODELOS.md)*
+*Siguiente documento: [08_AUDITORIA_IA_MODELOS.md](./08_AUDITORIA_IA_MODELOS.md)*

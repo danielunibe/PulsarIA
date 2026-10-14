@@ -26,6 +26,7 @@ import {
   normalizeTikTokProfileInput,
   toProfileSource,
   type PersistedCollectionSourceRecord,
+  type PersistedProfileChannelRecord,
   type ProfileSource,
   type ProfileSourceEntry,
   type ProfileSourceKey,
@@ -44,7 +45,7 @@ const SOURCE_META: Record<ProfileSourceKey, { label: string; icon: ElementType }
   posts: { label: 'Publicaciones', icon: FaTableCells },
   reposts: { label: 'Reposts', icon: FaRotate },
   saved: { label: 'Guardados', icon: FaBookmark },
-  favorites: { label: 'Favoritos', icon: FaHeart },
+  favorites: { label: 'Me gusta', icon: FaHeart },
 };
 
 interface RegisterProfileSourceResult {
@@ -61,6 +62,7 @@ interface ConnectedProfileCardProps {
   busy: boolean;
   syncing?: boolean;
   onSelect: () => void;
+  onSelectChannel: (key: ProfileSourceKey) => void;
   onEdit: () => void;
   onCancelEdit: () => void;
   onToggle: (key: ProfileSourceKey) => void;
@@ -91,11 +93,13 @@ function selectionFromProfile(profile: ProfileSource): ProfileSourceSelection {
 }
 
 function formatCount(value: number | null): string {
-  return value === null ? '…' : new Intl.NumberFormat('es-MX', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+  return value === null ? '—' : new Intl.NumberFormat('es-MX', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
 }
 
 function sourceStateLabel(entry: ProfileSourceEntry): string {
   switch (entry.syncState) {
+    case 'pending':
+      return 'Sin consultar';
     case 'paused':
       return 'Pausada';
     case 'discovering':
@@ -108,7 +112,7 @@ function sourceStateLabel(entry: ProfileSourceEntry): string {
     case 'requires_auth':
       return 'Requiere sesión';
     case 'rate_limited':
-      return 'Reintentando';
+      return 'Límite de TikTok';
     case 'unavailable':
     case 'unsupported':
       return 'No disponible';
@@ -127,8 +131,12 @@ function profileStatusLabel(profile: ProfileSource): string {
       return 'Requiere atención';
     case 'registering':
       return 'Registrando';
+    case 'pending':
+      return 'Pendiente de consulta';
+    case 'discovering':
+      return 'Consultando perfil';
     default:
-      return 'Perfil listo';
+      return 'Consulta completada';
   }
 }
 
@@ -141,6 +149,7 @@ function ConnectedProfileCard({
   busy,
   syncing,
   onSelect,
+  onSelectChannel,
   onEdit,
   onCancelEdit,
   onToggle,
@@ -197,7 +206,7 @@ function ConnectedProfileCard({
           </span>
           <div className="profile-source-identity">
             <div className="profile-source-name-line">
-              <strong>{profile.displayName || 'Nombre pendiente'}</strong>
+              <strong>{profile.displayName || profile.handle}</strong>
               {profile.verified === true && (
                 <span className="profile-source-verified" aria-label="Cuenta verificada" title="Cuenta verificada">
                   <FaCheck size={11} aria-hidden="true" />
@@ -211,18 +220,18 @@ function ConnectedProfileCard({
                 title={
                   profile.rules.autoEnqueue
                     ? 'Descarga a disco activa: Los nuevos videos se descargarán a tu disco local en segundo plano.'
-                    : 'Modo Streaming activo: Los videos se transmiten sin saturar el disco; la descarga física es bajo demanda.'
+                    : 'Solo consulta: añade referencias a la biblioteca sin descargar archivos.'
                 }
               >
                 {profile.rules.autoEnqueue ? (
                   <>
                     <FaDownload size={9} aria-hidden="true" />
-                    <span>Descarga auto</span>
+                    <span>Proceso gradual</span>
                   </>
                 ) : (
                   <>
                     <FaBolt size={9} aria-hidden="true" />
-                    <span>Streaming</span>
+                    <span>Online</span>
                   </>
                 )}
               </span>
@@ -281,13 +290,13 @@ function ConnectedProfileCard({
                       <div className="profile-source-dropdown-item-text">
                         <strong>
                           {profile.rules.autoEnqueue
-                            ? 'Activar Modo Streaming'
-                            : 'Activar Descarga automática'}
+                            ? 'Desactivar descarga automática'
+                            : 'Procesar lentamente en Inicio'}
                         </strong>
                         <small>
                           {profile.rules.autoEnqueue
-                            ? 'Reproduce en directo sin ocupar almacenamiento masivo; descarga solo bajo demanda.'
-                            : 'Descarga videos a tu disco en segundo plano automáticamente.'}
+                            ? 'Conserva referencias en tu biblioteca sin iniciar nuevas descargas.'
+                            : 'Procesa un video a la vez, con 30 segundos de espera entre videos.'}
                         </small>
                       </div>
                     </div>
@@ -307,7 +316,7 @@ function ConnectedProfileCard({
                       disabled={busy || syncing}
                     >
                       <FaRotate size={12} className={syncing ? 'source-spin' : ''} aria-hidden="true" />
-                      <span>{syncing ? 'Sincronizando fuentes…' : 'Sincronizar ahora'}</span>
+                      <span>{syncing ? 'Consultando fuentes…' : 'Consultar contenido ahora'}</span>
                     </button>
                   )}
 
@@ -388,31 +397,27 @@ function ConnectedProfileCard({
         </div>
 
         <div className="profile-source-section-label">
-          <span>Fuentes internas</span>
-          <span className="profile-source-known-note">Los datos aparecen cuando estén disponibles</span>
+          <span>Contenido del perfil</span>
+          <span className="profile-source-known-note">Referencias encontradas</span>
         </div>
-        <div className="profile-source-grid" role="list" aria-label={'Fuentes de ' + profile.handle}>
+        <div className="profile-source-grid" role="group" aria-label={'Contenido de ' + profile.handle}>
           {PROFILE_SOURCE_KEYS.map((key) => {
             const meta = SOURCE_META[key];
             const entry = profile.sources[key];
             const Icon = meta.icon;
             return (
-              <div className={'profile-source-entry ' + (entry.enabled ? 'is-enabled' : 'is-paused')} key={key} role="listitem">
+              <button type="button" className={'profile-source-entry ' + (entry.enabled ? 'is-enabled' : 'is-paused')} key={key}
+                onClick={() => onSelectChannel(key)} title={entry.errorMessage ?? `Ver ${meta.label.toLowerCase()} de ${profile.handle}`}
+                aria-label={`Ver ${meta.label.toLowerCase()} de ${profile.handle}: ${sourceStateLabel(entry)}`}>
                 <span className="profile-source-entry-icon"><Icon size={14} aria-hidden="true" /></span>
                 <span className="profile-source-entry-copy">
                   <strong>{meta.label}</strong>
                   <span>{sourceStateLabel(entry)}</span>
                 </span>
                 <b aria-label={meta.label + ': ' + (entry.discoveredCount === null ? 'pendiente' : entry.discoveredCount)}>
-                  {entry.syncState === 'requires_session' || entry.syncState === 'requires_auth'
-                    ? 'Requiere sesión'
-                    : entry.syncState === 'unsupported' || entry.syncState === 'unavailable'
-                    ? 'No disponible'
-                    : entry.syncState === 'rate_limited'
-                    ? 'Reintentando'
-                    : formatCount(entry.discoveredCount)}
+                  {formatCount(entry.discoveredCount)}
                 </b>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -436,8 +441,8 @@ function ConnectedProfileCard({
                 >
                   <FaBolt size={14} aria-hidden="true" />
                   <div>
-                    <strong>Streaming primero</strong>
-                    <small>Reproduce sin saturar disco; descarga solo bajo demanda.</small>
+                    <strong>Ver online</strong>
+                    <small>Conserva referencias y reproduce desde TikTok al abrir cada video.</small>
                   </div>
                 </button>
                 <button
@@ -449,8 +454,8 @@ function ConnectedProfileCard({
                 >
                   <FaDownload size={14} aria-hidden="true" />
                   <div>
-                    <strong>Descarga a disco</strong>
-                    <small>Guarda archivos de video a disco en segundo plano automáticamente.</small>
+                    <strong>Proceso gradual</strong>
+                    <small>Un video a la vez, con 30 segundos de espera entre videos. Progreso real en Inicio.</small>
                   </div>
                 </button>
               </div>
@@ -493,32 +498,52 @@ function ConnectedProfileCard({
 
         <div className="profile-source-footer">
           <span className={'profile-source-status status-' + profile.status}><i aria-hidden="true" />{profileStatusLabel(profile)}</span>
-          <span>{profile.displayName || profile.avatarUrl || profile.metrics.followers !== null ? 'Metadata verificada' : 'Metadata pendiente'}</span>
+          <span>{profile.displayName || profile.avatarUrl || profile.metrics.followers !== null ? 'Datos disponibles' : 'Datos pendientes'}</span>
           {onSync && (
             <button
               type="button"
               className="profile-source-sync-button"
               onClick={onSync}
-              disabled={busy || syncing}
-              title="Sincronizar fuentes ahora"
+              disabled={busy || syncing || !PROFILE_SOURCE_KEYS.some((key) => profile.sources[key].enabled)}
+              title={profile.scanLimit === 0 ? 'Consultar todo el contenido disponible' : `Consultar hasta ${profile.scanLimit} videos recientes por fuente`}
             >
               <FaRotate size={11} className={syncing ? 'source-spin' : ''} aria-hidden="true" />
-              <span>{syncing ? 'Sincronizando…' : 'Sincronizar'}</span>
+              <span>{syncing ? 'Consultando…' : 'Consultar contenido'}</span>
             </button>
           )}
           <button type="button" className="profile-source-focus-button" onClick={onSelect} aria-pressed={selected}>
-            {selected ? 'Seleccionado' : 'Seleccionar'}
+            {selected ? 'Viendo contenido' : 'Ver contenido'}
           </button>
         </div>
+        <p className="profile-source-query-note">{profile.scanLimit === 0 ? 'Todo el contenido disponible' : `Hasta ${profile.scanLimit} videos recientes`} por fuente. {profile.rules.autoEnqueue ? 'Procesa un video a la vez, con 30 segundos de espera entre videos. Sigue su progreso en Inicio.' : 'Puedes reproducir online y activar el procesamiento gradual cuando lo necesites.'}</p>
+        {profile.lastError && <p className="source-form-error" role="status">{profile.lastError}</p>}
+        {PROFILE_SOURCE_KEYS.some((key) => profile.sources[key].syncState === 'requires_session') && (
+          <p className="profile-source-query-note">Esta fuente requiere una sesión autorizada del navegador. Configúrala en Ajustes antes de volver a consultar.</p>
+        )}
       </div>
     </article>
   );
 }
 
-export function TikTokSourcesPanel() {
+interface TikTokSourcesPanelProps {
+  onProfileSelect?: (profile: ProfileSource | null, channelKind?: ProfileSourceKey | 'all') => void;
+  selectedProfileId?: number | null;
+  contentRightsAccepted?: boolean;
+  onRequestContentRights?: () => void;
+}
+
+interface ProfileSyncSummary {
+  error_count: number;
+  partial: boolean;
+  message: string;
+}
+
+export function TikTokSourcesPanel({ onProfileSelect, selectedProfileId, contentRightsAccepted = false, onRequestContentRights }: TikTokSourcesPanelProps = {}) {
   const [profiles, setProfiles] = useState<ProfileSource[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [profileInput, setProfileInput] = useState('');
+  const [registrationAutoEnqueue, setRegistrationAutoEnqueue] = useState(false);
+  const [historyLimit, setHistoryLimit] = useState(0);
   const [selection, setSelection] = useState<ProfileSourceSelection>(copySelection(EMPTY_SELECTION));
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingSelection, setEditingSelection] = useState<ProfileSourceSelection>(copySelection(EMPTY_SELECTION));
@@ -529,6 +554,7 @@ export function TikTokSourcesPanel() {
   const [syncingId, setSyncingId] = useState<number | null>(null);
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const native = isTauriRuntime();
 
@@ -539,12 +565,15 @@ export function TikTokSourcesPanel() {
     }
     try {
       const records = await invokeNative<PersistedCollectionSourceRecord[]>('get_collection_sources');
-      setProfiles(records
-        .filter((record) => record.platform === 'tiktok' && record.source_type === 'profile')
-        .map(toProfileSource));
-      setFormError(null);
+      const profileRecords = records.filter((record) => record.platform === 'tiktok' && record.source_type === 'profile');
+      const loaded = await Promise.all(profileRecords.map(async (record) => {
+        const channels = await invokeNative<PersistedProfileChannelRecord[]>('get_profile_channels', { sourceId: record.id });
+        return toProfileSource(record, channels);
+      }));
+      setProfiles(loaded);
+      setLoadError(null);
     } catch (cause) {
-      setFormError(cause instanceof Error ? cause.message : 'No se pudieron cargar los perfiles conectados.');
+      setLoadError(cause instanceof Error ? cause.message : 'No se pudieron cargar los perfiles guardados.');
     } finally {
       setLoading(false);
     }
@@ -552,19 +581,21 @@ export function TikTokSourcesPanel() {
 
   const syncProfile = useCallback(async (profileId: number) => {
     if (syncingId !== null || !native) return;
+    if (!contentRightsAccepted) { onRequestContentRights?.(); return; }
     setSyncingId(profileId);
     try {
-      toast.info('Sincronizando fuentes del perfil…');
-      await invokeNative('sync_collection_source_now', { sourceId: profileId });
+      toast.info('Consultando contenido del perfil…');
+      const summary = await invokeNative<ProfileSyncSummary>('sync_collection_source_now', { sourceId: profileId });
       await refreshProfiles();
-      toast.success('Sincronización completada');
+      if (summary.partial || summary.error_count > 0) toast.warning(summary.message);
+      else toast.success(summary.message);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       toast.error(`Error sincronizando perfil: ${message}`);
     } finally {
       setSyncingId(null);
     }
-  }, [native, refreshProfiles, syncingId]);
+  }, [contentRightsAccepted, native, onRequestContentRights, refreshProfiles, syncingId]);
 
   useEffect(() => {
     void refreshProfiles();
@@ -572,36 +603,30 @@ export function TikTokSourcesPanel() {
 
   useEffect(() => {
     if (!native) return;
-    let unlistenSync: (() => void) | undefined;
-    let unlistenMeta: (() => void) | undefined;
-    let unlistenStatus: (() => void) | undefined;
-    let unlistenItem: (() => void) | undefined;
-
+    let disposed = false;
+    const unlisteners: (() => void)[] = [];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleRefresh = () => {
+      if (disposed || timer !== undefined) return;
+      timer = setTimeout(() => { timer = undefined; if (!disposed) void refreshProfiles(); }, 150);
+    };
     const setup = async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
-        unlistenSync = await listen('tiktok_source_sync_completed', () => {
-          void refreshProfiles();
-        });
-        unlistenMeta = await listen('tiktok_source_metadata_updated', () => {
-          void refreshProfiles();
-        });
-        unlistenStatus = await listen('tiktok_source_channel_status_changed', () => {
-          void refreshProfiles();
-        });
-        unlistenItem = await listen('tiktok_source_item_discovered', () => {
-          void refreshProfiles();
-        });
+        for (const event of ['tiktok_source_sync_started', 'tiktok_source_sync_completed', 'tiktok_source_metadata_updated', 'tiktok_source_channel_status_changed', 'tiktok_source_item_discovered']) {
+          if (disposed) break;
+          const unlisten = await listen(event, scheduleRefresh);
+          if (disposed) unlisten(); else unlisteners.push(unlisten);
+        }
       } catch {
         // Event system fallback
       }
     };
     void setup();
     return () => {
-      unlistenSync?.();
-      unlistenMeta?.();
-      unlistenStatus?.();
-      unlistenItem?.();
+      disposed = true;
+      if (timer !== undefined) clearTimeout(timer);
+      unlisteners.forEach((unlisten) => unlisten());
     };
   }, [native, refreshProfiles]);
 
@@ -646,6 +671,7 @@ export function TikTokSourcesPanel() {
       setFormError('La persistencia de perfiles requiere abrir Pulsaria en el shell Tauri.');
       return;
     }
+    if (registrationAutoEnqueue && !contentRightsAccepted) { onRequestContentRights?.(); return; }
 
     setRegistering(true);
     try {
@@ -653,6 +679,8 @@ export function TikTokSourcesPanel() {
         input: {
           profileUrl: normalized.profile.canonicalUrl,
           selectedSources: selection,
+          autoEnqueue: registrationAutoEnqueue,
+          historyLimit,
         },
       });
       const profile = toProfileSource(result.source);
@@ -663,14 +691,16 @@ export function TikTokSourcesPanel() {
         return next.sort((a, b) => a.id - b.id);
       });
       setSelectedId(profile.id);
+      onProfileSelect?.(profile, 'all');
       setProfileInput('');
       if (result.duplicate) {
-        setFormMessage('Este perfil ya está conectado. Se seleccionó la tarjeta existente.');
-        toast.info('Este perfil ya está conectado.');
+        setFormMessage('Este perfil ya está agregado. Se abrió su contenido y se conservó su configuración.');
+        toast.info('Este perfil ya está agregado.');
       } else {
-        setFormMessage('Perfil registrado y configuración guardada.');
-        toast.success('Perfil TikTok registrado');
+        setFormMessage('Perfil agregado. Pulsa «Consultar contenido» en su tarjeta para traer referencias a la biblioteca.');
+        toast.success('Perfil agregado sin iniciar descargas');
       }
+      await refreshProfiles();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setFormError(message);
@@ -695,29 +725,18 @@ export function TikTokSourcesPanel() {
     async (profile: ProfileSource) => {
       if (!native || savingId !== null) return;
       const targetAutoEnqueue = !profile.rules.autoEnqueue;
+      if (targetAutoEnqueue && !contentRightsAccepted) { onRequestContentRights?.(); return; }
       setSavingId(profile.id);
       try {
         await invokeNative('set_profile_auto_enqueue', {
           sourceId: profile.id,
           autoEnqueue: targetAutoEnqueue,
         });
-        setProfiles((current) =>
-          current.map((item) =>
-            item.id === profile.id
-              ? {
-                  ...item,
-                  rules: {
-                    ...item.rules,
-                    autoEnqueue: targetAutoEnqueue,
-                  },
-                }
-              : item
-          )
-        );
+        await refreshProfiles();
         if (targetAutoEnqueue) {
           toast.success(`Descarga a disco activada para ${profile.handle}: los videos se guardarán localmente.`);
         } else {
-          toast.success(`Modo Streaming activado para ${profile.handle}: los videos se reproducirán en directo sin descargarse a disco.`);
+          toast.success(`Descarga automática desactivada para ${profile.handle}. Las próximas consultas guardarán referencias.`);
         }
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
@@ -726,7 +745,7 @@ export function TikTokSourcesPanel() {
         setSavingId(null);
       }
     },
-    [native, savingId]
+    [contentRightsAccepted, native, onRequestContentRights, refreshProfiles, savingId]
   );
 
   const toggleActive = useCallback(
@@ -739,16 +758,7 @@ export function TikTokSourcesPanel() {
           sourceId: profile.id,
           active: nextActive,
         });
-        setProfiles((current) =>
-          current.map((item) =>
-            item.id === profile.id
-              ? {
-                  ...item,
-                  status: nextActive ? 'ready' : 'paused',
-                }
-              : item
-          )
-        );
+        await refreshProfiles();
         toast.success(nextActive ? `Monitoreo reanudado para ${profile.handle}` : `Monitoreo pausado para ${profile.handle}`);
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
@@ -757,7 +767,7 @@ export function TikTokSourcesPanel() {
         setSavingId(null);
       }
     },
-    [native, savingId]
+    [native, refreshProfiles, savingId]
   );
 
   const deleteProfile = useCallback(
@@ -771,7 +781,7 @@ export function TikTokSourcesPanel() {
       try {
         await invokeNative('delete_collection_source', { sourceId: profile.id });
         setProfiles((current) => current.filter((item) => item.id !== profile.id));
-        if (selectedId === profile.id) setSelectedId(null);
+        if ((selectedProfileId ?? selectedId) === profile.id) { setSelectedId(null); onProfileSelect?.(null); }
         if (editingId === profile.id) setEditingId(null);
         toast.success(`Perfil ${profile.handle} desenlazado.`);
       } catch (cause) {
@@ -781,11 +791,12 @@ export function TikTokSourcesPanel() {
         setSavingId(null);
       }
     },
-    [editingId, native, savingId, selectedId]
+    [editingId, native, onProfileSelect, savingId, selectedId, selectedProfileId]
   );
 
   async function saveProfileSettings() {
     if (editingId === null || savingId !== null || !native) return;
+    if (editingAutoEnqueue && !contentRightsAccepted) { onRequestContentRights?.(); return; }
     setSavingId(editingId);
     setFormError(null);
     try {
@@ -799,6 +810,7 @@ export function TikTokSourcesPanel() {
       const profile = toProfileSource(source);
       setProfiles((current) => current.map((item) => (item.id === profile.id ? profile : item)));
       setEditingId(null);
+      await refreshProfiles();
       setFormMessage('Configuración del perfil guardada.');
       toast.success('Configuración guardada');
     } catch (cause) {
@@ -811,11 +823,11 @@ export function TikTokSourcesPanel() {
   }
 
   return (
-    <section className="sources-panel" aria-label="Registro canónico de perfiles TikTok">
+    <section className="sources-panel" aria-label="Perfiles de TikTok">
       <form className="source-profile-card" onSubmit={registerProfile} aria-label="Registrar perfil de TikTok">
         <header className="source-profile-head">
           <span className="source-profile-glyph" aria-hidden="true"><TikTokIcon size={13} /></span>
-          <h3>Perfil de TikTok</h3>
+          <h3>Agregar perfil</h3>
           <span className="source-profile-head-spacer" aria-hidden="true" />
           <button type="button" className="source-profile-select-all" onClick={toggleAllRegistrationSources} disabled={registering}>
             {PROFILE_SOURCE_KEYS.every((key) => selection[key]) ? 'Limpiar' : 'Seleccionar todo'}
@@ -837,15 +849,13 @@ export function TikTokSourcesPanel() {
             disabled={registering}
           />
         </label>
-        <p id="tiktok-profile-input-help" className="source-profile-help">Pega una URL o @usuario</p>
+        <p id="tiktok-profile-input-help" className="source-profile-help">Pega una URL de TikTok o escribe @usuario.</p>
         <p id="tiktok-profile-sync-note" className="source-profile-sync-note" role="note">
-          Al registrar el perfil, Pulsaria consulta las pestañas activas. Mientras Pulsaria esté abierta,
-          revisa esas fuentes cada 15 minutos y añade a tu cola el contenido nuevo que cumpla las reglas.
-          Puedes pausar el perfil en Ajustes.
+          Guarda el perfil primero. Después consulta su contenido desde la tarjeta.
         </p>
 
         <div className="source-profile-cap">
-          <span>Pestañas del perfil a procesar</span>
+          <span>Contenido a consultar</span>
           <span>{PROFILE_SOURCE_KEYS.filter((key) => selection[key]).length} de {PROFILE_SOURCE_KEYS.length}</span>
         </div>
         <div className="source-profile-grid" role="group" aria-label="Fuentes a registrar">
@@ -864,19 +874,36 @@ export function TikTokSourcesPanel() {
               >
                 <Icon size={15} aria-hidden="true" />
                 <span>{meta.label}</span>
-                <small>{enabled ? 'Activa' : 'Pausada'}</small>
+                <small>{enabled ? 'Seleccionado' : 'Sin seleccionar'}</small>
               </button>
             );
           })}
         </div>
 
+        <p className="source-profile-sync-note">Guardados y Me gusta pueden requerir sesión. La consulta comprobará qué fuentes están disponibles.</p>
+        <label className="source-profile-limit" htmlFor="tiktok-profile-limit">
+          <span>Contenido por fuente</span>
+          <select id="tiktok-profile-limit" value={historyLimit} onChange={(event) => setHistoryLimit(Number(event.target.value))} disabled={registering}>
+            <option value={0}>Todo lo disponible</option><option value={20}>Hasta 20</option><option value={50}>Hasta 50</option><option value={100}>Hasta 100</option>
+          </select>
+        </label>
+        <label className="source-profile-auto-download">
+          <input type="checkbox" checked={registrationAutoEnqueue} disabled={registering || !native}
+            onChange={(event) => {
+              if (event.target.checked && !contentRightsAccepted) { onRequestContentRights?.(); return; }
+              setRegistrationAutoEnqueue(event.target.checked);
+            }} />
+          <span><strong>Procesar lentamente en Inicio</strong><small>Primero carga las referencias para ver online. Al activarlo, procesa un video a la vez con 30 segundos de espera entre videos.</small></span>
+        </label>
+        {!native && <p className="source-profile-sync-note" role="note">Abre la aplicación de escritorio para agregar y consultar perfiles.</p>}
+
         <button
           type="submit"
           className={'source-profile-cta ' + (profileInput.trim() && PROFILE_SOURCE_KEYS.some((key) => selection[key]) ? 'ready' : '')}
-          disabled={registering || !profileInput.trim() || !PROFILE_SOURCE_KEYS.some((key) => selection[key])}
+          disabled={!native || registering || !profileInput.trim() || !PROFILE_SOURCE_KEYS.some((key) => selection[key])}
         >
           <FaCheck size={14} aria-hidden="true" />
-          {registering ? 'Registrando…' : 'EXTRAER SELECCIÓN'}
+          {registering ? 'Agregando…' : 'Agregar perfil'}
         </button>
         {formMessage && <p className="source-form-message" role="status">{formMessage}</p>}
         {formError && <p className="source-form-error" role="alert"><FaTriangleExclamation size={14} aria-hidden="true" />{formError}</p>}
@@ -884,18 +911,19 @@ export function TikTokSourcesPanel() {
 
       <div className="sources-list-heading">
         <div>
-          <span className="source-eyebrow">REGISTRO CANÓNICO</span>
-          <h3>Perfiles conectados</h3>
+          <span className="source-eyebrow">TU BIBLIOTECA</span>
+          <h3>Perfiles agregados</h3>
         </div>
         <span className="sources-count">{profiles.length}</span>
       </div>
 
+      {loadError && <div className="source-form-error" role="alert"><span>{loadError}</span><button type="button" onClick={() => void refreshProfiles()}>Reintentar</button></div>}
       {loading ? (
         <div className="sources-empty"><FaRotate className="source-spin" size={17} aria-hidden="true" /><span>Cargando perfiles persistidos…</span></div>
       ) : profiles.length === 0 ? (
         <div className="sources-empty">
           <FaInfo size={17} aria-hidden="true" />
-          <div><strong>Aún no hay fuentes conectadas</strong><span>Registra un perfil para que aparezca aquí.</span></div>
+          <div><strong>{native ? 'Aún no hay perfiles agregados' : 'Vista previa de Perfiles'}</strong><span>{native ? 'Agrega un perfil y consulta su contenido cuando estés listo.' : 'Tus perfiles se cargan en la aplicación de escritorio.'}</span></div>
         </div>
       ) : (
         <div className="sources-cards">
@@ -903,13 +931,14 @@ export function TikTokSourcesPanel() {
             <ConnectedProfileCard
               key={profile.id}
               profile={profile}
-              selected={selectedId === profile.id}
+              selected={(selectedProfileId === undefined ? selectedId : selectedProfileId) === profile.id}
               editing={editingId === profile.id}
               selection={editingSelection}
               editingAutoEnqueue={editingAutoEnqueue}
-              busy={savingId === profile.id}
-              syncing={syncingId === profile.id}
-              onSelect={() => setSelectedId(profile.id)}
+              busy={savingId === profile.id || syncingId === profile.id || profile.status === 'discovering'}
+              syncing={syncingId === profile.id || profile.status === 'discovering'}
+              onSelect={() => { setSelectedId(profile.id); onProfileSelect?.(profile, 'all'); }}
+              onSelectChannel={(key) => { setSelectedId(profile.id); onProfileSelect?.(profile, key); }}
               onEdit={() => beginEdit(profile)}
               onCancelEdit={() => setEditingId(null)}
               onToggle={toggleEditingSource}

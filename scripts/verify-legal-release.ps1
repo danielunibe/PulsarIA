@@ -2,6 +2,7 @@
 param(
     [string]$SourceRoot,
     [switch]$RequireSbom,
+    [switch]$CandidateOnly,
     [string]$SbomPath,
     [string]$MaterialsRoot
 )
@@ -189,7 +190,7 @@ try {
             $value = $manifest.$field
             if ($null -eq $value -or ([string]$value).Trim().Length -eq 0) { $blockers.Add("Release manifest field is empty: $field") }
         }
-        foreach ($field in @('public_owner','legal_contact_email','notice_address','legal_approval')) {
+        foreach ($field in @('public_owner','legal_contact_email','notice_city','legal_approval')) {
             if ([string]$manifest.$field -match 'TO BE COMPLETED|PENDING HUMAN REVIEW') { $blockers.Add("Release manifest still contains a release placeholder: $field") }
         }
         if ([string]$manifest.telemetry_policy -ne 'zero-telemetry') { $blockers.Add('Telemetry policy is not zero-telemetry.') }
@@ -202,6 +203,11 @@ try {
         } catch {
             $blockers.Add('Tauri release version could not be read for manifest comparison.')
         }
+        $contactArgs = @('--manifest', (Join-Path $SourceRoot 'legal/release-manifest.json'))
+        if ($CandidateOnly) { $contactArgs += '--candidate-only' }
+        $contactArgs += @('--expected-version', [string]$manifest.release_version)
+        & node (Join-Path $SourceRoot 'scripts/verify-release-contact.mjs') @contactArgs
+        if ($LASTEXITCODE -ne 0) { $blockers.Add('Public contact review gate failed.') }
     }
 
     try { $model = Get-Content -LiteralPath (Join-Path $SourceRoot 'src-tauri/resources/local-llm-manifest.json') -Raw | ConvertFrom-Json } catch { $blockers.Add('Local LLM manifest is invalid JSON.'); $model = $null }
@@ -238,5 +244,9 @@ try {
         Write-Error ("PULSARIA LEGAL RELEASE GATE: BLOCKED`n - " + ($blockers -join "`n - "))
         exit 1
     }
-    Write-Host 'PULSARIA LEGAL RELEASE GATE: PASS'
+    if ($CandidateOnly) {
+        Write-Host 'PULSARIA CANDIDATE MATERIALS GATE: PASS; this is not publication approval.'
+    } else {
+        Write-Host 'PULSARIA LEGAL MATERIALS GATE: PASS; exact artifact approval is still enforced by GitHub Environment.'
+    }
 } finally { Pop-Location }

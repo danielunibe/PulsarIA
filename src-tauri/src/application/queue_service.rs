@@ -7,9 +7,10 @@ use metrics::{counter, gauge, histogram};
 use tokio::process::Command;
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::Duration;
-use tracing::{error, info, instrument, warn};
+use tracing::{info, instrument, warn};
 
 use crate::application::search_service::SearchService;
+use crate::db;
 use crate::domain::models::JobMessage;
 use crate::domain::ports::JobRepository;
 use crate::infrastructure::workers::python_runner::{PythonWorker, WorkerMetadata, WorkerResult};
@@ -26,17 +27,73 @@ const MAX_WORKER_LIMIT: usize = 8;
 
 const BACKPRESSURE_ERROR: &str = "System is saturated: backpressure applied";
 
+#[derive(Clone)]
+struct QueueAdmissionGate {
+    workers: Arc<Semaphore>,
+    profiles: Arc<Semaphore>,
+    processing_paused: Arc<AtomicBool>,
+    background_paused: Arc<AtomicBool>,
+    profile_processing_authorized: Arc<AtomicBool>,
+    profile_cooldown: Duration,
+}
+
+impl QueueAdmissionGate {
+    async fn run(&self, profile_background: bool, work: impl std::future::Future<Output = ()>) {
+        let profile_permit = if profile_background {
+            match self.profiles.clone().acquire_owned().await {
+                Ok(permit) => Some(permit),
+                Err(_) => return,
+            }
+        } else {
+            None
+        };
+        let admission_paused = || {
+            self.processing_paused.load(Ordering::SeqCst)
+                || (profile_background
+                    && (self.background_paused.load(Ordering::SeqCst)
+                        || !self.profile_processing_authorized.load(Ordering::SeqCst)))
+        };
+        let permit = loop {
+            while admission_paused() {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            let permit = match self.workers.clone().acquire_owned().await {
+                Ok(permit) => permit,
+                Err(_) => return,
+            };
+            // Pause or consent can change while this task waits for worker capacity.
+            // Release the slot and re-check before starting work.
+            if admission_paused() {
+                drop(permit);
+                continue;
+            }
+            break permit;
+        };
+        work.await;
+        drop(permit);
+        // The profile cooldown leaves ordinary workers available for foreground jobs.
+        if profile_permit.is_some() {
+            tokio::time::sleep(self.profile_cooldown).await;
+        }
+        drop(profile_permit);
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceScanItem {
     pub url: String,
     pub id: Option<String>,
     pub upload_date: Option<String>,
     pub timestamp: Option<f64>,
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceScanCategory {
     pub available: bool,
+    #[serde(default)]
+    pub status: Option<String>,
     pub reason: Option<String>,
     #[serde(default)]
     pub auth_required: bool,
@@ -93,6 +150,8 @@ pub struct QueueService {
     idle_workers: Arc<tokio::sync::Mutex<Vec<PythonWorker>>>,
     processing_paused: Arc<AtomicBool>,
     background_admission_paused: Arc<AtomicBool>,
+    profile_processing_authorized: Arc<AtomicBool>,
+    profile_feeder_running: Arc<AtomicBool>,
     /// Serializes maintenance rebuilds with the moment a job is admitted.
     /// The guard is intentionally held only while claiming a job or while
     /// performing the complete rebuild, never while downloading media.
@@ -587,6 +646,15 @@ impl QueueService {
         let active_jobs = Arc::new(tokio::sync::Mutex::new(HashSet::<i64>::new()));
         let processing_paused = Arc::new(AtomicBool::new(false));
         let background_admission_paused = Arc::new(AtomicBool::new(false));
+        let profile_processing_authorized = Arc::new(AtomicBool::new(false));
+        let admission_gate = QueueAdmissionGate {
+            workers: semaphore.clone(),
+            profiles: Arc::new(Semaphore::new(1)),
+            processing_paused: processing_paused.clone(),
+            background_paused: background_admission_paused.clone(),
+            profile_processing_authorized: profile_processing_authorized.clone(),
+            profile_cooldown: Duration::from_secs(30),
+        };
 
         info!("Initializing worker pool with {} workers", worker_count);
 
@@ -604,14 +672,6 @@ impl QueueService {
                 while processing_paused_clone.load(Ordering::SeqCst) {
                     tokio::time::sleep(Duration::from_millis(250)).await;
                 }
-                let permit = match semaphore.clone().acquire_owned().await {
-                    Ok(permit) => permit,
-                    Err(error) => {
-                        error!("Failed acquiring worker permit: {}", error);
-                        continue;
-                    }
-                };
-
                 let runtime = QueueRuntime {
                     repo: repo_clone.clone(),
                     search: search_clone.clone(),
@@ -622,9 +682,13 @@ impl QueueService {
                     active_jobs: active_jobs_clone.clone(),
                 };
 
+                let gate = admission_gate.clone();
                 tokio::spawn(async move {
-                    Self::execute_job_with_retries(message, runtime).await;
-                    drop(permit);
+                    gate.run(
+                        message.profile_background,
+                        Self::execute_job_with_retries(message, runtime),
+                    )
+                    .await;
                 });
             }
         });
@@ -640,6 +704,8 @@ impl QueueService {
             idle_workers: idle_workers_for_health,
             processing_paused,
             background_admission_paused,
+            profile_processing_authorized,
+            profile_feeder_running: Arc::new(AtomicBool::new(false)),
             maintenance_lock,
         }
     }
@@ -682,12 +748,21 @@ impl QueueService {
             .store(paused, Ordering::SeqCst);
     }
 
+    pub fn is_profile_processing_authorized(&self) -> bool {
+        self.profile_processing_authorized.load(Ordering::SeqCst)
+    }
+
+    pub fn set_profile_processing_authorized(&self, authorized: bool) {
+        self.profile_processing_authorized
+            .store(authorized, Ordering::SeqCst);
+    }
+
     /// Re-enqueues work that survived a previous process shutdown. SQLite is
     /// the source of truth for jobs, but the in-memory channel is intentionally
     /// rebuilt on every launch. Without this reconciliation, a job could stay
     /// forever in `queued` (or in an interrupted processing state) while the UI
     /// correctly reports that it has no worker attached to it.
-    pub async fn resume_pending_jobs(&self) -> Result<usize, String> {
+    pub async fn resume_pending_jobs(self: &Arc<Self>) -> Result<usize, String> {
         let jobs = self.job_repo.get_all_jobs()?;
         let pending_jobs = jobs
             .into_iter()
@@ -708,6 +783,12 @@ impl QueueService {
 
         let mut resumed = 0;
         for job in pending_jobs {
+            let profile_job = self.job_repo.get_connection().and_then(|connection| {
+                let connection = connection
+                    .lock()
+                    .map_err(|_| "Database mutex poisoned".to_string())?;
+                db::is_profile_job(&connection, job.id).map_err(|error| error.to_string())
+            })?;
             // Claim the job before touching its files. This closes the race
             // with a manual retry arriving between the active check and the
             // cleanup below.
@@ -741,6 +822,12 @@ impl QueueService {
                 continue;
             }
 
+            if profile_job {
+                self.active_jobs.lock().await.remove(&job.id);
+                resumed += 1;
+                continue;
+            }
+
             let result = self
                 .enqueue_claimed(
                     job.id,
@@ -764,7 +851,52 @@ impl QueueService {
             }
         }
 
+        self.start_profile_job_feeder();
         Ok(resumed)
+    }
+
+    /// SQLite jobs remain the backlog. Admit one profile job at a time to the
+    /// same channel, observing pause, performance policy and backpressure.
+    pub fn start_profile_job_feeder(self: &Arc<Self>) {
+        if self.profile_feeder_running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let queue = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                if queue.is_processing_paused()
+                    || queue.is_background_admission_paused()
+                    || !queue.is_profile_processing_authorized()
+                    || queue.current_depth.load(Ordering::SeqCst) >= QUEUE_HIGH_WATERMARK
+                    || queue.backpressure_active.load(Ordering::SeqCst)
+                {
+                    continue;
+                }
+                let pending = queue.job_repo.get_connection().and_then(|connection| {
+                    let connection = connection
+                        .lock()
+                        .map_err(|_| "Database mutex poisoned".to_string())?;
+                    db::get_pending_profile_jobs(&connection).map_err(|error| error.to_string())
+                });
+                let pending = match pending {
+                    Ok(jobs) => jobs,
+                    Err(error) => {
+                        warn!("Profile queue lookup failed: {error}");
+                        continue;
+                    }
+                };
+                let active = queue.active_job_ids().await;
+                if let Some((id, url)) = pending.into_iter().find(|(id, _)| !active.contains(id)) {
+                    if let Err(error) = queue.dispatch(id, url).await {
+                        warn!("Profile admission failed: {error}");
+                    }
+                    while queue.is_active(id).await {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                }
+            }
+        });
     }
 
     pub async fn expand_collection(&self, url: &str) -> Result<Vec<String>, String> {
@@ -853,7 +985,7 @@ impl QueueService {
             .arg("--categories")
             .arg(categories_json)
             .arg("--limit")
-            .arg(limit.clamp(1, 1000).to_string())
+            .arg(if limit == 0 { 0 } else { limit.clamp(1, 1000) }.to_string())
             .current_dir(&worker_dir)
             .env("PYTHONPATH", &worker_dir)
             .env("PYTHONUNBUFFERED", "1");
@@ -867,10 +999,13 @@ impl QueueService {
         }
         crate::process_control::hide_tokio_command(&mut command);
 
-        let output = tokio::time::timeout(Duration::from_secs(180), command.output())
-            .await
-            .map_err(|_| "Timed out inspecting TikTok source".to_string())?
-            .map_err(|error| format!("Failed to start source scanner: {error}"))?;
+        let output = tokio::time::timeout(
+            Duration::from_secs(if limit == 0 { 360 } else { 180 }),
+            command.output(),
+        )
+        .await
+        .map_err(|_| "Timed out inspecting TikTok source".to_string())?
+        .map_err(|error| format!("Failed to start source scanner: {error}"))?;
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let parsed: serde_json::Value = serde_json::from_str(&stdout).map_err(|error| {
@@ -993,6 +1128,12 @@ impl QueueService {
             .unwrap_or_else(storage::default_media_root);
         storage::ensure_capacity(&media_root)?;
 
+        let profile_background = self.job_repo.get_connection().and_then(|connection| {
+            let connection = connection
+                .lock()
+                .map_err(|_| "Database mutex poisoned".to_string())?;
+            db::is_profile_job(&connection, job_id).map_err(|error| error.to_string())
+        })?;
         self.reserve_depth()?;
         let formats =
             std::env::var("PULSAR_FORMATS").unwrap_or_else(|_| "[\"mp4\",\"mp3\",\"txt\"]".into());
@@ -1018,6 +1159,7 @@ impl QueueService {
                 whisper_model,
                 whisper_device,
                 whisper_compute_type,
+                profile_background,
             })
             .await
         {
@@ -1389,6 +1531,131 @@ mod tests {
     use super::{rewrite_visual_artifact_paths, worker_count_for};
     use serde_json::json;
     use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn profile_admission_is_serial_and_foreground_can_run_during_cooldown() {
+        use super::QueueAdmissionGate;
+        use std::sync::{atomic::AtomicBool, Arc};
+        use tokio::sync::{oneshot, Semaphore};
+        use tokio::time::{Duration, Instant};
+        let gate = QueueAdmissionGate {
+            workers: Arc::new(Semaphore::new(1)),
+            profiles: Arc::new(Semaphore::new(1)),
+            processing_paused: Arc::new(AtomicBool::new(false)),
+            background_paused: Arc::new(AtomicBool::new(false)),
+            profile_processing_authorized: Arc::new(AtomicBool::new(true)),
+            profile_cooldown: Duration::from_millis(80),
+        };
+        let (finished, receiver) = oneshot::channel();
+        let first_gate = gate.clone();
+        let first = tokio::spawn(async move {
+            first_gate
+                .run(true, async {
+                    finished.send(Instant::now()).unwrap();
+                })
+                .await;
+        });
+        let finished_at = receiver.await.unwrap();
+        let second_gate = gate.clone();
+        let second = tokio::spawn(async move {
+            second_gate
+                .run(true, async {
+                    assert!(
+                        finished_at.elapsed() >= Duration::from_millis(80),
+                        "next profile must wait for the cooldown"
+                    );
+                })
+                .await;
+        });
+        tokio::time::timeout(Duration::from_millis(40), gate.run(false, async {}))
+            .await
+            .expect("foreground admission must not wait for the profile cooldown");
+        first.await.unwrap();
+        second.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn profile_admission_waits_for_current_rights_consent() {
+        use super::QueueAdmissionGate;
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        use tokio::sync::Semaphore;
+        use tokio::time::Duration;
+
+        let authorized = Arc::new(AtomicBool::new(false));
+        let processed = Arc::new(AtomicBool::new(false));
+        let gate = QueueAdmissionGate {
+            workers: Arc::new(Semaphore::new(1)),
+            profiles: Arc::new(Semaphore::new(1)),
+            processing_paused: Arc::new(AtomicBool::new(false)),
+            background_paused: Arc::new(AtomicBool::new(false)),
+            profile_processing_authorized: authorized.clone(),
+            profile_cooldown: Duration::ZERO,
+        };
+
+        let work_processed = processed.clone();
+        let task = tokio::spawn(async move {
+            gate.run(true, async move {
+                work_processed.store(true, Ordering::SeqCst);
+            })
+            .await;
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(!processed.load(Ordering::SeqCst));
+
+        authorized.store(true, Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_millis(500), task)
+            .await
+            .expect("profile work should resume after consent is saved")
+            .unwrap();
+        assert!(processed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn paused_queue_does_not_start_jobs_waiting_for_worker_capacity() {
+        use super::QueueAdmissionGate;
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        use tokio::sync::Semaphore;
+        use tokio::time::{sleep, timeout, Duration};
+
+        let processing_paused = Arc::new(AtomicBool::new(false));
+        let started = Arc::new(AtomicBool::new(false));
+        let workers = Arc::new(Semaphore::new(0));
+        let gate = QueueAdmissionGate {
+            workers: workers.clone(),
+            profiles: Arc::new(Semaphore::new(1)),
+            processing_paused: processing_paused.clone(),
+            background_paused: Arc::new(AtomicBool::new(false)),
+            profile_processing_authorized: Arc::new(AtomicBool::new(true)),
+            profile_cooldown: Duration::ZERO,
+        };
+
+        let task_started = started.clone();
+        let task = tokio::spawn(async move {
+            gate.run(false, async move {
+                task_started.store(true, Ordering::SeqCst);
+            })
+            .await;
+        });
+
+        sleep(Duration::from_millis(25)).await;
+        processing_paused.store(true, Ordering::SeqCst);
+        workers.add_permits(1);
+        sleep(Duration::from_millis(50)).await;
+        assert!(!started.load(Ordering::SeqCst));
+
+        processing_paused.store(false, Ordering::SeqCst);
+        timeout(Duration::from_millis(500), task)
+            .await
+            .expect("queued work should resume after the pause is lifted")
+            .unwrap();
+        assert!(started.load(Ordering::SeqCst));
+    }
 
     #[test]
     fn worker_pool_has_safe_default_and_configured_bounds() {
