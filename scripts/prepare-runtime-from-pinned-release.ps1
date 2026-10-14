@@ -18,13 +18,17 @@ if ([string]::IsNullOrWhiteSpace($runnerTempRaw) -or -not (Test-Path -LiteralPat
     throw 'RUNNER_TEMP must identify an existing temporary directory.'
 }
 $runnerTemp = (Resolve-Path -LiteralPath $runnerTempRaw).Path
-$runnerTempPrefix = $runnerTemp.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
 
 function Assert-OwnedRunnerTempPath {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Root
+    )
 
+    $resolvedRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\', '/'))
+    $rootPrefix = $resolvedRoot + [System.IO.Path]::DirectorySeparatorChar
     $resolvedPath = [System.IO.Path]::GetFullPath($Path)
-    if (-not $resolvedPath.StartsWith($runnerTempPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $resolvedPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to use a path outside RUNNER_TEMP: $resolvedPath"
     }
 }
@@ -35,9 +39,9 @@ $bootstrapSha256 = '1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB95
 $bootstrapRoot = Join-Path $runnerTemp "pulsaria-runtime-bootstrap-$([guid]::NewGuid().ToString('N'))"
 $bootstrapInstallerPath = Join-Path $bootstrapRoot $bootstrapInstallerName
 $bootstrapInstallRoot = Join-Path $bootstrapRoot 'install'
-Assert-OwnedRunnerTempPath $bootstrapRoot
-Assert-OwnedRunnerTempPath $bootstrapInstallerPath
-Assert-OwnedRunnerTempPath $bootstrapInstallRoot
+Assert-OwnedRunnerTempPath -Path $bootstrapRoot -Root $runnerTemp
+Assert-OwnedRunnerTempPath -Path $bootstrapInstallerPath -Root $runnerTemp
+Assert-OwnedRunnerTempPath -Path $bootstrapInstallRoot -Root $runnerTemp
 if (Test-Path -LiteralPath $bootstrapRoot) {
     throw "Refusing to reuse an existing bootstrap temp directory: $bootstrapRoot"
 }
@@ -84,14 +88,14 @@ try {
     Write-Host "PULSARIA PINNED RUNTIME BOOTSTRAP: PASS ($bootstrapRelease, $bootstrapSha256)"
 } finally {
     if ($bootstrapRootCreated -and (Test-Path -LiteralPath $bootstrapRoot)) {
-        Assert-OwnedRunnerTempPath $bootstrapRoot
+        Assert-OwnedRunnerTempPath -Path $bootstrapRoot -Root $runnerTemp
         if ($bootstrapInstallationStarted) {
             # NSIS registers the product even with /D pointing into RUNNER_TEMP.
             # Removing the directory alone leaves a stale registration and
             # shortcuts. Only uninstall the bootstrap created by this run.
             $uninstaller = Get-ChildItem -LiteralPath $bootstrapInstallRoot -Filter '*uninstall*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($null -ne $uninstaller) {
-                Assert-OwnedRunnerTempPath $uninstaller.FullName
+                Assert-OwnedRunnerTempPath -Path $uninstaller.FullName -Root $runnerTemp
                 # _?= prevents NSIS from spawning a temporary uninstaller and
                 # returning before the actual uninstall and its exit code.
                 $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList @('/S', "_?=$bootstrapInstallRoot") -WindowStyle Hidden -Wait -PassThru
