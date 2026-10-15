@@ -25,13 +25,21 @@ function global:Start-Process {
         $expectedInstallRoot = Split-Path -Parent $FilePath
         $actualInstallArgument = if ($ArgumentList.Count -gt 1) { [string]$ArgumentList[1] } else { '' }
         $actualInstallRoot = if ($actualInstallArgument.StartsWith('_?=')) { $actualInstallArgument.Substring(3) } else { '' }
-        $expectedResolved = (Resolve-Path -LiteralPath $expectedInstallRoot).Path.TrimEnd([char[]]@('\', '/'))
-        $actualResolved = if (Test-Path -LiteralPath $actualInstallRoot -PathType Container) {
-            (Resolve-Path -LiteralPath $actualInstallRoot).Path.TrimEnd([char[]]@('\', '/'))
-        } else { '' }
-        $sameInstallRoot = [System.StringComparer]::OrdinalIgnoreCase.Equals($actualResolved, $expectedResolved)
+        $expectedMarkerName = ".pulsaria-uninstall-root-$([guid]::NewGuid().ToString('N'))"
+        $expectedMarkerPath = Join-Path $expectedInstallRoot $expectedMarkerName
+        $validArguments = $ArgumentList.Count -eq 2 -and $ArgumentList[0] -eq '/S' -and
+            (Test-Path -LiteralPath $actualInstallRoot -PathType Container)
+        $sameInstallRoot = $false
+        if ($validArguments) {
+            New-Item -ItemType File -Path $expectedMarkerPath -Force | Out-Null
+            try {
+                $sameInstallRoot = Test-Path -LiteralPath (Join-Path $actualInstallRoot $expectedMarkerName) -PathType Leaf
+            } finally {
+                Remove-Item -LiteralPath $expectedMarkerPath -Force -ErrorAction SilentlyContinue
+            }
+        }
         if ($ArgumentList.Count -ne 2 -or $ArgumentList[0] -ne '/S' -or -not $sameInstallRoot) {
-            throw "NSIS must be awaited with its exact owned install directory as the final _?= argument. Expected '$expectedResolved'; received '$actualInstallArgument'."
+            throw "NSIS must be awaited with its exact owned install directory as the final _?= argument. Expected '$expectedInstallRoot'; received '$actualInstallArgument'."
         }
         $global:bootstrapFixture.uninstalls++
         if ($global:bootstrapFixture.uninstallExit -eq 0) { $global:bootstrapFixture.registered = $false }
