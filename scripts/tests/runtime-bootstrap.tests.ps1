@@ -23,8 +23,15 @@ function global:Start-Process {
     if ($WindowStyle -ne 'Hidden' -or -not $Wait -or -not $PassThru) { throw 'Bootstrap processes must run hidden and be awaited.' }
     if ([IO.Path]::GetFileName($FilePath) -eq 'uninstall.exe') {
         $expectedInstallRoot = Split-Path -Parent $FilePath
-        if ($ArgumentList.Count -ne 2 -or $ArgumentList[0] -ne '/S' -or $ArgumentList[1] -ne "_?=$expectedInstallRoot") {
-            throw 'NSIS must be awaited with its exact owned install directory as the final _?= argument.'
+        $actualInstallArgument = if ($ArgumentList.Count -gt 1) { [string]$ArgumentList[1] } else { '' }
+        $actualInstallRoot = if ($actualInstallArgument.StartsWith('_?=')) { $actualInstallArgument.Substring(3) } else { '' }
+        $expectedResolved = (Resolve-Path -LiteralPath $expectedInstallRoot).Path.TrimEnd([char[]]@('\', '/'))
+        $actualResolved = if (Test-Path -LiteralPath $actualInstallRoot -PathType Container) {
+            (Resolve-Path -LiteralPath $actualInstallRoot).Path.TrimEnd([char[]]@('\', '/'))
+        } else { '' }
+        $sameInstallRoot = [System.StringComparer]::OrdinalIgnoreCase.Equals($actualResolved, $expectedResolved)
+        if ($ArgumentList.Count -ne 2 -or $ArgumentList[0] -ne '/S' -or -not $sameInstallRoot) {
+            throw "NSIS must be awaited with its exact owned install directory as the final _?= argument. Expected '$expectedResolved'; received '$actualInstallArgument'."
         }
         $global:bootstrapFixture.uninstalls++
         if ($global:bootstrapFixture.uninstallExit -eq 0) { $global:bootstrapFixture.registered = $false }
