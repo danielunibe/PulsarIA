@@ -205,6 +205,10 @@ async fn ingest_handler(
     State(state): State<ApiState>,
     Json(payload): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>, (StatusCode, String)> {
+    state
+        .queue_service
+        .ensure_processing_authorized()
+        .map_err(|error| (StatusCode::FORBIDDEN, error))?;
     validate_ingest_url(&payload.url).map_err(|error| (StatusCode::BAD_REQUEST, error))?;
 
     if is_collection_source(&payload.url) {
@@ -451,6 +455,10 @@ async fn retry_job_handler(
     State(state): State<ApiState>,
     Path(job_id): Path<i64>,
 ) -> Result<Json<IngestResponse>, (StatusCode, String)> {
+    state
+        .queue_service
+        .ensure_processing_authorized()
+        .map_err(|error| (StatusCode::FORBIDDEN, error))?;
     if state.queue_service.is_active(job_id).await {
         return Ok(Json(IngestResponse {
             job_id,
@@ -472,8 +480,11 @@ async fn retry_job_handler(
         let job = crate::db::get_job_by_id(&connection, job_id)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
             .ok_or_else(|| (StatusCode::NOT_FOUND, "Job not found".to_string()))?;
-        let explicitly_queued = job.status.eq_ignore_ascii_case("queued");
-        if !explicitly_queued
+        let explicitly_resumed = matches!(
+            job.status.to_ascii_lowercase().as_str(),
+            "queued" | "paused"
+        );
+        if !explicitly_resumed
             && !matches!(
                 job.status.to_lowercase().as_str(),
                 "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
@@ -484,7 +495,7 @@ async fn retry_job_handler(
                 "Job is not available for retry".to_string(),
             ));
         }
-        if explicitly_queued
+        if explicitly_resumed
             && !crate::application::queue_service::retry_budget_allows_resume(job.retry_count)
         {
             return Err((
@@ -498,7 +509,7 @@ async fn retry_job_handler(
         let processing_root = crate::storage::staging_root(&media_root);
         crate::db::cleanup_media_files(&connection, job_id, &processing_root)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-        if explicitly_queued {
+        if explicitly_resumed {
             crate::db::update_job_status(&connection, job_id, "retrying", 0)
                 .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
             (job.url, Some(job.retry_count))

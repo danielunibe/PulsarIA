@@ -188,6 +188,7 @@ test('the rights gate keeps the profile form mounted so a draft is not lost', ()
     'react-dom': { createPortal: (children) => children },
     '@/components/TikTokSourcesPanel': { TikTokSourcesPanel: ProfilePanel },
     '@/lib/url-validation': {}, '@/components/icon-library': {},
+    '@/hooks/use-processing-settings': { isTauriRuntime: () => false },
     '@/lib/i18n': { useI18n: () => ({ t: (key) => key }) },
   });
   const render = () => { index = 0; return elements(api.AddLinks({ mode: 'profiles', onSubmitLinks: async () => ({}) })); };

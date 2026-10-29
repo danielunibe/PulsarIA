@@ -187,6 +187,8 @@ impl ProfileDiscoveryService {
         &self,
         profile_url: &str,
     ) -> Result<ProfileMetadataSnapshot, String> {
+        self.queue.ensure_processing_authorized()?;
+        let cookie_browser = self.queue.current_cookie_browser();
         let python_exe = runtime::python_executable();
         let script = runtime::worker_script("main.py");
         let worker_dir = script
@@ -201,13 +203,23 @@ impl ProfileDiscoveryService {
             .arg(profile_url)
             .current_dir(&worker_dir)
             .env("PYTHONPATH", &worker_dir)
-            .env("PYTHONUNBUFFERED", "1");
+            .env("PYTHONUNBUFFERED", "1")
+            .env_remove("PULSAR_COOKIES_FROM_BROWSER");
+        if let Some(browser) = cookie_browser.as_deref() {
+            cmd.env("PULSAR_COOKIES_FROM_BROWSER", browser);
+        }
 
         crate::process_control::hide_tokio_command(&mut cmd);
 
-        let output = tokio::time::timeout(Duration::from_secs(30), cmd.output())
+        let output = self
+            .queue
+            .run_cookie_scoped_command(
+                cmd,
+                Duration::from_secs(30),
+                "Timed out resolving profile metadata",
+                cookie_browser,
+            )
             .await
-            .map_err(|_| "Timed out resolving profile metadata".to_string())?
             .map_err(|err| format!("Failed to execute metadata resolver: {err}"))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -265,6 +277,7 @@ impl ProfileDiscoveryService {
         &self,
         source_id: i64,
     ) -> Result<ProfileMetadataSnapshot, String> {
+        self.queue.ensure_processing_authorized()?;
         let (profile_url, _username) = {
             let conn = self
                 .db
@@ -315,7 +328,7 @@ impl ProfileDiscoveryService {
         source_id: i64,
         is_manual_sync: bool,
     ) -> Result<ProfileDiscoveryReport, String> {
-        if !self.queue.is_profile_processing_authorized() {
+        if !self.queue.is_processing_authorized() {
             return Err(
                 "La consulta de perfiles requiere aceptar las condiciones de derechos vigentes."
                     .into(),

@@ -82,7 +82,8 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
   const [retryingKey, setRetryingKey] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
 
-  const activeJobs = useMemo(() => jobs.filter((job) => !isCompletedJob(job) && !isFailedJob(job)), [jobs]);
+  const activeJobs = useMemo(() => jobs.filter((job) => !isCompletedJob(job) && !isFailedJob(job) && job.status.toLowerCase() !== 'paused'), [jobs]);
+  const pausedJobs = useMemo(() => jobs.filter((job) => job.status.toLowerCase() === 'paused'), [jobs]);
   const boundIds = useMemo(() => new Set(pending.map((item) => item.jobId).filter((id): id is number => typeof id === 'number')), [pending]);
   const tasks = useMemo<Array<JobRecord | PendingJob>>(() => [
     ...pending.filter((item) => item.status !== 'retryable' && (!item.jobId || !jobs.some((job) => job.id === item.jobId))),
@@ -104,7 +105,7 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
   }, [tasks]);
 
   const formats = [...settings.formats].sort((a, b) => (FORMAT_META[a]?.step ?? 99) - (FORMAT_META[b]?.step ?? 99));
-  if (tasks.length === 0 && failedJobs.length === 0 && retryablePending.length === 0) return null;
+  if (tasks.length === 0 && failedJobs.length === 0 && retryablePending.length === 0 && pausedJobs.length === 0) return null;
 
   return (
     <section className="flex min-h-0 w-full flex-col gap-3 font-sans">
@@ -146,6 +147,39 @@ export function QueueSection({ jobs, pending, globalProgress, onRetryJob, onRetr
             </motion.div>
           );
         })}
+        {pausedJobs.length > 0 && (
+          <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-amber-300/10 bg-amber-300/[0.04] p-3" aria-label={t('queuePausedConsent')}>
+            <div className="flex items-center justify-between px-1 pb-1">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-300/80" />
+                <span className="text-[10px] font-black uppercase tracking-[0.14em] text-white/80">{t('queuePausedConsent')}</span>
+              </div>
+              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-amber-300/10 text-amber-200">{pausedJobs.length}</span>
+            </div>
+            <p className="px-1 text-[9px] leading-relaxed text-white/45">{t('queuePausedConsentHelp')}</p>
+            <div className="flex flex-col gap-1.5">
+              {pausedJobs.map((job) => (
+                <div key={`paused-${job.id}`} className="flex items-center justify-between gap-2.5 rounded-xl bg-black/30 px-3 py-2">
+                  <p className="min-w-0 flex-1 truncate text-[11px] font-medium text-white/70" title={job.title || job.url}>{job.title || job.url}</p>
+                  <button
+                    type="button"
+                    disabled={retryingKey !== null}
+                    onClick={() => {
+                      setRetryError(null);
+                      setRetryingKey(`paused-${job.id}`);
+                      void onRetryJob(job.id).catch((error: unknown) => {
+                        setRetryError(error instanceof Error ? error.message : String(error));
+                      }).finally(() => setRetryingKey(null));
+                    }}
+                    className="shrink-0 rounded-xl border border-amber-300/20 bg-amber-300/[0.08] px-3 py-2 text-[9px] font-black text-amber-100 transition hover:bg-amber-300/[0.14] disabled:opacity-50"
+                  >
+                    {retryingKey === `paused-${job.id}` ? t('retrying') : t('queueResume')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {(failedJobs.length > 0 || retryablePending.length > 0) && (
           <div className="mt-2 flex flex-col gap-2 rounded-2xl bg-[#fe2c55]/[0.05] p-3 border-0" aria-label={t('retryableJobs')}>
             <div className="flex items-center justify-between px-1 pb-1">

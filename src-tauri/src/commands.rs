@@ -525,10 +525,21 @@ pub struct LegalConsentInput {
     pub locale: String,
 }
 
+/// User acknowledgement of the content-rights gate used by the ingestion UI.
+/// It is stored by the native process so REST and IPC entry points share the
+/// same consent state instead of trusting browser storage.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentRightsConsent {
+    pub version: String,
+    pub accepted_at: Option<String>,
+}
+
 const CURRENT_EULA_VERSION: &str = "0.1";
 const CURRENT_TERMS_VERSION: &str = "0.1";
 const CURRENT_PRIVACY_VERSION: &str = "0.1";
 const CURRENT_CONTENT_POLICY_VERSION: &str = "0.1";
+const CURRENT_CONTENT_RIGHTS_VERSION: &str = "1.0";
 
 const APP_SETTINGS_SCHEMA_VERSION: u32 = 1;
 
@@ -3370,6 +3381,7 @@ pub async fn add_job(
     state: State<'_, AppState>,
     _app_handle: tauri::AppHandle,
 ) -> Result<i64, String> {
+    state.queue.ensure_processing_authorized()?;
     {
         let configured = state.worker_config.read().await.processing.clone();
         let effective = effective_processing_settings(configured.clone())?;
@@ -3640,6 +3652,7 @@ pub async fn connect_tiktok_source(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<ConnectTikTokSourceResult, String> {
+    state.queue.ensure_processing_authorized()?;
     let browser = state.worker_config.read().await.cookies_browser.clone();
     connect_tiktok_source_service(
         state.db.clone(),
@@ -3659,6 +3672,9 @@ pub async fn register_profile_source(
     input: RegisterProfileSourceInput,
     state: State<'_, AppState>,
 ) -> Result<RegisterProfileSourceResult, String> {
+    if input.auto_enqueue {
+        state.queue.ensure_processing_authorized()?;
+    }
     let browser = state.worker_config.read().await.cookies_browser.clone();
     let connection = state
         .db
@@ -3680,6 +3696,9 @@ pub async fn update_profile_source_settings(
     input: UpdateProfileSourceSettingsInput,
     state: State<'_, AppState>,
 ) -> Result<db::CollectionSourceRecord, String> {
+    if input.auto_enqueue == Some(true) {
+        state.queue.ensure_processing_authorized()?;
+    }
     let connection = state
         .db
         .lock()
@@ -3701,6 +3720,9 @@ pub async fn set_profile_auto_enqueue(
     auto_enqueue: bool,
     state: State<'_, AppState>,
 ) -> Result<db::CollectionSourceRecord, String> {
+    if auto_enqueue {
+        state.queue.ensure_processing_authorized()?;
+    }
     let connection = state
         .db
         .lock()
@@ -3825,6 +3847,7 @@ pub async fn sync_collection_source_now(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<crate::application::collection_service::SourceSyncSummary, String> {
+    state.queue.ensure_processing_authorized()?;
     let source_type = {
         let connection = state
             .db
@@ -4032,8 +4055,39 @@ fn load_current_legal_consent() -> LegalConsent {
     consent
 }
 
-pub(crate) fn has_current_legal_consent() -> bool {
-    legal_consent_is_current(&load_current_legal_consent())
+fn default_content_rights_consent() -> ContentRightsConsent {
+    ContentRightsConsent {
+        version: CURRENT_CONTENT_RIGHTS_VERSION.into(),
+        accepted_at: None,
+    }
+}
+
+fn content_rights_consent_is_current(consent: &ContentRightsConsent) -> bool {
+    consent.version == CURRENT_CONTENT_RIGHTS_VERSION && consent.accepted_at.is_some()
+}
+
+fn load_current_content_rights_consent() -> ContentRightsConsent {
+    let path = settings_data_dir().join("content-rights-consent.json");
+    let consent = fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<ContentRightsConsent>(&contents).ok())
+        .unwrap_or_else(default_content_rights_consent);
+    if content_rights_consent_is_current(&consent) {
+        consent
+    } else {
+        default_content_rights_consent()
+    }
+}
+
+pub(crate) fn has_current_processing_consent() -> bool {
+    processing_consent_is_current(
+        &load_current_legal_consent(),
+        &load_current_content_rights_consent(),
+    )
+}
+
+fn processing_consent_is_current(legal: &LegalConsent, rights: &ContentRightsConsent) -> bool {
+    legal_consent_is_current(legal) && content_rights_consent_is_current(rights)
 }
 
 #[tauri::command]
@@ -4041,7 +4095,39 @@ pub async fn get_legal_consent(state: State<'_, AppState>) -> Result<LegalConsen
     let consent = load_current_legal_consent();
     state
         .queue
-        .set_profile_processing_authorized(legal_consent_is_current(&consent));
+        .set_processing_authorized(has_current_processing_consent());
+    Ok(consent)
+}
+
+#[tauri::command]
+pub async fn get_content_rights_consent(
+    state: State<'_, AppState>,
+) -> Result<ContentRightsConsent, String> {
+    let consent = load_current_content_rights_consent();
+    state
+        .queue
+        .set_processing_authorized(has_current_processing_consent());
+    Ok(consent)
+}
+
+#[tauri::command]
+pub async fn set_content_rights_consent(
+    accepted: bool,
+    state: State<'_, AppState>,
+) -> Result<ContentRightsConsent, String> {
+    let consent = ContentRightsConsent {
+        version: CURRENT_CONTENT_RIGHTS_VERSION.into(),
+        accepted_at: accepted.then(|| chrono::Utc::now().to_rfc3339()),
+    };
+    fs::create_dir_all(settings_data_dir()).map_err(|error| error.to_string())?;
+    let serialized = serde_json::to_vec_pretty(&consent).map_err(|error| error.to_string())?;
+    atomic_write(
+        &settings_data_dir().join("content-rights-consent.json"),
+        &serialized,
+    )?;
+    state
+        .queue
+        .set_processing_authorized(has_current_processing_consent());
     Ok(consent)
 }
 
@@ -4072,7 +4158,9 @@ pub async fn save_legal_consent(
     fs::create_dir_all(settings_data_dir()).map_err(|error| error.to_string())?;
     let serialized = serde_json::to_vec_pretty(&consent).map_err(|error| error.to_string())?;
     atomic_write(&settings_data_dir().join("legal-consent.json"), &serialized)?;
-    state.queue.set_profile_processing_authorized(true);
+    state
+        .queue
+        .set_processing_authorized(has_current_processing_consent());
     Ok(consent)
 }
 
@@ -4256,6 +4344,7 @@ pub async fn retry_job(
     state: State<'_, AppState>,
     _app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    state.queue.ensure_processing_authorized()?;
     // A failed attempt may still be inside QueueService's exponential
     // backoff. Treat a second click as idempotent instead of resetting the
     // same job while its original retry task is alive.
@@ -4272,8 +4361,8 @@ pub async fn retry_job(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "Trabajo no encontrado".to_string())?;
         let status = job.status.to_lowercase();
-        let explicitly_queued = status == "queued";
-        if !explicitly_queued
+        let explicitly_resumed = matches!(status.as_str(), "queued" | "paused");
+        if !explicitly_resumed
             && !matches!(
                 status.as_str(),
                 "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
@@ -4281,7 +4370,7 @@ pub async fn retry_job(
         {
             return Err("El trabajo todav├¡a no est├í disponible para reintento".to_string());
         }
-        if explicitly_queued
+        if explicitly_resumed
             && !crate::application::queue_service::retry_budget_allows_resume(job.retry_count)
         {
             return Err(
@@ -4293,7 +4382,7 @@ pub async fn retry_job(
         // A retry starts from a clean pipeline instead of reusing partial files.
         db::cleanup_media_files(&db, job_id, &processing_root())
             .map_err(|error| error.to_string())?;
-        if explicitly_queued {
+        if explicitly_resumed {
             db::update_job_status(&db, job_id, "retrying", 0).map_err(|error| error.to_string())?;
             (job.url, Some(job.retry_count))
         } else {
@@ -6318,8 +6407,9 @@ pub async fn get_model_capability_profiles(
 mod unib_tests {
     use super::{
         apply_checkpoint_transition, atomic_write, classify_local_model_error,
-        default_legal_consent, legal_consent_is_current, parse_unib_segments, parse_unib_time,
-        unib_header_value, LocalModelErrorCode,
+        content_rights_consent_is_current, default_content_rights_consent, default_legal_consent,
+        legal_consent_is_current, parse_unib_segments, parse_unib_time,
+        processing_consent_is_current, unib_header_value, LocalModelErrorCode,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -6457,5 +6547,23 @@ mod unib_tests {
         assert!(legal_consent_is_current(&consent));
         consent.privacy_version = "0.2".into();
         assert!(!legal_consent_is_current(&consent));
+    }
+
+    #[test]
+    fn processing_requires_both_current_legal_and_content_rights_consent() {
+        let mut legal = default_legal_consent();
+        let mut rights = default_content_rights_consent();
+        assert!(!processing_consent_is_current(&legal, &rights));
+
+        legal.accepted_at = Some("2026-10-29T00:00:00Z".into());
+        assert!(legal_consent_is_current(&legal));
+        assert!(!processing_consent_is_current(&legal, &rights));
+
+        rights.accepted_at = Some("2026-10-29T00:00:00Z".into());
+        assert!(content_rights_consent_is_current(&rights));
+        assert!(processing_consent_is_current(&legal, &rights));
+
+        rights.version = "0.9".into();
+        assert!(!processing_consent_is_current(&legal, &rights));
     }
 }

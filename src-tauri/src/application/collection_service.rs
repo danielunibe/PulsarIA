@@ -719,6 +719,7 @@ pub async fn connect_tiktok_source(
     history_from: Option<&str>,
     app_handle: tauri::AppHandle,
 ) -> Result<ConnectTikTokSourceResult, String> {
+    queue.ensure_processing_authorized()?;
     let profile_url = tiktok_profile_url(profile_url)
         .ok_or_else(|| "La URL no corresponde a un perfil TikTok válido".to_string())?;
     let source_id = {
@@ -889,6 +890,7 @@ pub async fn sync_collection_source_by_id(
     source_id: i64,
     app_handle: tauri::AppHandle,
 ) -> Result<SourceSyncSummary, String> {
+    queue.ensure_processing_authorized()?;
     let source = {
         let connection = db_connection
             .lock()

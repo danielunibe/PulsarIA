@@ -129,6 +129,7 @@ impl PythonWorker {
             .current_dir(worker_dir)
             .env("PYTHONPATH", worker_dir)
             .env("PYTHONUNBUFFERED", "1")
+            .env_remove("PULSAR_COOKIES_FROM_BROWSER")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

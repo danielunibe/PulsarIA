@@ -303,10 +303,10 @@ async fn main() {
         search_service.clone(),
         maintenance_lock,
     ));
-    let profile_processing_authorized = commands::has_current_legal_consent();
-    queue_service.set_profile_processing_authorized(profile_processing_authorized);
-    if !profile_processing_authorized {
-        tracing::info!("Profile discovery and processing are waiting for current rights consent");
+    let processing_authorized = commands::has_current_processing_consent();
+    queue_service.set_processing_authorized(processing_authorized);
+    if !processing_authorized {
+        tracing::info!("Processing is waiting for current legal and content-rights consent");
     }
     match queue_service.resume_pending_jobs().await {
         Ok(resumed) if resumed > 0 => {
@@ -728,6 +728,8 @@ async fn main() {
             commands::set_processing_pause,
             commands::get_legal_consent,
             commands::save_legal_consent,
+            commands::get_content_rights_consent,
+            commands::set_content_rights_consent,
             commands::get_app_settings,
             commands::save_app_settings,
             commands::get_autostart_status,

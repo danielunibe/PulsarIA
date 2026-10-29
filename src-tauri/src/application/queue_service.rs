@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use metrics::{counter, gauge, histogram};
@@ -33,36 +33,52 @@ struct QueueAdmissionGate {
     profiles: Arc<Semaphore>,
     processing_paused: Arc<AtomicBool>,
     background_paused: Arc<AtomicBool>,
-    profile_processing_authorized: Arc<AtomicBool>,
+    processing_authorized: Arc<AtomicBool>,
+    processing_authorization_epoch: Arc<AtomicU64>,
     profile_cooldown: Duration,
 }
 
 impl QueueAdmissionGate {
-    async fn run(&self, profile_background: bool, work: impl std::future::Future<Output = ()>) {
+    async fn run(
+        &self,
+        profile_background: bool,
+        authorization_epoch: u64,
+        work: impl std::future::Future<Output = ()>,
+    ) -> bool {
         let profile_permit = if profile_background {
             match self.profiles.clone().acquire_owned().await {
                 Ok(permit) => Some(permit),
-                Err(_) => return,
+                Err(_) => return false,
             }
         } else {
             None
         };
         let admission_paused = || {
             self.processing_paused.load(Ordering::SeqCst)
-                || (profile_background
-                    && (self.background_paused.load(Ordering::SeqCst)
-                        || !self.profile_processing_authorized.load(Ordering::SeqCst)))
+                || !self.processing_authorized.load(Ordering::SeqCst)
+                || (profile_background && self.background_paused.load(Ordering::SeqCst))
         };
         let permit = loop {
+            if self.processing_authorization_epoch.load(Ordering::SeqCst) != authorization_epoch {
+                return false;
+            }
             while admission_paused() {
                 tokio::time::sleep(Duration::from_millis(250)).await;
+                if self.processing_authorization_epoch.load(Ordering::SeqCst) != authorization_epoch
+                {
+                    return false;
+                }
             }
             let permit = match self.workers.clone().acquire_owned().await {
                 Ok(permit) => permit,
-                Err(_) => return,
+                Err(_) => return false,
             };
             // Pause or consent can change while this task waits for worker capacity.
             // Release the slot and re-check before starting work.
+            if self.processing_authorization_epoch.load(Ordering::SeqCst) != authorization_epoch {
+                drop(permit);
+                return false;
+            }
             if admission_paused() {
                 drop(permit);
                 continue;
@@ -76,6 +92,7 @@ impl QueueAdmissionGate {
             tokio::time::sleep(self.profile_cooldown).await;
         }
         drop(profile_permit);
+        true
     }
 }
 
@@ -150,7 +167,8 @@ pub struct QueueService {
     idle_workers: Arc<tokio::sync::Mutex<Vec<PythonWorker>>>,
     processing_paused: Arc<AtomicBool>,
     background_admission_paused: Arc<AtomicBool>,
-    profile_processing_authorized: Arc<AtomicBool>,
+    processing_authorized: Arc<AtomicBool>,
+    processing_authorization_epoch: Arc<AtomicU64>,
     profile_feeder_running: Arc<AtomicBool>,
     /// Serializes maintenance rebuilds with the moment a job is admitted.
     /// The guard is intentionally held only while claiming a job or while
@@ -167,6 +185,8 @@ struct QueueRuntime {
     backpressure_active: Arc<AtomicBool>,
     circuit_breaker: Arc<CircuitBreaker>,
     active_jobs: Arc<tokio::sync::Mutex<HashSet<i64>>>,
+    processing_authorized: Arc<AtomicBool>,
+    processing_authorization_epoch: Arc<AtomicU64>,
 }
 
 fn resolve_python_exe() -> PathBuf {
@@ -183,6 +203,84 @@ fn resolve_python_exe() -> PathBuf {
 
 fn resolve_worker_script() -> PathBuf {
     crate::runtime::worker_script("main.py")
+}
+
+fn configured_cookie_browser() -> Option<String> {
+    std::env::var("PULSAR_COOKIES_FROM_BROWSER")
+        .ok()
+        .filter(|browser| matches!(browser.as_str(), "chrome" | "edge" | "firefox"))
+}
+
+fn effective_cookie_browser(
+    current_setting: Option<&str>,
+    _legacy_source_snapshot: Option<&str>,
+    processing_authorized: bool,
+) -> Option<String> {
+    if !processing_authorized {
+        return None;
+    }
+    current_setting
+        .filter(|browser| matches!(*browser, "chrome" | "edge" | "firefox"))
+        .map(str::to_string)
+}
+
+fn cookie_scan_policy_is_current(
+    expected_browser: Option<&str>,
+    current_browser: Option<&str>,
+    processing_authorized: bool,
+    expected_authorization_epoch: u64,
+    current_authorization_epoch: u64,
+) -> bool {
+    processing_authorized
+        && expected_authorization_epoch == current_authorization_epoch
+        && expected_browser == current_browser
+}
+
+fn dispatch_failure_is_consent_pause(
+    processing_authorized: bool,
+    expected_authorization_epoch: u64,
+    current_authorization_epoch: u64,
+) -> bool {
+    !processing_authorized || expected_authorization_epoch != current_authorization_epoch
+}
+
+async fn run_policy_guarded_command<F>(
+    mut command: Command,
+    timeout: Duration,
+    timeout_message: &str,
+    policy_changed_message: &str,
+    policy_is_current: F,
+) -> Result<std::process::Output, String>
+where
+    F: Fn() -> bool,
+{
+    if !policy_is_current() {
+        return Err(policy_changed_message.to_string());
+    }
+    command.kill_on_drop(true);
+    let output_future = command.output();
+    tokio::pin!(output_future);
+    let output = tokio::time::timeout(timeout, async {
+        loop {
+            tokio::select! {
+                result = &mut output_future => {
+                    let output = result.map_err(|error| error.to_string())?;
+                    if !policy_is_current() {
+                        return Err(policy_changed_message.to_string());
+                    }
+                    return Ok(output);
+                }
+                _ = tokio::time::sleep(Duration::from_millis(75)) => {
+                    if !policy_is_current() {
+                        return Err(policy_changed_message.to_string());
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|_| timeout_message.to_string())??;
+    Ok(output)
 }
 
 fn processing_root() -> PathBuf {
@@ -667,13 +765,15 @@ impl QueueService {
         let active_jobs = Arc::new(tokio::sync::Mutex::new(HashSet::<i64>::new()));
         let processing_paused = Arc::new(AtomicBool::new(false));
         let background_admission_paused = Arc::new(AtomicBool::new(false));
-        let profile_processing_authorized = Arc::new(AtomicBool::new(false));
+        let processing_authorized = Arc::new(AtomicBool::new(false));
+        let processing_authorization_epoch = Arc::new(AtomicU64::new(0));
         let admission_gate = QueueAdmissionGate {
             workers: semaphore.clone(),
             profiles: Arc::new(Semaphore::new(1)),
             processing_paused: processing_paused.clone(),
             background_paused: background_admission_paused.clone(),
-            profile_processing_authorized: profile_processing_authorized.clone(),
+            processing_authorized: processing_authorized.clone(),
+            processing_authorization_epoch: processing_authorization_epoch.clone(),
             profile_cooldown: Duration::from_secs(30),
         };
 
@@ -687,6 +787,8 @@ impl QueueService {
         let idle_workers_for_health = idle_workers.clone();
         let active_jobs_clone = active_jobs.clone();
         let processing_paused_clone = processing_paused.clone();
+        let authorization_epoch_for_dispatch = processing_authorization_epoch.clone();
+        let authorized_for_dispatch = processing_authorized.clone();
 
         tokio::spawn(async move {
             while let Some(message) = receiver.recv().await {
@@ -701,15 +803,35 @@ impl QueueService {
                     backpressure_active: backpressure_clone.clone(),
                     circuit_breaker: breaker_clone.clone(),
                     active_jobs: active_jobs_clone.clone(),
+                    processing_authorized: authorized_for_dispatch.clone(),
+                    processing_authorization_epoch: authorization_epoch_for_dispatch.clone(),
                 };
 
                 let gate = admission_gate.clone();
+                let job_id = message.job_id;
+                let message_epoch = message.authorization_epoch;
+                let cancellation_repo = repo_clone.clone();
+                let cancellation_depth = depth_clone.clone();
+                let cancellation_backpressure = backpressure_clone.clone();
+                let cancellation_active_jobs = active_jobs_clone.clone();
                 tokio::spawn(async move {
-                    gate.run(
-                        message.profile_background,
-                        Self::execute_job_with_retries(message, runtime),
-                    )
-                    .await;
+                    let started = gate
+                        .run(
+                            message.profile_background,
+                            message_epoch,
+                            Self::execute_job_with_retries(message, runtime),
+                        )
+                        .await;
+                    if !started {
+                        if let Err(error) = cancellation_repo.update_status(job_id, "paused", 0) {
+                            warn!(
+                                "Could not persist consent pause for job {}: {}",
+                                job_id, error
+                            );
+                        }
+                        Self::decrement_depth(&cancellation_depth, &cancellation_backpressure);
+                        cancellation_active_jobs.lock().await.remove(&job_id);
+                    }
                 });
             }
         });
@@ -725,7 +847,8 @@ impl QueueService {
             idle_workers: idle_workers_for_health,
             processing_paused,
             background_admission_paused,
-            profile_processing_authorized,
+            processing_authorized,
+            processing_authorization_epoch,
             profile_feeder_running: Arc::new(AtomicBool::new(false)),
             maintenance_lock,
         }
@@ -769,13 +892,57 @@ impl QueueService {
             .store(paused, Ordering::SeqCst);
     }
 
-    pub fn is_profile_processing_authorized(&self) -> bool {
-        self.profile_processing_authorized.load(Ordering::SeqCst)
+    pub fn is_processing_authorized(&self) -> bool {
+        self.processing_authorized.load(Ordering::SeqCst)
     }
 
-    pub fn set_profile_processing_authorized(&self, authorized: bool) {
-        self.profile_processing_authorized
-            .store(authorized, Ordering::SeqCst);
+    pub fn ensure_processing_authorized(&self) -> Result<(), String> {
+        if self.is_processing_authorized() {
+            Ok(())
+        } else {
+            Err("El procesamiento requiere aceptar las condiciones de derechos vigentes.".into())
+        }
+    }
+
+    pub fn set_processing_authorized(&self, authorized: bool) {
+        let previous = self
+            .processing_authorized
+            .swap(authorized, Ordering::SeqCst);
+        if previous != authorized {
+            self.processing_authorization_epoch
+                .fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    pub(crate) fn current_cookie_browser(&self) -> Option<String> {
+        configured_cookie_browser()
+    }
+
+    pub(crate) async fn run_cookie_scoped_command(
+        &self,
+        command: Command,
+        timeout: Duration,
+        timeout_message: &str,
+        expected_browser: Option<String>,
+    ) -> Result<std::process::Output, String> {
+        self.ensure_processing_authorized()?;
+        let authorization_epoch = self.processing_authorization_epoch.load(Ordering::SeqCst);
+        run_policy_guarded_command(
+            command,
+            timeout,
+            timeout_message,
+            "La autorización o la sesión del navegador cambió durante la consulta; se canceló el escaneo.",
+            || {
+                cookie_scan_policy_is_current(
+                    expected_browser.as_deref(),
+                    configured_cookie_browser().as_deref(),
+                    self.is_processing_authorized(),
+                    authorization_epoch,
+                    self.processing_authorization_epoch.load(Ordering::SeqCst),
+                )
+            },
+        )
+        .await
     }
 
     /// Re-enqueues work that was demonstrably in flight before shutdown.
@@ -783,6 +950,10 @@ impl QueueService {
     /// their original admission may no longer be authorized. Profile work is
     /// admitted separately by the consent and source-state gated feeder.
     pub async fn resume_pending_jobs(self: &Arc<Self>) -> Result<usize, String> {
+        if !self.is_processing_authorized() {
+            self.pause_recoverable_jobs_for_consent()?;
+            return Ok(0);
+        }
         let jobs = self.job_repo.get_all_jobs()?;
         let pending_jobs = jobs
             .into_iter()
@@ -845,6 +1016,11 @@ impl QueueService {
                 continue;
             }
 
+            if !self.is_processing_authorized() {
+                self.active_jobs.lock().await.remove(&job.id);
+                break;
+            }
+
             let result = self
                 .enqueue_claimed(
                     job.id,
@@ -853,6 +1029,7 @@ impl QueueService {
                     std::env::var("PULSAR_COOKIES_FROM_BROWSER")
                         .ok()
                         .filter(|browser| !browser.trim().is_empty()),
+                    self.processing_authorization_epoch.load(Ordering::SeqCst),
                 )
                 .await;
             if result.is_err() {
@@ -872,6 +1049,22 @@ impl QueueService {
         Ok(resumed)
     }
 
+    fn pause_recoverable_jobs_for_consent(&self) -> Result<(), String> {
+        let jobs = self.job_repo.get_all_jobs()?;
+        for job in jobs
+            .into_iter()
+            .filter(|job| is_restart_recoverable_status(&job.status))
+        {
+            let connection = self.job_repo.get_connection()?;
+            let connection = connection
+                .lock()
+                .map_err(|_| "Database mutex poisoned".to_string())?;
+            db::update_job_status(&connection, job.id, "paused", job.progress)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
     /// SQLite jobs remain the backlog. Admit one profile job at a time to the
     /// same channel, observing pause, performance policy and backpressure.
     pub fn start_profile_job_feeder(self: &Arc<Self>) {
@@ -884,7 +1077,7 @@ impl QueueService {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 if queue.is_processing_paused()
                     || queue.is_background_admission_paused()
-                    || !queue.is_profile_processing_authorized()
+                    || !queue.is_processing_authorized()
                     || queue.current_depth.load(Ordering::SeqCst) >= QUEUE_HIGH_WATERMARK
                     || queue.backpressure_active.load(Ordering::SeqCst)
                 {
@@ -925,6 +1118,12 @@ impl QueueService {
         url: &str,
         browser: Option<&str>,
     ) -> Result<Vec<String>, String> {
+        self.ensure_processing_authorized()?;
+        let cookie_browser = effective_cookie_browser(
+            configured_cookie_browser().as_deref(),
+            browser,
+            self.is_processing_authorized(),
+        );
         let python_exe = resolve_python_exe();
         let script = resolve_worker_script();
         let worker_dir = script
@@ -939,18 +1138,22 @@ impl QueueService {
             .arg(url)
             .current_dir(&worker_dir)
             .env("PYTHONPATH", &worker_dir)
-            .env("PYTHONUNBUFFERED", "1");
-        if let Some(browser) =
-            browser.filter(|value| matches!(*value, "chrome" | "edge" | "firefox"))
-        {
+            .env("PYTHONUNBUFFERED", "1")
+            .env_remove("PULSAR_COOKIES_FROM_BROWSER");
+        if let Some(browser) = cookie_browser.as_deref() {
             command.env("PULSAR_COOKIES_FROM_BROWSER", browser);
         }
         crate::process_control::hide_tokio_command(&mut command);
 
-        let output = tokio::time::timeout(Duration::from_secs(120), command.output())
+        let output = self
+            .run_cookie_scoped_command(
+                command,
+                Duration::from_secs(120),
+                "Timed out expanding TikTok collection",
+                cookie_browser,
+            )
             .await
-            .map_err(|_| "Timed out expanding TikTok collection".to_string())?
-            .map_err(|error| format!("Failed to start collection expansion: {}", error))?;
+            .map_err(|error| format!("Failed to expand TikTok collection: {error}"))?;
 
         if !output.status.success() {
             let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -984,6 +1187,12 @@ impl QueueService {
         limit: usize,
         history_from: Option<&str>,
     ) -> Result<SourceScanResult, String> {
+        self.ensure_processing_authorized()?;
+        let cookie_browser = effective_cookie_browser(
+            configured_cookie_browser().as_deref(),
+            browser,
+            self.is_processing_authorized(),
+        );
         let python_exe = resolve_python_exe();
         let script = resolve_worker_script();
         let worker_dir = script
@@ -1005,24 +1214,25 @@ impl QueueService {
             .arg(if limit == 0 { 0 } else { limit.clamp(1, 1000) }.to_string())
             .current_dir(&worker_dir)
             .env("PYTHONPATH", &worker_dir)
-            .env("PYTHONUNBUFFERED", "1");
+            .env("PYTHONUNBUFFERED", "1")
+            .env_remove("PULSAR_COOKIES_FROM_BROWSER");
         if let Some(history_from) = history_from.filter(|value| !value.trim().is_empty()) {
             command.arg("--from-date").arg(history_from);
         }
-        if let Some(browser) =
-            browser.filter(|value| matches!(*value, "chrome" | "edge" | "firefox"))
-        {
+        if let Some(browser) = cookie_browser.as_deref() {
             command.env("PULSAR_COOKIES_FROM_BROWSER", browser);
         }
         crate::process_control::hide_tokio_command(&mut command);
 
-        let output = tokio::time::timeout(
-            Duration::from_secs(if limit == 0 { 360 } else { 180 }),
-            command.output(),
-        )
-        .await
-        .map_err(|_| "Timed out inspecting TikTok source".to_string())?
-        .map_err(|error| format!("Failed to start source scanner: {error}"))?;
+        let output = self
+            .run_cookie_scoped_command(
+                command,
+                Duration::from_secs(if limit == 0 { 360 } else { 180 }),
+                "Timed out inspecting TikTok source",
+                cookie_browser,
+            )
+            .await
+            .map_err(|error| format!("Failed to start source scanner: {error}"))?;
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let parsed: serde_json::Value = serde_json::from_str(&stdout).map_err(|error| {
@@ -1047,19 +1257,17 @@ impl QueueService {
 
     #[instrument(skip(self))]
     pub async fn dispatch(&self, job_id: i64, url: String) -> Result<(), String> {
-        let env_browser = std::env::var("PULSAR_COOKIES_FROM_BROWSER")
-            .ok()
-            .filter(|b| !b.trim().is_empty());
-        self.dispatch_with_browser(job_id, url, env_browser).await
+        self.dispatch_with_browser(job_id, url, configured_cookie_browser())
+            .await
     }
 
     pub async fn dispatch_with_browser(
         &self,
         job_id: i64,
         url: String,
-        cookies_browser: Option<String>,
+        _cookies_browser: Option<String>,
     ) -> Result<(), String> {
-        self.dispatch_with_attempt_and_browser(job_id, url, 0, cookies_browser)
+        self.dispatch_with_attempt_and_browser(job_id, url, 0, configured_cookie_browser())
             .await
     }
 
@@ -1071,10 +1279,7 @@ impl QueueService {
         url: String,
         attempt: u32,
     ) -> Result<(), String> {
-        let env_browser = std::env::var("PULSAR_COOKIES_FROM_BROWSER")
-            .ok()
-            .filter(|browser| !browser.trim().is_empty());
-        self.dispatch_with_attempt_and_browser(job_id, url, attempt, env_browser)
+        self.dispatch_with_attempt_and_browser(job_id, url, attempt, configured_cookie_browser())
             .await
     }
 
@@ -1083,11 +1288,19 @@ impl QueueService {
         job_id: i64,
         url: String,
         attempt: u32,
-        cookies_browser: Option<String>,
+        requested_browser: Option<String>,
     ) -> Result<(), String> {
+        self.ensure_processing_authorized()?;
+        let current_browser = configured_cookie_browser();
+        let cookies_browser = effective_cookie_browser(
+            current_browser.as_deref(),
+            requested_browser.as_deref(),
+            self.is_processing_authorized(),
+        );
         if !retry_budget_allows_resume(attempt) {
             return Err("El presupuesto de reintentos está agotado; revisa el trabajo antes de iniciar una nueva serie.".to_string());
         }
+        let authorization_epoch = self.processing_authorization_epoch.load(Ordering::SeqCst);
         // Dispatch is idempotent per job. Keep the claim while the admission
         // decision and send complete so a concurrent retry cannot observe a
         // half-admitted job.
@@ -1101,14 +1314,27 @@ impl QueueService {
         }
 
         let result = self
-            .enqueue_claimed(job_id, url, attempt, cookies_browser)
+            .enqueue_claimed(job_id, url, attempt, cookies_browser, authorization_epoch)
             .await;
         if result.is_err() {
             self.active_jobs.lock().await.remove(&job_id);
         }
 
         if let Err(error) = &result {
-            persist_and_log_job_error(&self.job_repo, job_id, "error", error);
+            if dispatch_failure_is_consent_pause(
+                self.is_processing_authorized(),
+                authorization_epoch,
+                self.processing_authorization_epoch.load(Ordering::SeqCst),
+            ) {
+                if let Err(pause_error) = self.job_repo.update_status(job_id, "paused", 0) {
+                    warn!(
+                        "Could not persist consent pause for job {}: {}",
+                        job_id, pause_error
+                    );
+                }
+            } else {
+                persist_and_log_job_error(&self.job_repo, job_id, "error", error);
+            }
         }
         result
     }
@@ -1163,7 +1389,14 @@ impl QueueService {
         url: String,
         attempt: u32,
         cookies_browser: Option<String>,
+        authorization_epoch: u64,
     ) -> Result<(), String> {
+        self.ensure_processing_authorized()?;
+        if self.processing_authorization_epoch.load(Ordering::SeqCst) != authorization_epoch {
+            return Err(
+                "El consentimiento cambió; vuelve a confirmar antes de reanudar el trabajo.".into(),
+            );
+        }
         if !self.circuit_breaker.allow_request() {
             return Err("Service unavailable: circuit breaker is open".to_string());
         }
@@ -1199,6 +1432,7 @@ impl QueueService {
                 job_id,
                 url,
                 attempt,
+                authorization_epoch,
                 cookies_browser,
                 formats,
                 download_dir,
@@ -1260,7 +1494,22 @@ impl QueueService {
             backpressure_active,
             circuit_breaker,
             active_jobs,
+            processing_authorized,
+            processing_authorization_epoch,
         } = runtime;
+        if !processing_authorized.load(Ordering::SeqCst)
+            || processing_authorization_epoch.load(Ordering::SeqCst) != message.authorization_epoch
+        {
+            if let Err(error) = repo.update_status(message.job_id, "paused", 0) {
+                warn!(
+                    "Could not persist consent pause for job {}: {}",
+                    message.job_id, error
+                );
+            }
+            Self::decrement_depth(&current_depth, &backpressure_active);
+            active_jobs.lock().await.remove(&message.job_id);
+            return;
+        }
         if let Err(error) = repo.update_status(message.job_id, "processing", 0) {
             let message_text = format!("Could not mark job as processing: {}", error);
             persist_and_log_job_error(&repo, message.job_id, "error", &message_text);
@@ -1272,6 +1521,11 @@ impl QueueService {
         let script_path = resolve_worker_script();
 
         loop {
+            message.cookies_browser = effective_cookie_browser(
+                configured_cookie_browser().as_deref(),
+                message.cookies_browser.as_deref(),
+                processing_authorized.load(Ordering::SeqCst),
+            );
             // Do not hold the pool mutex while spawning Python. Process
             // creation can take seconds on a cold bundled runtime and should
             // not serialize access to already-idle workers.
@@ -1580,6 +1834,66 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
 
+    #[test]
+    fn policy_guarded_scan_child_writes_its_completion_marker() {
+        let Ok(marker) = std::env::var("PULSAR_TEST_SCAN_CHILD_MARKER") else {
+            return;
+        };
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        std::fs::write(marker, "completed").expect("test child can write its marker");
+    }
+
+    #[tokio::test]
+    async fn revoking_scan_policy_kills_the_child_before_its_followup_request() {
+        use std::sync::{
+            atomic::{AtomicBool, AtomicU64, Ordering},
+            Arc,
+        };
+        use tokio::process::Command;
+        use tokio::time::Duration;
+
+        let marker = std::env::temp_dir().join(format!(
+            "pulsaria-scan-revocation-{}-{}.marker",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut command = Command::new(std::env::current_exe().expect("test executable path"));
+        command
+            .arg("--exact")
+            .arg("application::queue_service::tests::policy_guarded_scan_child_writes_its_completion_marker")
+            .arg("--nocapture")
+            .env("PULSAR_TEST_SCAN_CHILD_MARKER", &marker);
+
+        let authorized = Arc::new(AtomicBool::new(true));
+        let authorization_epoch = Arc::new(AtomicU64::new(4));
+        let policy = authorized.clone();
+        let policy_epoch = authorization_epoch.clone();
+        let scan = tokio::spawn(super::run_policy_guarded_command(
+            command,
+            Duration::from_secs(5),
+            "test scan timed out",
+            "test scan authorization changed",
+            move || policy.load(Ordering::SeqCst) && policy_epoch.load(Ordering::SeqCst) == 4,
+        ));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        authorized.store(false, Ordering::SeqCst);
+        authorization_epoch.fetch_add(1, Ordering::SeqCst);
+        // A rapid reaccept must not revive work admitted under the prior
+        // authorization epoch.
+        authorized.store(true, Ordering::SeqCst);
+        let error = scan.await.expect("scan task completed").unwrap_err();
+        assert_eq!(error, "test scan authorization changed");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !marker.exists(),
+            "revoked scan child must not make its simulated follow-up request"
+        );
+        let _ = std::fs::remove_file(marker);
+    }
+
     #[tokio::test]
     async fn profile_admission_is_serial_and_foreground_can_run_during_cooldown() {
         use super::QueueAdmissionGate;
@@ -1591,14 +1905,15 @@ mod tests {
             profiles: Arc::new(Semaphore::new(1)),
             processing_paused: Arc::new(AtomicBool::new(false)),
             background_paused: Arc::new(AtomicBool::new(false)),
-            profile_processing_authorized: Arc::new(AtomicBool::new(true)),
+            processing_authorized: Arc::new(AtomicBool::new(true)),
+            processing_authorization_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             profile_cooldown: Duration::from_millis(80),
         };
         let (finished, receiver) = oneshot::channel();
         let first_gate = gate.clone();
         let first = tokio::spawn(async move {
             first_gate
-                .run(true, async {
+                .run(true, 0, async {
                     finished.send(Instant::now()).unwrap();
                 })
                 .await;
@@ -1607,7 +1922,7 @@ mod tests {
         let second_gate = gate.clone();
         let second = tokio::spawn(async move {
             second_gate
-                .run(true, async {
+                .run(true, 0, async {
                     assert!(
                         finished_at.elapsed() >= Duration::from_millis(80),
                         "next profile must wait for the cooldown"
@@ -1615,7 +1930,7 @@ mod tests {
                 })
                 .await;
         });
-        tokio::time::timeout(Duration::from_millis(40), gate.run(false, async {}))
+        tokio::time::timeout(Duration::from_millis(40), gate.run(false, 0, async {}))
             .await
             .expect("foreground admission must not wait for the profile cooldown");
         first.await.unwrap();
@@ -1639,13 +1954,14 @@ mod tests {
             profiles: Arc::new(Semaphore::new(1)),
             processing_paused: Arc::new(AtomicBool::new(false)),
             background_paused: Arc::new(AtomicBool::new(false)),
-            profile_processing_authorized: authorized.clone(),
+            processing_authorized: authorized.clone(),
+            processing_authorization_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             profile_cooldown: Duration::ZERO,
         };
 
         let work_processed = processed.clone();
         let task = tokio::spawn(async move {
-            gate.run(true, async move {
+            gate.run(true, 0, async move {
                 work_processed.store(true, Ordering::SeqCst);
             })
             .await;
@@ -1659,6 +1975,154 @@ mod tests {
             .expect("profile work should resume after consent is saved")
             .unwrap();
         assert!(processed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn foreground_admission_waits_for_current_rights_consent() {
+        use super::QueueAdmissionGate;
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        use tokio::sync::Semaphore;
+        use tokio::time::Duration;
+
+        let authorized = Arc::new(AtomicBool::new(false));
+        let processed = Arc::new(AtomicBool::new(false));
+        let gate = QueueAdmissionGate {
+            workers: Arc::new(Semaphore::new(1)),
+            profiles: Arc::new(Semaphore::new(1)),
+            processing_paused: Arc::new(AtomicBool::new(false)),
+            background_paused: Arc::new(AtomicBool::new(false)),
+            processing_authorized: authorized.clone(),
+            processing_authorization_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            profile_cooldown: Duration::ZERO,
+        };
+
+        let work_processed = processed.clone();
+        let task = tokio::spawn(async move {
+            gate.run(false, 0, async move {
+                work_processed.store(true, Ordering::SeqCst);
+            })
+            .await;
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(
+            !processed.load(Ordering::SeqCst),
+            "foreground jobs must wait until the current rights consent is accepted"
+        );
+
+        authorized.store(true, Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_millis(500), task)
+            .await
+            .expect("foreground work should resume after consent is saved")
+            .unwrap();
+        assert!(processed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn revoked_queue_messages_do_not_resume_after_consent_is_restored() {
+        use super::QueueAdmissionGate;
+        use std::sync::{
+            atomic::{AtomicBool, AtomicU64, Ordering},
+            Arc,
+        };
+        use tokio::sync::Semaphore;
+        use tokio::time::Duration;
+
+        let authorized = Arc::new(AtomicBool::new(true));
+        let epoch = Arc::new(AtomicU64::new(3));
+        let workers = Arc::new(Semaphore::new(0));
+        let processed = Arc::new(AtomicBool::new(false));
+        let gate = QueueAdmissionGate {
+            workers: workers.clone(),
+            profiles: Arc::new(Semaphore::new(1)),
+            processing_paused: Arc::new(AtomicBool::new(false)),
+            background_paused: Arc::new(AtomicBool::new(false)),
+            processing_authorized: authorized.clone(),
+            processing_authorization_epoch: epoch.clone(),
+            profile_cooldown: Duration::ZERO,
+        };
+
+        let work_processed = processed.clone();
+        let task = tokio::spawn(async move {
+            gate.run(false, 3, async move {
+                work_processed.store(true, Ordering::SeqCst);
+            })
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        authorized.store(false, Ordering::SeqCst);
+        epoch.fetch_add(1, Ordering::SeqCst);
+        authorized.store(true, Ordering::SeqCst);
+        workers.add_permits(1);
+
+        let started = tokio::time::timeout(Duration::from_millis(500), task)
+            .await
+            .expect("revoked work should not remain stuck in the queue")
+            .unwrap();
+        assert!(!started);
+        assert!(!processed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn cookie_authorization_uses_only_the_current_global_selection() {
+        assert_eq!(
+            super::effective_cookie_browser(None, Some("chrome"), true),
+            None
+        );
+        assert_eq!(
+            super::effective_cookie_browser(Some("edge"), Some("chrome"), true),
+            Some("edge".to_string())
+        );
+        assert_eq!(
+            super::effective_cookie_browser(Some("chrome"), Some("chrome"), false),
+            None
+        );
+        assert_eq!(
+            super::effective_cookie_browser(Some("opera"), Some("chrome"), true),
+            None,
+            "unsupported browser values must fail closed"
+        );
+    }
+
+    #[test]
+    fn a_dispatch_revoked_before_channel_admission_is_paused_not_failed() {
+        assert!(!super::dispatch_failure_is_consent_pause(true, 4, 4));
+        assert!(super::dispatch_failure_is_consent_pause(false, 4, 4));
+        // Even if consent is accepted again before the dispatch finishes, the
+        // epoch change keeps this old admission from becoming an error/retry.
+        assert!(super::dispatch_failure_is_consent_pause(true, 4, 6));
+    }
+
+    #[test]
+    fn a_running_scan_is_cancelled_when_consent_or_session_changes() {
+        assert!(super::cookie_scan_policy_is_current(
+            Some("chrome"),
+            Some("chrome"),
+            true,
+            7,
+            7
+        ));
+        assert!(!super::cookie_scan_policy_is_current(
+            Some("chrome"),
+            None,
+            true,
+            7,
+            7
+        ));
+        assert!(!super::cookie_scan_policy_is_current(
+            None, None, false, 7, 7
+        ));
+        // Reaccepting consent must not revive a scan admitted under an older
+        // authorization epoch.
+        assert!(!super::cookie_scan_policy_is_current(
+            Some("chrome"),
+            Some("chrome"),
+            true,
+            7,
+            9
+        ));
     }
 
     #[test]
@@ -1704,13 +2168,14 @@ mod tests {
             profiles: Arc::new(Semaphore::new(1)),
             processing_paused: processing_paused.clone(),
             background_paused: Arc::new(AtomicBool::new(false)),
-            profile_processing_authorized: Arc::new(AtomicBool::new(true)),
+            processing_authorized: Arc::new(AtomicBool::new(true)),
+            processing_authorization_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             profile_cooldown: Duration::ZERO,
         };
 
         let task_started = started.clone();
         let task = tokio::spawn(async move {
-            gate.run(false, async move {
+            gate.run(false, 0, async move {
                 task_started.store(true, Ordering::SeqCst);
             })
             .await;
