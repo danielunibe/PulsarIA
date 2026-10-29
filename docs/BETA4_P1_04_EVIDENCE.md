@@ -90,12 +90,16 @@ para cubrirlo. Si el QA autorizado confirma un host legítimo, se debe agregar
 ese origen exacto y una prueba.
 
 No se ejecutó el instalador, no se inició Pulsaria, no se leyeron perfiles,
-cookies, credenciales, AppData, bibliotecas reales ni modelos locales. La CI de
-GitHub para el SHA focal se añadirá a este registro después del push y se
-verificará en ambos workflows. P1-04 permanece en DOING hasta la aceptación de
-Windows/WebView instalada y la matriz funcional pendiente. PR #3 sigue abierto y
-draft; los resultados CI del commit focal se registran en la tarjeta Trello
-P1-04. No se hizo merge, tag, release ni publicación.
+cookies, credenciales, AppData, bibliotecas reales ni modelos locales. El
+commit focal de código `6ff55a0ec7416c1de3656f2a1b69b9d7cdd9ca91` pasó ambos
+workflows CI:
+
+- [canonical, run 40946292035](https://github.com/danielunibe/PulsarIA/actions/runs/40946292035)
+- [runtime bootstrap/source manifest, run 40946292008](https://github.com/danielunibe/PulsarIA/actions/runs/40946292008)
+
+P1-04 permanece en DOING hasta la aceptación de Windows/WebView instalada y la
+matriz funcional pendiente. PR #3 sigue abierto y draft. No se hizo merge, tag,
+release ni publicación.
 
 Rollback del cambio fuente: `git revert <SHA focal de P1-04>` en
 `codex/pulsaria-beta4-prep`; no se requiere reset ni force-push.

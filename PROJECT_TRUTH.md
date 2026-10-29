@@ -32,8 +32,11 @@ Por ello la matriz TAURI-01…13 queda parcial y P1-04 no se cierra por el build
 ni los tests automatizados. No se usaron perfiles TikTok, cookies, credenciales,
 AppData, bibliotecas ni modelos personales. La evidencia detallada y el plan de
 rollback están en [docs/BETA4_P1_04_EVIDENCE.md](./docs/BETA4_P1_04_EVIDENCE.md).
-Los resultados CI del commit focal se registran en la tarjeta Trello P1-04. PR
-#3 permanece abierto y en borrador; no se autoriza merge, tag, release o
+El commit focal de código `6ff55a0ec7416c1de3656f2a1b69b9d7cdd9ca91` pasó
+[canonical CI (run 40946292035)](https://github.com/danielunibe/PulsarIA/actions/runs/40946292035)
+y [runtime bootstrap/source manifest
+(run 40946292008)](https://github.com/danielunibe/PulsarIA/actions/runs/40946292008).
+PR #3 permanece abierto y en borrador; no se autoriza merge, tag, release o
 publicación.
 
 ## Gate P1-03 — consistencia de descubrimiento de perfiles — 2026-10-29
