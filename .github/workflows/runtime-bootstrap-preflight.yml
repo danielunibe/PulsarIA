@@ -6,17 +6,41 @@ on:
     paths:
       - .github/workflows/direct-download-release.yml
       - .github/workflows/runtime-bootstrap-preflight.yml
+      - app/**
+      - assets/**
+      - components/**
+      - CONTENT_POLICY*.md
+      - COPYRIGHT_AND_TAKEDOWN*.md
+      - EULA*.md
+      - hooks/**
+      - lib/**
+      - LICENSE
+      - legal/**
+      - MODEL_NOTICE.md
+      - next.config.ts
+      - package.json
+      - package-lock.json
+      - postcss.config.mjs
+      - PRIVACY*.md
+      - public/**
       - scripts/prepare-runtime-from-pinned-release.ps1
       - scripts/prepare-runtime.ps1
       - scripts/generate-runtime-manifest.ps1
       - scripts/verify-runtime-manifest.ps1
+      - semantic/**
+      - scripts/verify-installed-bundle.ps1
+      - scripts/resolve-installed-bundle.ps1
+      - scripts/prepare-tauri-frontend.mjs
       - scripts/stage-direct-release.ps1
       - scripts/verify-direct-release-artifacts.ps1
       - scripts/prepare-direct-release-materials.ps1
       - legal/third-party-materials.json
       - python-workers/**
-      - src-tauri/tauri.conf.json
-      - src-tauri/resources/**
+      - src-tauri/**
+      - TERMS_OF_USE*.md
+      - THIRD_PARTY_NOTICES.md
+      - tsconfig.json
+      - types/**
   workflow_dispatch:
 
 permissions:
@@ -24,9 +48,9 @@ permissions:
 
 jobs:
   verify-pinned-runtime-bootstrap:
-    name: Verify pinned runtime bootstrap and source manifest
+    name: Verify runtime bootstrap and isolated Windows installer smoke
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
@@ -37,13 +61,18 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
 
-      - name: Check whether the latest PR commit changes runtime bootstrap inputs
+      - name: Check whether the latest PR commit changes runtime or installer inputs
         id: runtime-scope
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
           PR_ACTION: ${{ github.event.action }}
         run: |
           $runBootstrap = $env:PR_ACTION -in @('opened', 'reopened')
+          $runInstallerSmoke = $runBootstrap
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $runBootstrap = $true
+            $runInstallerSmoke = $true
+          }
           if (-not $runBootstrap) {
             $parentCommit = git rev-parse HEAD^
             if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($parentCommit)) {
@@ -53,6 +82,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Could not inspect paths changed by the latest PR commit.' }
             $exactPaths = @(
               '.github/workflows/direct-download-release.yml',
+              '.github/workflows/runtime-bootstrap-preflight.yml',
               'scripts/prepare-runtime-from-pinned-release.ps1',
               'scripts/prepare-runtime.ps1',
               'scripts/generate-runtime-manifest.ps1',
@@ -69,13 +99,87 @@ jobs:
               $_.StartsWith('python-workers/', [System.StringComparison]::OrdinalIgnoreCase) -or
               $_.StartsWith('src-tauri/resources/', [System.StringComparison]::OrdinalIgnoreCase)
             }).Count -gt 0
+
+            $smokeExactPaths = @(
+              '.github/workflows/runtime-bootstrap-preflight.yml',
+              '.github/workflows/direct-download-release.yml',
+              'package.json',
+              'package-lock.json',
+              'scripts/verify-installed-bundle.ps1',
+              'scripts/resolve-installed-bundle.ps1',
+              'scripts/prepare-tauri-frontend.mjs',
+              'scripts/prepare-runtime-from-pinned-release.ps1',
+              'scripts/prepare-runtime.ps1',
+              'scripts/generate-runtime-manifest.ps1',
+              'scripts/verify-runtime-manifest.ps1',
+              'LICENSE',
+              'MODEL_NOTICE.md',
+              'THIRD_PARTY_NOTICES.md',
+              'next.config.ts',
+              'postcss.config.mjs',
+              'tsconfig.json'
+            )
+            $runInstallerSmoke = @($changedPaths | Where-Object {
+              $smokeExactPaths -contains $_ -or
+              $_.StartsWith('app/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('components/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('hooks/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('lib/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('assets/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('legal/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('public/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('semantic/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('src-tauri/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('types/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_.StartsWith('python-workers/', [System.StringComparison]::OrdinalIgnoreCase) -or
+              $_ -match '^(CONTENT_POLICY|COPYRIGHT_AND_TAKEDOWN|EULA|PRIVACY|TERMS_OF_USE).*\.md$'
+            }).Count -gt 0
+            if ($runInstallerSmoke) { $runBootstrap = $true }
           }
           $runValue = $runBootstrap.ToString().ToLowerInvariant()
+          $smokeValue = $runInstallerSmoke.ToString().ToLowerInvariant()
           Write-Host "Run pinned runtime bootstrap for latest PR commit: $runValue"
-          [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "run=$runValue`n", [System.Text.Encoding]::ASCII)
+          Write-Host "Run isolated installed NSIS smoke for latest PR commit: $smokeValue"
+          [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "run=$runValue`ninstaller-smoke=$smokeValue`n", [System.Text.Encoding]::ASCII)
 
       - name: Prepare pinned runtime and verify all resource hashes
         if: github.event_name == 'workflow_dispatch' || steps.runtime-scope.outputs.run == 'true'
         run: |
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-runtime-from-pinned-release.ps1 -ProjectRoot $PWD.Path
           if ($LASTEXITCODE -ne 0) { throw 'Pinned runtime bootstrap preflight failed.' }
+
+      - name: Set up Node.js for isolated installer smoke
+        if: steps.runtime-scope.outputs.installer-smoke == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies for isolated installer smoke
+        if: steps.runtime-scope.outputs.installer-smoke == 'true'
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed for isolated installer smoke.' }
+
+      - name: Build and install-smoke the exact NSIS artifact in runner TEMP
+        if: steps.runtime-scope.outputs.installer-smoke == 'true'
+        env:
+          NEXT_PUBLIC_PULSARIA_UPDATER_ENABLED: 'false'
+        run: |
+          npm run tauri build -- --bundles nsis
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri NSIS build failed in isolated installer smoke.' }
+
+          $config = Get-Content -LiteralPath 'src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json
+          $version = [string]$config.version
+          $installer = Join-Path $env:GITHUB_WORKSPACE "target-tauri/release/bundle/nsis/Pulsaria_${version}_x64-setup.exe"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Versioned NSIS installer is missing: $installer" }
+          $installerHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+          Write-Host "PULSARIA_ISOLATED_NSIS_SHA256: $installerHash"
+          "Pulsaria ${version} NSIS SHA-256: $installerHash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+          npm run verify:installed -- -Configuration release -Bundle nsis -InstallerPath $installer -ExpectedSha256 $installerHash -ApiPort 8080 -StartupTimeoutSeconds 180
+          if ($LASTEXITCODE -ne 0) { throw 'Installed NSIS smoke failed in the isolated GitHub runner.' }
+
+          . ./scripts/resolve-installed-bundle.ps1
+          Assert-InstallerHostIsIsolated -ProductName ([string]$config.productName)
+          Write-Host 'PULSARIA_ISOLATED_NSIS_INSTALLER_SMOKE: PASS (runner TEMP install, isolated APPDATA/WebView2, API health, restart and cleanup)'
