@@ -78,7 +78,9 @@ try {
     npm run verify:frontend-secrets
     if ($LASTEXITCODE -ne 0) { throw 'Frontend secret boundary failed' }
 
-    Write-Host '9/13 API loopback security contract'
+    Write-Host '9/13 Tauri policy and API loopback security contracts'
+    node --test scripts/tests/tauri-security.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Tauri security policy contract failed' }
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-api-loopback.ps1
     if ($LASTEXITCODE -ne 0) { throw 'API loopback gate failed' }
 

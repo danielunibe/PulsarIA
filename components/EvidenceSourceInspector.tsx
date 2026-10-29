@@ -17,7 +17,7 @@ import {
  * EvidenceSourceInspector — inspector de fuentes del Reader editorial.
  *
  * Resuelve `Evidence → Source → Media` por IPC y reproduce con el mecanismo
- * canónico de Pulsaria (`<video>` + `convertFileSrc`, seek por `currentTime`
+ * canónico de Pulsaria (`<video>` + asset protocol autorizado, seek por `currentTime`
  * en `loadedmetadata` con clamp, mismo patrón que `ExpandedVideoModal`).
  * Sin video local declara honestamente que la reproducción no está
  * disponible; nunca inventa una ruta.

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { isTikTokPlayerMessage, tiktokPlayerUrl } from '@/lib/tiktok-player';
+import { isNativeShell, openTrustedExternalUrl } from '@/lib/external-links.mjs';
 
 interface TikTokOnlinePlayerProps {
   originalUrl: string;
@@ -58,7 +59,18 @@ function PlayerFrame({ originalUrl, title, playing = true, muted = false, onStat
       {status === 'error' && <div className="pulsaria-online-player__error" role="status">
         <p>TikTok no ha podido reproducir este video. Comprueba la conexión o su disponibilidad.</p>
         <button type="button" onClick={() => { setStatus('loading'); setAttempt((value) => value + 1); }}>Reintentar</button>
-        <a href={originalUrl} target="_blank" rel="noopener noreferrer">Abrir en TikTok</a>
+        <a
+          href={originalUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => {
+            if (!isNativeShell()) return;
+            event.preventDefault();
+            void openTrustedExternalUrl(originalUrl);
+          }}
+        >
+          Abrir en TikTok
+        </a>
       </div>}
     </div>
   );

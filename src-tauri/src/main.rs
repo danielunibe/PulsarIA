@@ -41,6 +41,7 @@
 mod commands;
 mod db;
 mod embedding;
+mod external_links;
 mod process_control;
 mod runtime;
 mod storage;
@@ -416,7 +417,6 @@ async fn main() {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--background"]),
@@ -723,6 +723,7 @@ async fn main() {
             commands::get_collection_source_activity,
             commands::get_health_events,
             commands::get_api_session_token,
+            commands::open_external_url,
             commands::get_runtime_health,
             commands::get_processing_pause,
             commands::set_processing_pause,
@@ -765,6 +766,7 @@ async fn main() {
             commands::record_media_access,
             commands::get_job_artifacts,
             commands::get_generated_outputs,
+            commands::authorize_renderable_asset,
             commands::save_video_frame,
             commands::get_processing_settings,
             commands::set_processing_settings,

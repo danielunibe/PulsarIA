@@ -4,6 +4,38 @@ Este es el único documento normativo técnico y operativo de Pulsaria. Si otro
 reporte, plan, auditoría o README contradice este archivo, prevalecen el código
 actual, las pruebas reproducidas y esta definición de verdad.
 
+## Gate P1-04 — seguridad Tauri, CSP y recursos locales — 2026-10-29
+
+P1-04 queda **PARTIAL / DOING**. El WebView comienza con `assetProtocol.scope`
+vacío; cada archivo renderizable exige referencia exacta persistida y validación
+de ruta antes de `allow_file`. Se eliminaron el plugin shell y
+`shell:allow-open`; los enlaces externos usan un allowlist nativo HTTPS de
+TikTok y documentos legales exactos. Producción y desarrollo tienen CSP
+separadas, sin wildcard ni `unsafe-eval`. La excepción de `'unsafe-inline'` en
+script/style se documenta a partir del export estático actual de Next; el build
+genera dos etiquetas script inline de trece. Los tres orígenes de imagen ya
+enumerados por `next.config.ts` se conservan como excepciones exactas para
+miniaturas dinámicas; no se añadieron wildcards.
+
+`npm run verify:mvp` pasó **13/13** localmente. Rust: 312 PASS, 0 fallidas,
+7 ignoradas; los dos tests de runtime aislado se omitieron porque no había
+fixture temporal aislado. Python: 39 PASS y un skip para URL TikTok live no
+autorizada. Pasaron los 7 tests nuevos de seguridad Tauri, API loopback
+`127.0.0.1`, TypeScript, lint, locale, export Next, formato Rust y runtime
+54/54. El NSIS Beta 4 se construyó en modo build-only: 688,141,033 bytes, SHA-256
+`FDE2127D8192AE13F9343E172AB7D344E8E0ADCB2AD3758F34B396BCA72CF569`,
+Authenticode `NotSigned`. No se ejecutó el instalador ni se lanzó la app.
+
+La revisión de archivos locales, CSP en una WebView ejecutada, enlaces nativos,
+reproducción y desconexión real de medios continúan sin aceptación instalada.
+Por ello la matriz TAURI-01…13 queda parcial y P1-04 no se cierra por el build
+ni los tests automatizados. No se usaron perfiles TikTok, cookies, credenciales,
+AppData, bibliotecas ni modelos personales. La evidencia detallada y el plan de
+rollback están en [docs/BETA4_P1_04_EVIDENCE.md](./docs/BETA4_P1_04_EVIDENCE.md).
+Los resultados CI del commit focal se registran en la tarjeta Trello P1-04. PR
+#3 permanece abierto y en borrador; no se autoriza merge, tag, release o
+publicación.
+
 ## Gate P1-03 — consistencia de descubrimiento de perfiles — 2026-10-29
 
 El gate quedó verificado en `0c1fd6225b998486bf5021fd80ecb7f489b8f268`, después

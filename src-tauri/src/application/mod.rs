@@ -1,3 +1,4 @@
+pub mod asset_scope;
 pub mod benchmark_dataset;
 pub mod benchmark_metrics;
 pub mod benchmark_report;

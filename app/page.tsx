@@ -37,6 +37,7 @@ import { CinemaMode } from '@/components/CinemaMode';
 import type { PageConfig, SortKey } from '@/components/PagePanel';
 import type { CinemaVideo, VideoData } from '@/types';
 import { apiFetch } from '@/lib/api-client';
+import { resolveAuthorizedAssetUrl } from '@/lib/authorized-assets';
 import { LocalizedErrorBoundary } from '@/components/ErrorBoundary';
 import { ContextMenu, type PulsariaContextMenuAction, type PulsariaContextMenuKind } from '@/components/ContextMenu';
 import { PlaylistPickerDialog } from '@/components/PlaylistPickerDialog';
@@ -720,14 +721,7 @@ export default function Page() {
     const [resolvedSearchVideo, setResolvedSearchVideo] = useState<SearchVideoDetails | null>(null);
 
     async function toAssetUrl(localPath: string | undefined | null): Promise<string | undefined> {
-        if (!localPath) return undefined;
-        if (localPath.startsWith('http://') || localPath.startsWith('https://')) return localPath;
-        try {
-            const { convertFileSrc } = await import('@tauri-apps/api/core');
-            return convertFileSrc(localPath);
-        } catch {
-            return undefined;
-        }
+        return resolveAuthorizedAssetUrl(localPath);
     }
 
     useEffect(() => {

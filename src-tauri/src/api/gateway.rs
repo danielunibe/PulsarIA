@@ -18,6 +18,16 @@ use tracing::{info, warn};
 /// Keep this as a single contract so a future host configurability change
 /// cannot silently turn the desktop API into a network service.
 pub const API_BIND_HOST: &str = "127.0.0.1";
+const API_CORS_ALLOWED_ORIGINS: [&str; 6] = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3344",
+    "http://127.0.0.1:3344",
+    // Tauri 2 uses this local origin for the bundled Windows WebView.
+    "http://tauri.localhost",
+    // macOS Tauri 2 uses this scheme/host for the bundled WebView.
+    "tauri://localhost",
+];
 
 pub fn validate_api_bind_host(host: &str) -> Result<(), &'static str> {
     if host == API_BIND_HOST {
@@ -803,12 +813,7 @@ pub async fn start_api_server(port: u16, state: ApiState) {
     let runtime = state.runtime.clone();
     // Configurar CORS para desarrollo Next.js y el servidor estático de producción.
     let cors = CorsLayer::new()
-        .allow_origin([
-            HeaderValue::from_static("http://localhost:3000"),
-            HeaderValue::from_static("http://127.0.0.1:3000"),
-            HeaderValue::from_static("http://localhost:3344"),
-            HeaderValue::from_static("http://127.0.0.1:3344"),
-        ])
+        .allow_origin(API_CORS_ALLOWED_ORIGINS.map(HeaderValue::from_static))
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS, Method::DELETE])
         .allow_headers([
             HeaderName::from_static("content-type"),
@@ -915,7 +920,10 @@ pub async fn start_api_server(port: u16, state: ApiState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_collection_source, validate_api_bind_host, validate_ingest_url, API_BIND_HOST};
+    use super::{
+        is_collection_source, validate_api_bind_host, validate_ingest_url, API_BIND_HOST,
+        API_CORS_ALLOWED_ORIGINS,
+    };
     use crate::api::middleware::security::MAX_URL_LENGTH;
 
     #[test]
@@ -926,6 +934,15 @@ mod tests {
         assert!(validate_api_bind_host("192.168.1.50").is_err());
         assert!(validate_api_bind_host("::").is_err());
         assert!(validate_api_bind_host("::1").is_err());
+    }
+
+    #[test]
+    fn api_cors_allows_only_known_development_and_tauri_origins() {
+        assert!(API_CORS_ALLOWED_ORIGINS.contains(&"http://tauri.localhost"));
+        assert!(API_CORS_ALLOWED_ORIGINS.contains(&"tauri://localhost"));
+        assert!(API_CORS_ALLOWED_ORIGINS.contains(&"http://127.0.0.1:3000"));
+        assert!(!API_CORS_ALLOWED_ORIGINS.contains(&"https://evil.example"));
+        assert_eq!(API_CORS_ALLOWED_ORIGINS.len(), 6);
     }
 
     #[test]

@@ -20,6 +20,8 @@ import { apiFetch } from '@/lib/api-client';
 import { useI18n } from '@/lib/i18n';
 import { TikTokOnlinePlayer } from '@/components/TikTokOnlinePlayer';
 import { tiktokPlayerUrl } from '@/lib/tiktok-player';
+import { resolveAuthorizedAssetUrl } from '@/lib/authorized-assets';
+import { openTrustedExternalUrl } from '@/lib/external-links.mjs';
 
 // ============================================================
 // ExpandedVideoModal — AAA Multimodal Knowledge Hub
@@ -104,13 +106,7 @@ function isNativeShell(): boolean {
 }
 
 async function resolveArtifactUrl(path: string): Promise<string | undefined> {
-    if (/^(https?:\/\/|data:)/i.test(path)) return path;
-    try {
-        const { convertFileSrc } = await import('@tauri-apps/api/core');
-        return convertFileSrc(path);
-    } catch {
-        return undefined;
-    }
+    return resolveAuthorizedAssetUrl(path);
 }
 
 /**
@@ -391,18 +387,8 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
     const openOriginal = useCallback(async () => {
         const url = video.originalUrl;
         if (!url) return;
-        try {
-            const parsed = new URL(url);
-            if (parsed.protocol !== 'https:') throw new Error('Unsupported URL protocol');
-        } catch {
-            toast.error('La URL original no es segura o está incompleta.');
-            return;
-        }
-        try {
-            const { open } = await import('@tauri-apps/plugin-shell');
-            await open(url);
-        } catch {
-            window.open(url, '_blank', 'noopener,noreferrer');
+        if (!await openTrustedExternalUrl(url)) {
+            toast.error('La URL original no está autorizada o no se pudo abrir.');
         }
     }, [video.originalUrl]);
 

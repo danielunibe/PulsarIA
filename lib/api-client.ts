@@ -28,11 +28,11 @@ export async function apiFetch(
       const { invoke } = await import('@tauri-apps/api/core');
       const token = await invoke<string>('get_api_session_token');
       headers.set('Authorization', `Bearer ${token}`);
-    } catch (error) {
+    } catch {
       // Let the server reject the request instead of inventing credentials,
-      // but retain evidence in the console so a native IPC failure is not
-      // mistaken for an anonymous API response.
-      console.warn('Could not obtain the native API session token:', error);
+      // but retain a sanitized signal so an IPC failure is not mistaken for
+      // an anonymous API response.
+      console.warn('Could not obtain the native API session token through IPC.');
     }
   } else if (typeof window !== 'undefined' && window.__PULSAR_DEV_API_TOKEN__) {
     headers.set('Authorization', `Bearer ${window.__PULSAR_DEV_API_TOKEN__}`);

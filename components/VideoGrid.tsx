@@ -7,6 +7,7 @@ import type { JobRecord as SharedJobRecord } from '@/hooks/use-jobs';
 import type { PlaylistContentView, SourceContentView } from '@/hooks/usePlaylists';
 import type { CinemaVideo, VideoData } from '@/types';
 import { apiFetch } from '@/lib/api-client';
+import { resolveAuthorizedAssetUrl } from '@/lib/authorized-assets';
 import { useI18n } from '@/lib/i18n';
 import { StateDisplay } from '@/components/ui/StateDisplay';
 import { useDemoMedia } from '@/hooks/use-demo-media';
@@ -92,18 +93,9 @@ interface ProgressEvent {
     progress: number;
 }
 
-// -- Convierte una ruta local de archivo a una URL que Tauri puede renderizar
-// Usa convertFileSrc si está disponible (app Tauri), de lo contrario usa asset.localhost
+// Convierte referencias locales solo después de la autorización nativa del archivo.
 async function toAssetUrl(localPath: string | undefined): Promise<string | undefined> {
-    if (!localPath) return undefined;
-    // Si ya es URL http/https, devolver tal cual
-    if (localPath.startsWith('http://') || localPath.startsWith('https://')) return localPath;
-    try {
-        const { convertFileSrc } = await import('@tauri-apps/api/core');
-        return convertFileSrc(localPath);
-    } catch {
-        return undefined;
-    }
+    return resolveAuthorizedAssetUrl(localPath);
 }
 
 type SourceState = 'local' | 'online' | 'unavailable' | 'storage_offline';

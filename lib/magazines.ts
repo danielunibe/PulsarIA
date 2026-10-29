@@ -8,6 +8,7 @@
  * siguiendo el patrón de `VideoGrid` (IPC con fallback, sin credenciales
  * inventadas en modo navegador).
  */
+import { resolveAuthorizedAssetUrl } from '@/lib/authorized-assets';
 
 /** Registro de tomo tal como lo serializa el backend (snake_case). */
 export interface MagazineVolumeRecord {
@@ -515,20 +516,13 @@ export function presentEvidenceKind(kind: string, locale: 'es-MX' | 'en-US' = 'e
 
 /**
  * Convierte una ruta local a URL reproducible (patrón canónico de Pulsaria:
- * `convertFileSrc` en Tauri, URL remota tal cual, `undefined` si no hay
+ * asset protocol autorizado en Tauri, URL remota tal cual, `undefined` si no hay
  * shell nativo). Misma regla que `VideoGrid`/`ExpandedVideoModal`.
  */
 export async function resolveAssetUrl(
   localPath: string | null | undefined,
 ): Promise<string | undefined> {
-  if (!localPath) return undefined;
-  if (/^(https?:\/\/|data:|asset:\/\/)/i.test(localPath)) return localPath;
-  try {
-    const { convertFileSrc } = await import('@tauri-apps/api/core');
-    return convertFileSrc(localPath);
-  } catch {
-    return undefined;
-  }
+  return resolveAuthorizedAssetUrl(localPath);
 }
 
 /** Lee los capítulos de un tomo desde el backend nativo. */

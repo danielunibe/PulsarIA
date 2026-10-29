@@ -4103,6 +4103,32 @@ pub fn get_generated_outputs(conn: &Connection, job_id: i64) -> Result<Vec<Gener
     rows.collect()
 }
 
+/// Returns whether a path is a persisted media surface the frontend may render.
+/// This is an allowlist lookup, not a filesystem-root check: user libraries may
+/// live on removable or otherwise configured drives, while arbitrary paths in
+/// the user's home directory are never implicitly trusted.
+pub fn is_renderable_asset_path(conn: &Connection, path: &str) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM media
+             WHERE video_path = ?1 OR audio_path = ?1 OR thumbnail = ?1 OR poster_path = ?1
+            UNION ALL
+            SELECT 1 FROM media_artifacts WHERE path = ?1
+            UNION ALL
+            SELECT 1 FROM generated_outputs
+             WHERE path = ?1 AND category IN ('video', 'audio')
+            UNION ALL
+            SELECT 1 FROM magazine_volumes WHERE hero_frame_path = ?1
+            UNION ALL
+            SELECT 1 FROM magazine_articles WHERE hero_frame_path = ?1
+            UNION ALL
+            SELECT 1 FROM magazine_evidence WHERE keyframe_path = ?1
+        )",
+        params![path],
+        |row| row.get(0),
+    )
+}
+
 pub struct AutoPlaylistInput<'a> {
     pub name: &'a str,
     pub description: Option<&'a str>,
@@ -5852,6 +5878,51 @@ pub fn get_channel_content_items(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renderable_asset_paths_require_exact_persisted_media_or_evidence_records() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE media (
+                video_path TEXT, audio_path TEXT, thumbnail TEXT, poster_path TEXT
+             );
+             CREATE TABLE media_artifacts (path TEXT);
+             CREATE TABLE generated_outputs (path TEXT, category TEXT);
+             CREATE TABLE magazine_volumes (hero_frame_path TEXT);
+             CREATE TABLE magazine_articles (hero_frame_path TEXT);
+             CREATE TABLE magazine_evidence (keyframe_path TEXT);
+             INSERT INTO media VALUES ('E:/library/video.mp4', 'E:/library/audio.m4a', 'E:/library/thumb.jpg', 'E:/library/poster.png');
+             INSERT INTO media_artifacts VALUES ('E:/library/frame.webp');
+             INSERT INTO generated_outputs VALUES ('E:/library/export.mp4', 'video');
+             INSERT INTO generated_outputs VALUES ('E:/library/notes.txt', 'text');
+             INSERT INTO magazine_volumes VALUES ('E:/library/volume.png');
+             INSERT INTO magazine_articles VALUES ('E:/library/article.jpg');
+             INSERT INTO magazine_evidence VALUES ('E:/library/evidence.png');",
+        )
+        .unwrap();
+
+        for path in [
+            "E:/library/video.mp4",
+            "E:/library/audio.m4a",
+            "E:/library/thumb.jpg",
+            "E:/library/poster.png",
+            "E:/library/frame.webp",
+            "E:/library/export.mp4",
+            "E:/library/volume.png",
+            "E:/library/article.jpg",
+            "E:/library/evidence.png",
+        ] {
+            assert!(is_renderable_asset_path(&conn, path).unwrap(), "{path}");
+        }
+        for path in [
+            "E:/library/notes.txt",
+            "E:/library/unrecorded.mp4",
+            "C:/Users/test/private.mp4",
+            "E:/library/VIDEO.mp4",
+        ] {
+            assert!(!is_renderable_asset_path(&conn, path).unwrap(), "{path}");
+        }
+    }
 
     #[test]
     fn profile_sources_deduplication_saved_and_reposts() {

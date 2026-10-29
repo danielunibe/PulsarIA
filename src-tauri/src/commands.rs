@@ -28,7 +28,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex as StdMutex};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::Mutex;
@@ -139,6 +139,13 @@ pub struct AppState {
 #[tauri::command]
 pub fn get_api_session_token(state: State<'_, AppState>) -> String {
     state.api_session_token.clone()
+}
+
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let trusted_url = crate::external_links::validate_external_url(&url).map_err(str::to_string)?;
+    tauri_plugin_opener::open_url(trusted_url.as_str(), None::<&str>)
+        .map_err(|_| "No se pudo abrir el enlace externo autorizado.".to_string())
 }
 
 #[tauri::command]
@@ -2308,6 +2315,40 @@ pub async fn get_generated_outputs(
         .lock()
         .map_err(|_| "Database mutex poisoned".to_string())?;
     db::get_generated_outputs(&connection, job_id).map_err(|error| error.to_string())
+}
+
+/// Grants the asset protocol access to one exact, persisted media/evidence file.
+/// The database membership check prevents the webview from widening the scope
+/// to arbitrary paths such as other files under `$HOME`.
+#[tauri::command]
+pub fn authorize_renderable_asset(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    if path.len() > 32_768 {
+        return Err("Asset reference is invalid or unavailable".into());
+    }
+    {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "Asset reference is invalid or unavailable".to_string())?;
+        let is_recorded = db::is_renderable_asset_path(&connection, &path)
+            .map_err(|_| "Asset reference is invalid or unavailable".to_string())?;
+        if !is_recorded {
+            return Err("Asset reference is invalid or unavailable".into());
+        }
+    }
+
+    let path = crate::application::asset_scope::validate_renderable_asset_path(
+        std::path::Path::new(&path),
+    )
+    .map_err(|_| "Asset reference is invalid or unavailable".to_string())?;
+    app.asset_protocol_scope()
+        .allow_file(&path)
+        .map_err(|_| "Asset reference is invalid or unavailable".to_string())?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
