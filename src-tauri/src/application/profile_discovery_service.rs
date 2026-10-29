@@ -63,6 +63,52 @@ impl Drop for DiscoveryGuard {
     }
 }
 
+fn source_item_timestamp(item: &SourceScanItem) -> Option<f64> {
+    item.timestamp
+        .filter(|timestamp| timestamp.is_finite() && *timestamp > 0.0)
+        .or_else(|| {
+            item.upload_date
+                .as_deref()
+                .and_then(|value| chrono::NaiveDate::parse_from_str(value, "%Y%m%d").ok())
+                .and_then(|date| date.and_hms_opt(0, 0, 0))
+                .map(|date| date.and_utc().timestamp() as f64)
+        })
+}
+
+/// Sort only when every row has a timestamp. A partial comparator that treats
+/// dated and undated rows as equal is non-transitive; when dates are missing,
+/// retain the stable order returned by the provider.
+fn order_discovery_items(items: &mut [SourceScanItem]) {
+    if items
+        .iter()
+        .all(|item| source_item_timestamp(item).is_some())
+    {
+        items.sort_by(|left, right| {
+            let left_time = source_item_timestamp(left).unwrap_or_default();
+            let right_time = source_item_timestamp(right).unwrap_or_default();
+            right_time
+                .partial_cmp(&left_time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+}
+
+fn discovery_checkpoint_candidates(
+    persisted_ids: &[String],
+    oldest_scan_is_complete: bool,
+    processing_succeeded: bool,
+) -> (Option<String>, Option<String>) {
+    if !processing_succeeded || persisted_ids.is_empty() {
+        return (None, None);
+    }
+
+    let newest = persisted_ids.first().cloned();
+    let oldest = oldest_scan_is_complete
+        .then(|| persisted_ids.last().cloned())
+        .flatten();
+    (newest, oldest)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileMetadataSnapshot {
     pub platform: String,
@@ -627,6 +673,8 @@ impl ProfileDiscoveryService {
                 ("rate_limited".into(), "RATE_LIMITED".into())
             } else if category_data.status.as_deref() == Some("unsupported") {
                 ("unsupported".into(), "PROVIDER_UNSUPPORTED".into())
+            } else if category_data.status.as_deref() == Some("unknown") {
+                ("unknown".into(), "VISIBILITY_UNCONFIRMED".into())
             } else {
                 classify_error_string(&reason)
             };
@@ -664,22 +712,15 @@ impl ProfileDiscoveryService {
 
         // Category is available! Process items newest-first
         let mut items = category_data.items.clone();
-
-        // Sort items newest-first: if timestamp is present, sort descending
-        items.sort_by(|a, b| {
-            match (a.timestamp, b.timestamp) {
-                (Some(t1), Some(t2)) => t2.partial_cmp(&t1).unwrap_or(std::cmp::Ordering::Equal),
-                _ => std::cmp::Ordering::Equal, // preserve existing provider ordering
-            }
-        });
+        order_discovery_items(&mut items);
 
         let mut discovered = 0i64;
         let mut queued = 0i64;
         let mut duplicates = 0i64;
-        let mut newest_id: Option<String> = channel.newest_known_content_id.clone();
-        let mut oldest_id: Option<String> = channel.oldest_known_content_id.clone();
+        let mut persisted_ids = Vec::new();
         let mut seen_urls = HashSet::new();
         let mut processing_error = None;
+        let mut scan_interrupted = false;
 
         for item in &items {
             let canonical_url = canonicalize_tiktok_url(&item.url);
@@ -692,11 +733,6 @@ impl ProfileDiscoveryService {
             // Extract stable platform content ID
             let platform_content_id =
                 extract_content_id_from_url(&canonical_url, item.id.as_deref());
-
-            if newest_id.is_none() {
-                newest_id = Some(platform_content_id.clone());
-            }
-            oldest_id = Some(platform_content_id.clone());
 
             let persisted = self
                 .db
@@ -719,7 +755,12 @@ impl ProfileDiscoveryService {
                     continue;
                 }
             };
+            if !item_result.admitted {
+                scan_interrupted = true;
+                break;
+            }
             discovered += 1;
+            persisted_ids.push(platform_content_id);
             if item_result.duplicate {
                 duplicates += 1;
             }
@@ -739,6 +780,80 @@ impl ProfileDiscoveryService {
             );
         }
 
+        if scan_interrupted {
+            let message = "El canal cambió durante la consulta; vuelve a sincronizar para completar el inventario.";
+            let (current_enabled, total_count) = if let Ok(connection) = self.db.lock() {
+                let current_enabled = db::get_profile_channels(&connection, source.id)
+                    .ok()
+                    .and_then(|channels| {
+                        channels
+                            .into_iter()
+                            .find(|entry| entry.kind == channel_kind)
+                            .map(|entry| entry.enabled)
+                    })
+                    .unwrap_or(false);
+                let status = if current_enabled { "pending" } else { "paused" };
+                let count = db::count_profile_content(&connection, source.id, &channel_kind)
+                    .unwrap_or(channel.discovered_count);
+                let _ = db::update_profile_channel_checkpoint(
+                    &connection,
+                    source.id,
+                    &channel_kind,
+                    status,
+                    count,
+                    None,
+                    None,
+                    None,
+                );
+                let _ = db::update_profile_channel_status(
+                    &connection,
+                    source.id,
+                    &channel_kind,
+                    status,
+                    current_enabled.then_some("SCAN_INTERRUPTED"),
+                    current_enabled.then_some(message),
+                );
+                (current_enabled, count)
+            } else {
+                (false, channel.discovered_count)
+            };
+            let status = if current_enabled { "pending" } else { "paused" };
+
+            let _ = self.app_handle.emit(
+                "tiktok_source_channel_status_changed",
+                serde_json::json!({
+                    "sourceId": source.id,
+                    "kind": &channel_kind,
+                    "status": status,
+                    "discoveredCount": total_count,
+                    "errorMessage": current_enabled.then_some(message),
+                }),
+            );
+            return ChannelDiscoverySummary {
+                channel_kind,
+                status: status.to_string(),
+                discovered_count: discovered,
+                queued_count: queued,
+                duplicate_count: duplicates,
+                error_code: current_enabled.then_some("SCAN_INTERRUPTED".into()),
+                error_message: current_enabled.then_some(message.into()),
+            };
+        }
+
+        // Advance only what this scan can prove. Bounded/date-filtered scans
+        // can safely refresh the newest edge but cannot replace the oldest.
+        let oldest_scan_is_complete = !category_data.truncated && source.history_from.is_none();
+        let (newest_id, oldest_id) = discovery_checkpoint_candidates(
+            &persisted_ids,
+            oldest_scan_is_complete,
+            processing_error.is_none(),
+        );
+        let checkpoint_status = if processing_error.is_some() {
+            "error"
+        } else {
+            "idle"
+        };
+
         // Persist checkpoint in SQLite
         let mut total_count = channel.discovered_count;
         {
@@ -749,7 +864,7 @@ impl ProfileDiscoveryService {
                         &conn,
                         source.id,
                         &channel_kind,
-                        "idle",
+                        checkpoint_status,
                         total_count,
                         None,
                         newest_id.as_deref(),
@@ -802,14 +917,15 @@ impl ProfileDiscoveryService {
 }
 
 pub(crate) struct PersistedDiscoveryItem {
+    admitted: bool,
     content_id: i64,
     new_relationship: bool,
     duplicate: bool,
     dispatch_job_id: Option<i64>,
 }
 
-/// Admission reads the current saved rule for every item, including a toggle
-/// made while a scan is running. Discovery without downloads remains durable.
+/// Admission rereads the channel toggle and download rule for each item so a
+/// setting change during a scan cannot admit new work from a disabled channel.
 pub(crate) fn persist_discovered_item(
     connection: &rusqlite::Connection,
     source_id: i64,
@@ -819,6 +935,15 @@ pub(crate) fn persist_discovered_item(
 ) -> rusqlite::Result<PersistedDiscoveryItem> {
     let transaction = connection.unchecked_transaction()?;
     let source = db::get_collection_source(&transaction, source_id)?;
+    if !watch_config_enables_channel(&source.watch_config_json, kind) {
+        return Ok(PersistedDiscoveryItem {
+            admitted: false,
+            content_id: 0,
+            new_relationship: false,
+            duplicate: false,
+            dispatch_job_id: None,
+        });
+    }
     let canonical_url = canonicalize_tiktok_url(&item.url);
     let platform_id = extract_content_id_from_url(&canonical_url, item.id.as_deref());
     let (content_id, _) = db::upsert_content_item(
@@ -836,7 +961,7 @@ pub(crate) fn persist_discovered_item(
         Some(&serde_json::json!({"profileSourceId": source_id, "channelKind": kind, "url": canonical_url}).to_string()), Some(sync_run_id))?;
     let existing_job = db::find_job_id_by_url(&transaction, &canonical_url)?;
     let rules = serde_json::from_str::<SourceRules>(&source.rules_json).unwrap_or_default();
-    let dispatch_job_id = if rules.auto_enqueue && existing_job.is_none() {
+    let dispatch_job_id = if source.active && rules.auto_enqueue && existing_job.is_none() {
         Some(db::insert_job(&transaction, &canonical_url)?)
     } else {
         None
@@ -846,6 +971,7 @@ pub(crate) fn persist_discovered_item(
     }
     transaction.commit()?;
     Ok(PersistedDiscoveryItem {
+        admitted: true,
         content_id,
         new_relationship,
         duplicate: existing_job.is_some(),
@@ -853,12 +979,24 @@ pub(crate) fn persist_discovered_item(
     })
 }
 
+fn watch_config_enables_channel(watch_config_json: &str, kind: &str) -> bool {
+    let watch = serde_json::from_str::<serde_json::Value>(watch_config_json)
+        .unwrap_or(serde_json::Value::Null);
+    let key = if kind == "favorites" { "likes" } else { kind };
+    watch
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .or_else(|| {
+            (kind == "favorites")
+                .then(|| watch.get("favorites").and_then(serde_json::Value::as_bool))
+                .flatten()
+        })
+        .unwrap_or(false)
+}
+
 /// Extracts platform content ID from canonical URL or explicit ID.
 /// Example: `https://www.tiktok.com/@creator/video/7412345678901234567` -> `7412345678901234567`
 pub fn extract_content_id_from_url(url: &str, explicit_id: Option<&str>) -> String {
-    if let Some(id) = explicit_id.filter(|s| !s.trim().is_empty()) {
-        return id.trim().to_string();
-    }
     if let Some(pos) = url.find("/video/") {
         let remainder = &url[pos + 7..];
         let end = remainder
@@ -868,6 +1006,9 @@ pub fn extract_content_id_from_url(url: &str, explicit_id: Option<&str>) -> Stri
         if !id_part.is_empty() {
             return id_part.to_string();
         }
+    }
+    if let Some(id) = explicit_id.filter(|s| !s.trim().is_empty()) {
+        return id.trim().to_string();
     }
     use std::hash::{DefaultHasher, Hasher};
     let mut hasher = DefaultHasher::new();
@@ -906,6 +1047,78 @@ fn classify_error_string(error: &str) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scan_item(id: &str, timestamp: Option<f64>, upload_date: Option<&str>) -> SourceScanItem {
+        SourceScanItem {
+            url: format!("https://www.tiktok.com/@creator/video/{id}"),
+            id: Some(id.to_string()),
+            upload_date: upload_date.map(str::to_string),
+            timestamp,
+            title: None,
+        }
+    }
+
+    #[test]
+    fn mixed_or_missing_dates_preserve_provider_order_without_comparator_reordering() {
+        let mut items = vec![
+            scan_item("newest", Some(300.0), None),
+            scan_item("undated", None, None),
+            scan_item("older", Some(100.0), None),
+        ];
+
+        order_discovery_items(&mut items);
+
+        assert_eq!(items[0].id.as_deref(), Some("newest"));
+        assert_eq!(items[1].id.as_deref(), Some("undated"));
+        assert_eq!(items[2].id.as_deref(), Some("older"));
+    }
+
+    #[test]
+    fn complete_dates_are_sorted_newest_first_with_stable_ties() {
+        let mut items = vec![
+            scan_item("older", Some(100.0), None),
+            scan_item("newest-a", Some(300.0), None),
+            scan_item("newest-b", Some(300.0), None),
+        ];
+
+        order_discovery_items(&mut items);
+
+        assert_eq!(items[0].id.as_deref(), Some("newest-a"));
+        assert_eq!(items[1].id.as_deref(), Some("newest-b"));
+        assert_eq!(items[2].id.as_deref(), Some("older"));
+    }
+
+    #[test]
+    fn bounded_or_failed_scans_preserve_the_oldest_checkpoint() {
+        let persisted_ids = ["new-120".to_string(), "new-110".to_string()];
+
+        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, false, true);
+        assert_eq!(newest.as_deref(), Some("new-120"));
+        assert_eq!(oldest, None);
+
+        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, true, false);
+        assert_eq!(newest, None);
+        assert_eq!(oldest, None);
+
+        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, true, true);
+        assert_eq!(newest.as_deref(), Some("new-120"));
+        assert_eq!(oldest.as_deref(), Some("new-110"));
+    }
+
+    #[test]
+    fn canonical_tiktok_video_id_takes_precedence_over_provider_alias() {
+        assert_eq!(
+            extract_content_id_from_url(
+                "https://www.tiktok.com/@creator/video/7412345678901234567?share=1",
+                Some("provider-alias"),
+            ),
+            "7412345678901234567"
+        );
+        assert_eq!(
+            extract_content_id_from_url("https://www.tiktok.com/@creator/liked", Some("stable-id")),
+            "stable-id"
+        );
+    }
 
     #[test]
     fn partial_queries_report_auth_and_rate_limits_without_claiming_success() {

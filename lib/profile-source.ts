@@ -19,6 +19,7 @@ export type ProfileSourceSyncState =
   | 'requires_session'
   | 'requires_auth'
   | 'rate_limited'
+  | 'unknown'
   | 'unavailable'
   | 'unsupported'
   | 'error';
@@ -67,6 +68,7 @@ export interface ProfileSource {
   status: ProfileStatus;
   scanLimit: number;
   lastSyncAt: string | null;
+  nextSyncAt: string | null;
   lastError: string | null;
 }
 
@@ -164,6 +166,7 @@ export interface PersistedCollectionSourceRecord {
   updated_at?: string | null;
   history_limit?: number | null;
   last_sync_at?: string | null;
+  next_sync_at?: string | null;
   last_error?: string | null;
 }
 
@@ -195,6 +198,7 @@ function sourceState(enabled: boolean, status: string, category: string): Profil
   if (status === 'checking') return 'discovering';
   if (category === 'requires_session' || category === 'requires_auth' || status === 'needs_auth') return 'requires_session';
   if (category === 'rate_limited') return 'rate_limited';
+  if (category === 'unknown') return 'unknown';
   if (category === 'unsupported' || category === 'unavailable') return 'unsupported';
   if (category === 'error' || category === 'private') return 'error';
   if (category === 'discovering' || category === 'discovering_recent' || category === 'backfilling') {
@@ -272,6 +276,7 @@ export function toProfileSource(source: PersistedCollectionSourceRecord, channel
     status: profileStatus(source),
     scanLimit: source.history_limit ?? 0,
     lastSyncAt: source.last_sync_at ?? null,
+    nextSyncAt: source.next_sync_at ?? null,
     lastError: source.last_error ?? null,
   };
 }

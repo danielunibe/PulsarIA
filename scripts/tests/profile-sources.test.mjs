@@ -77,6 +77,15 @@ test('favorites and legacy likes summary keys both preserve session failures', (
   assert.equal(checking.sources.posts.syncState, 'discovering');
 });
 
+test('unknown activity availability stays unknown and does not render a false zero', () => {
+  const profile = adapter.toProfileSource(record({
+    status: 'partial', last_sync_at: '2026-10-12',
+    last_sync_summary_json: JSON.stringify({ categories: { saved: { state: 'unknown', discovered: 0 } } }),
+  }));
+  assert.equal(profile.sources.saved.syncState, 'unknown');
+  assert.equal(profile.sources.saved.discoveredCount, null);
+});
+
 function elements(node) {
   if (!node || typeof node !== 'object') return [];
   if (Array.isArray(node)) return node.flatMap(elements);
@@ -124,7 +133,7 @@ async function panel({ native = true, rights = true, sources = [], summary = {} 
   render();
   effects[0]();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  return { render, calls, selections, toasts, requestedRights };
+  return { api, render, calls, selections, toasts, requestedRights };
 }
 
 test('adding uses saved options, opens the profile, and never invokes a scan', async () => {
@@ -155,6 +164,16 @@ test('profile content controls reach the consumer and partial queries show a war
   assert.equal(fixture.toasts.at(-1).kind, 'warning');
   assert.equal(fixture.toasts.at(-1).message, 'Requiere sesión');
   assert.equal(fixture.toasts.some((toast) => toast.kind === 'success'), false);
+});
+
+test('rate limits show the persisted retry time in the channel state', async () => {
+  const fixture = await panel();
+  const profile = adapter.toProfileSource(record({
+    status: 'partial', last_sync_at: '2026-10-29 09:00:00', next_sync_at: '2026-10-29 09:15:00',
+    last_sync_summary_json: JSON.stringify({ categories: { saved: { state: 'rate_limited', discovered: 0 } } }),
+  }));
+  const label = fixture.api.sourceStateLabel(profile.sources.saved, profile.nextSyncAt);
+  assert.ok(label.startsWith('Límite de TikTok · reintento '), label);
 });
 
 test('querying without content rights requests the existing gate and does not invoke IPC', async () => {

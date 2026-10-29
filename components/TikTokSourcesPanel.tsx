@@ -96,7 +96,7 @@ function formatCount(value: number | null): string {
   return value === null ? '—' : new Intl.NumberFormat('es-MX', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
 }
 
-function sourceStateLabel(entry: ProfileSourceEntry): string {
+export function sourceStateLabel(entry: ProfileSourceEntry, nextSyncAt: string | null): string {
   switch (entry.syncState) {
     case 'pending':
       return 'Sin consultar';
@@ -111,8 +111,18 @@ function sourceStateLabel(entry: ProfileSourceEntry): string {
     case 'requires_session':
     case 'requires_auth':
       return 'Requiere sesión';
-    case 'rate_limited':
+    case 'rate_limited': {
+      if (nextSyncAt) {
+        const retryDate = new Date(nextSyncAt.includes('T') ? nextSyncAt : `${nextSyncAt.replace(' ', 'T')}Z`);
+        if (!Number.isNaN(retryDate.getTime())) {
+          const retryTime = new Intl.DateTimeFormat('es-MX', { hour: '2-digit', minute: '2-digit' }).format(retryDate);
+          return `Límite de TikTok · reintento ${retryTime}`;
+        }
+      }
       return 'Límite de TikTok';
+    }
+    case 'unknown':
+      return 'Disponibilidad desconocida';
     case 'unavailable':
     case 'unsupported':
       return 'No disponible';
@@ -408,11 +418,11 @@ function ConnectedProfileCard({
             return (
               <button type="button" className={'profile-source-entry ' + (entry.enabled ? 'is-enabled' : 'is-paused')} key={key}
                 onClick={() => onSelectChannel(key)} title={entry.errorMessage ?? `Ver ${meta.label.toLowerCase()} de ${profile.handle}`}
-                aria-label={`Ver ${meta.label.toLowerCase()} de ${profile.handle}: ${sourceStateLabel(entry)}`}>
+                aria-label={`Ver ${meta.label.toLowerCase()} de ${profile.handle}: ${sourceStateLabel(entry, profile.nextSyncAt)}`}>
                 <span className="profile-source-entry-icon"><Icon size={14} aria-hidden="true" /></span>
                 <span className="profile-source-entry-copy">
                   <strong>{meta.label}</strong>
-                  <span>{sourceStateLabel(entry)}</span>
+                  <span>{sourceStateLabel(entry, profile.nextSyncAt)}</span>
                 </span>
                 <b aria-label={meta.label + ': ' + (entry.discoveredCount === null ? 'pendiente' : entry.discoveredCount)}>
                   {formatCount(entry.discoveredCount)}

@@ -5574,7 +5574,10 @@ pub fn finish_profile_discovery(
             last_success_at = CASE WHEN ?2 IN ('active', 'partial') THEN datetime('now') ELSE last_success_at END,
             last_sync_summary_json = ?3, last_error = ?4, discovered_count = ?5,
             consecutive_failures = CASE WHEN ?4 IS NULL THEN 0 ELSE consecutive_failures + 1 END,
-            next_sync_at = datetime('now', '+' || interval_minutes || ' minutes'),
+            next_sync_at = datetime('now', '+' || CASE
+                WHEN ?4 IS NULL THEN interval_minutes
+                ELSE max(interval_minutes, min(180, 15 * (consecutive_failures + 1)))
+            END || ' minutes'),
             updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![source_id, status, summary_json, error, count],
     )?;
@@ -5621,9 +5624,9 @@ pub fn update_profile_channel_checkpoint(
             newest_known_content_id = coalesce(?6, newest_known_content_id),
             oldest_known_content_id = coalesce(?7, oldest_known_content_id),
             last_discovery_at = CURRENT_TIMESTAMP,
-            last_successful_discovery_at = CURRENT_TIMESTAMP,
-            error_code = NULL,
-            error_message = NULL,
+            last_successful_discovery_at = CASE WHEN ?3 IN ('idle', 'completed_initial_backfill') THEN CURRENT_TIMESTAMP ELSE last_successful_discovery_at END,
+            error_code = CASE WHEN ?3 IN ('idle', 'completed_initial_backfill') THEN NULL ELSE error_code END,
+            error_message = CASE WHEN ?3 IN ('idle', 'completed_initial_backfill') THEN NULL ELSE error_message END,
             updated_at = CURRENT_TIMESTAMP
          WHERE profile_source_id = ?1 AND kind = ?2",
         params![
@@ -6266,6 +6269,252 @@ mod tests {
             );
             assert_eq!(posts_channel.status, "idle");
         }
+    }
+
+    #[test]
+    fn profile_channel_toggle_stops_late_admission_and_preserves_existing_jobs() {
+        use crate::application::profile_discovery_service::persist_discovered_item;
+        use crate::application::queue_service::SourceScanItem;
+
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let registered = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@channeltoggle",
+            &selection,
+        )
+        .unwrap();
+        ensure_profile_channels(
+            &conn,
+            registered.source.id,
+            &registered.source.watch_config_json,
+        )
+        .unwrap();
+        let item = SourceScanItem {
+            url: "https://www.tiktok.com/@creator/video/7410000000000000001?share=1".into(),
+            id: Some("provider-alias".into()),
+            upload_date: None,
+            timestamp: None,
+            title: None,
+        };
+
+        let posts_disabled = crate::application::collection_service::ProfileSourceSelection {
+            posts: false,
+            reposts: true,
+            saved: false,
+            favorites: false,
+        };
+        crate::application::collection_service::update_profile_source_settings(
+            &conn,
+            registered.source.id,
+            &posts_disabled,
+            Some(true),
+        )
+        .unwrap();
+        persist_discovered_item(&conn, registered.source.id, "posts", &item, "run-off").unwrap();
+        assert_eq!(
+            count_profile_content(&conn, registered.source.id, "posts").unwrap(),
+            0
+        );
+        assert!(get_all_jobs(&conn).unwrap().is_empty());
+
+        crate::application::collection_service::update_profile_source_settings(
+            &conn,
+            registered.source.id,
+            &selection,
+            Some(true),
+        )
+        .unwrap();
+        persist_discovered_item(&conn, registered.source.id, "posts", &item, "run-on").unwrap();
+        assert_eq!(
+            count_profile_content(&conn, registered.source.id, "posts").unwrap(),
+            1
+        );
+        let jobs = get_all_jobs(&conn).unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].url,
+            "https://www.tiktok.com/@creator/video/7410000000000000001"
+        );
+
+        crate::application::collection_service::update_profile_source_settings(
+            &conn,
+            registered.source.id,
+            &posts_disabled,
+            Some(true),
+        )
+        .unwrap();
+        assert_eq!(
+            get_all_jobs(&conn).unwrap().len(),
+            1,
+            "turning a channel off must not cancel existing jobs"
+        );
+    }
+
+    #[test]
+    fn bounded_profile_checkpoint_refreshes_newest_but_keeps_oldest() {
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let registered = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@checkpointincremental",
+            &selection,
+        )
+        .unwrap();
+        ensure_profile_channels(
+            &conn,
+            registered.source.id,
+            &registered.source.watch_config_json,
+        )
+        .unwrap();
+
+        update_profile_channel_checkpoint(
+            &conn,
+            registered.source.id,
+            "posts",
+            "idle",
+            20,
+            None,
+            Some("new-100"),
+            Some("old-1"),
+        )
+        .unwrap();
+        update_profile_channel_checkpoint(
+            &conn,
+            registered.source.id,
+            "posts",
+            "idle",
+            30,
+            None,
+            Some("new-120"),
+            None,
+        )
+        .unwrap();
+
+        let channel = get_profile_channels(&conn, registered.source.id)
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.kind == "posts")
+            .unwrap();
+        assert_eq!(channel.newest_known_content_id.as_deref(), Some("new-120"));
+        assert_eq!(channel.oldest_known_content_id.as_deref(), Some("old-1"));
+    }
+
+    #[test]
+    fn failed_channel_checkpoint_preserves_success_time_and_applies_retry_backoff() {
+        let conn = memory_db();
+        let selection = crate::application::collection_service::ProfileSourceSelection {
+            posts: true,
+            reposts: false,
+            saved: false,
+            favorites: false,
+        };
+        let registered = crate::application::collection_service::register_profile_source(
+            &conn,
+            "@checkpointfailure",
+            &selection,
+        )
+        .unwrap();
+        ensure_profile_channels(
+            &conn,
+            registered.source.id,
+            &registered.source.watch_config_json,
+        )
+        .unwrap();
+
+        update_profile_channel_checkpoint(
+            &conn,
+            registered.source.id,
+            "posts",
+            "idle",
+            1,
+            None,
+            Some("new-1"),
+            Some("old-1"),
+        )
+        .unwrap();
+        let first_success = get_profile_channels(&conn, registered.source.id)
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.kind == "posts")
+            .unwrap()
+            .last_successful_discovery_at
+            .unwrap();
+
+        update_profile_channel_status(
+            &conn,
+            registered.source.id,
+            "posts",
+            "error",
+            Some("PROCESSING_ERROR"),
+            Some("synthetic persistence failure"),
+        )
+        .unwrap();
+        update_profile_channel_checkpoint(
+            &conn,
+            registered.source.id,
+            "posts",
+            "error",
+            1,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let failed_channel = get_profile_channels(&conn, registered.source.id)
+            .unwrap()
+            .into_iter()
+            .find(|channel| channel.kind == "posts")
+            .unwrap();
+        assert_eq!(failed_channel.status, "error");
+        assert_eq!(
+            failed_channel.last_successful_discovery_at.as_deref(),
+            Some(first_success.as_str())
+        );
+        assert_eq!(
+            failed_channel.error_code.as_deref(),
+            Some("PROCESSING_ERROR")
+        );
+        assert_eq!(
+            failed_channel.error_message.as_deref(),
+            Some("synthetic persistence failure")
+        );
+
+        conn.execute(
+            "UPDATE collection_sources SET interval_minutes = 1 WHERE id = ?1",
+            params![registered.source.id],
+        )
+        .unwrap();
+        finish_profile_discovery(
+            &conn,
+            registered.source.id,
+            "partial",
+            "{}",
+            Some("synthetic rate limit"),
+        )
+        .unwrap();
+        let retry_delay_seconds: i64 = conn
+            .query_row(
+                "SELECT strftime('%s', next_sync_at) - strftime('%s', 'now')
+                 FROM collection_sources WHERE id = ?1",
+                params![registered.source.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            (14 * 60..=15 * 60).contains(&retry_delay_seconds),
+            "the first failed profile sync should back off for about 15 minutes"
+        );
     }
 
     #[test]
