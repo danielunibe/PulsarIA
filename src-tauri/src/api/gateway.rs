@@ -458,7 +458,7 @@ async fn retry_job_handler(
         }));
     }
 
-    let job_url = {
+    let (job_url, resume_attempt) = {
         let connection = state
             .job_repo
             .get_connection()
@@ -472,13 +472,24 @@ async fn retry_job_handler(
         let job = crate::db::get_job_by_id(&connection, job_id)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
             .ok_or_else(|| (StatusCode::NOT_FOUND, "Job not found".to_string()))?;
-        if !matches!(
-            job.status.to_lowercase().as_str(),
-            "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
-        ) {
+        let explicitly_queued = job.status.eq_ignore_ascii_case("queued");
+        if !explicitly_queued
+            && !matches!(
+                job.status.to_lowercase().as_str(),
+                "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
+            )
+        {
             return Err((
                 StatusCode::CONFLICT,
                 "Job is not available for retry".to_string(),
+            ));
+        }
+        if explicitly_queued
+            && !crate::application::queue_service::retry_budget_allows_resume(job.retry_count)
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                "Retry budget is exhausted; review the job before resuming it".to_string(),
             ));
         }
         let media_root = std::env::var_os("PULSAR_DOWNLOAD_DIR")
@@ -487,12 +498,26 @@ async fn retry_job_handler(
         let processing_root = crate::storage::staging_root(&media_root);
         crate::db::cleanup_media_files(&connection, job_id, &processing_root)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-        crate::db::reset_job_for_retry(&connection, job_id)
-            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-        job.url
+        if explicitly_queued {
+            crate::db::update_job_status(&connection, job_id, "retrying", 0)
+                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+            (job.url, Some(job.retry_count))
+        } else {
+            crate::db::reset_job_for_retry(&connection, job_id)
+                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+            (job.url, None)
+        }
     };
 
-    if let Err(error) = state.queue_service.dispatch(job_id, job_url).await {
+    let dispatch_result = if let Some(attempt) = resume_attempt {
+        state
+            .queue_service
+            .dispatch_with_attempt(job_id, job_url, attempt)
+            .await
+    } else {
+        state.queue_service.dispatch(job_id, job_url).await
+    };
+    if let Err(error) = dispatch_result {
         // El retry debe ser transaccional desde la perspectiva del usuario:
         // si la cola rechaza el despacho, no dejamos el registro atascado en
         // queued ni obligamos a esperar al scheduler de mantenimiento.

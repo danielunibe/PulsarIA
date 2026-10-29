@@ -163,14 +163,14 @@ async fn main() {
             return;
         }
     };
-    if let Err(error) = db::repair_library(&conn) {
-        tracing::error!("Automatic library reconciliation failed: {}", error);
-    }
     let media_root = if initial_app_settings.download_dir.trim().is_empty() {
         storage::default_media_root()
     } else {
         std::path::PathBuf::from(&initial_app_settings.download_dir)
     };
+    if let Err(error) = db::repair_library(&conn, &media_root) {
+        tracing::error!("Automatic library reconciliation failed: {}", error);
+    }
     if let Err(error) = db::reconcile_storage(&conn, &media_root) {
         tracing::error!("Automatic storage reconciliation failed: {}", error);
     }

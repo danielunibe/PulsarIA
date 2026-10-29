@@ -370,6 +370,7 @@ pub struct JobActivityEvent {
 pub struct LibraryRepairReport {
     pub interrupted_jobs: usize,
     pub missing_media_paths: usize,
+    pub inaccessible_media_paths: usize,
     pub preserved_jobs: usize,
     pub backup_path: Option<String>,
     #[serde(default)]
@@ -387,10 +388,14 @@ pub struct LibraryRepairReport {
 pub struct StorageReconciliationReport {
     pub checked_artifacts: usize,
     pub corrected_artifact_sizes: usize,
+    pub preserved_missing_artifacts: usize,
+    pub preserved_unavailable_artifacts: usize,
     pub removed_stale_artifacts: usize,
     pub checked_generated_outputs: usize,
     pub corrected_output_sizes: usize,
     pub repaired_output_paths: usize,
+    pub preserved_missing_outputs: usize,
+    pub preserved_unavailable_outputs: usize,
     pub removed_stale_outputs: usize,
 }
 
@@ -1160,7 +1165,7 @@ fn init_db_core() -> Result<Connection> {
                  CASE WHEN video_path IS NULL OR video_path = '' THEN 'online' ELSE 'local' END
              ELSE source_state
          END
-         WHERE source_state IS NULL OR source_state = '' OR source_state NOT IN ('local', 'online', 'unavailable')",
+         WHERE source_state IS NULL OR source_state = '' OR source_state NOT IN ('local', 'online', 'unavailable', 'storage_offline')",
         [],
     )?;
 
@@ -4205,9 +4210,12 @@ pub fn update_media_storage(
     audio_bytes: Option<u64>,
     source_state: &str,
 ) -> Result<()> {
-    if !matches!(source_state, "local" | "online" | "unavailable") {
+    if !matches!(
+        source_state,
+        "local" | "online" | "unavailable" | "storage_offline"
+    ) {
         return Err(rusqlite::Error::InvalidParameterName(
-            "source_state must be local, online or unavailable".to_string(),
+            "source_state must be local, online, unavailable or storage_offline".to_string(),
         ));
     }
     let rows = conn.execute(
@@ -5023,11 +5031,44 @@ fn path_is_within_existing(path: &Path, root: &Path) -> bool {
     path.starts_with(root)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StoredPathStatus {
+    Present(u64),
+    Missing,
+    Inaccessible,
+}
+
+/// A failed `metadata(path)` is not enough to conclude that the file was
+/// deleted: its volume or a parent directory may simply be offline. Treat it
+/// as definitively missing only when the containing directory (or configured
+/// media root) is still reachable. Callers preserve the original reference in
+/// every non-present case.
+fn inspect_stored_path(path: &Path, configured_root: &Path) -> StoredPathStatus {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => StoredPathStatus::Present(metadata.len()),
+        Ok(_) => StoredPathStatus::Inaccessible,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent_is_available = path
+                .parent()
+                .and_then(|parent| fs::metadata(parent).ok())
+                .is_some_and(|metadata| metadata.is_dir());
+            let configured_root_is_available = path.starts_with(configured_root)
+                && fs::metadata(configured_root).is_ok_and(|metadata| metadata.is_dir());
+            if parent_is_available || configured_root_is_available {
+                StoredPathStatus::Missing
+            } else {
+                StoredPathStatus::Inaccessible
+            }
+        }
+        Err(_) => StoredPathStatus::Inaccessible,
+    }
+}
+
 /// Reconciles durable derivative references after a crash, manual file move or
-/// an interrupted purge. Existing files are never deleted here: this routine
-/// only updates their measured size, repairs a generated output whose
-/// recoverable copy is still present, or removes a database row whose file is
-/// gone. Knowledge tables are intentionally not queried or modified.
+/// an interrupted purge. This routine never deletes files or database
+/// references. It refreshes sizes for safely reachable files, repairs a
+/// generated output whose recoverable copy is present, and reports missing or
+/// inaccessible paths while preserving their rows and purge history.
 pub fn reconcile_storage(
     conn: &Connection,
     media_root: &Path,
@@ -5076,52 +5117,42 @@ pub fn reconcile_storage(
     for (artifact_id, job_id, raw_path, stored_size) in artifact_rows {
         let path = PathBuf::from(&raw_path);
         let expected_root = artifact_root.join(job_id.to_string());
-        if path.is_file() && path_is_within_existing(&path, &expected_root) {
-            let actual_size = i64::try_from(
-                fs::metadata(&path)
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
-                    .len(),
-            )
-            .unwrap_or(i64::MAX);
-            if stored_size != actual_size {
-                transaction.execute(
-                    "UPDATE media_artifacts SET size_bytes = ?1 WHERE id = ?2",
-                    params![actual_size, artifact_id],
-                )?;
-                report.corrected_artifact_sizes += 1;
+        match inspect_stored_path(&path, &artifact_root) {
+            StoredPathStatus::Present(size) if path_is_within_existing(&path, &expected_root) => {
+                let actual_size = i64::try_from(size).unwrap_or(i64::MAX);
+                if stored_size != actual_size {
+                    transaction.execute(
+                        "UPDATE media_artifacts SET size_bytes = ?1 WHERE id = ?2",
+                        params![actual_size, artifact_id],
+                    )?;
+                    report.corrected_artifact_sizes += 1;
+                }
             }
-        } else {
-            // A stale or unsafe artifact reference is removed from the index,
-            // never from disk. This prevents later UI actions from following
-            // a path that no longer belongs to the application.
-            transaction.execute(
-                "DELETE FROM media_artifacts WHERE id = ?1",
-                params![artifact_id],
-            )?;
-            report.removed_stale_artifacts += 1;
+            StoredPathStatus::Missing => report.preserved_missing_artifacts += 1,
+            StoredPathStatus::Inaccessible | StoredPathStatus::Present(_) => {
+                report.preserved_unavailable_artifacts += 1
+            }
         }
     }
 
     for (output_id, raw_path, stored_size) in output_rows {
         let path = PathBuf::from(&raw_path);
-        if path.is_file() {
-            // A user can change the media root between sessions. Preserve an
-            // existing output in that case and only refresh its size; purge
-            // still performs its own root-safety check before moving it.
-            let actual_size = i64::try_from(
-                fs::metadata(&path)
-                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
-                    .len(),
-            )
-            .unwrap_or(i64::MAX);
-            if stored_size != actual_size {
-                transaction.execute(
-                    "UPDATE generated_outputs SET size_bytes = ?1 WHERE id = ?2",
-                    params![actual_size, output_id],
-                )?;
-                report.corrected_output_sizes += 1;
+        match inspect_stored_path(&path, media_root) {
+            StoredPathStatus::Present(size) => {
+                // A user can change the media root between sessions. Preserve
+                // an existing output and refresh only its measured size.
+                let actual_size = i64::try_from(size).unwrap_or(i64::MAX);
+                if stored_size != actual_size {
+                    transaction.execute(
+                        "UPDATE generated_outputs SET size_bytes = ?1 WHERE id = ?2",
+                        params![actual_size, output_id],
+                    )?;
+                    report.corrected_output_sizes += 1;
+                }
+                continue;
             }
-            continue;
+            StoredPathStatus::Missing => report.preserved_missing_outputs += 1,
+            StoredPathStatus::Inaccessible => report.preserved_unavailable_outputs += 1,
         }
 
         // A purge may have committed its history immediately before the
@@ -5143,9 +5174,11 @@ pub fn reconcile_storage(
             [PathBuf::from(trash), PathBuf::from(original)]
                 .into_iter()
                 .find(|candidate| {
-                    candidate.is_file()
-                        && (path_is_within_existing(candidate, media_root)
-                            || path_is_within_existing(candidate, &trash_root))
+                    matches!(
+                        inspect_stored_path(candidate, media_root),
+                        StoredPathStatus::Present(_)
+                    ) && (path_is_within_existing(candidate, media_root)
+                        || path_is_within_existing(candidate, &trash_root))
                 })
         });
 
@@ -5165,16 +5198,6 @@ pub fn reconcile_storage(
                 ],
             )?;
             report.repaired_output_paths += 1;
-        } else {
-            transaction.execute(
-                "DELETE FROM generated_output_purge WHERE output_id = ?1",
-                params![output_id],
-            )?;
-            transaction.execute(
-                "DELETE FROM generated_outputs WHERE id = ?1",
-                params![output_id],
-            )?;
-            report.removed_stale_outputs += 1;
         }
     }
 
@@ -5182,18 +5205,21 @@ pub fn reconcile_storage(
     Ok(report)
 }
 
-pub fn repair_library(conn: &Connection) -> Result<LibraryRepairReport> {
-    let total_jobs: usize = conn.query_row("SELECT COUNT(*) FROM jobs", [], |row| row.get(0))?;
+pub fn repair_library(conn: &Connection, media_root: &Path) -> Result<LibraryRepairReport> {
+    let transaction = conn.unchecked_transaction()?;
+    let total_jobs: usize =
+        transaction.query_row("SELECT COUNT(*) FROM jobs", [], |row| row.get(0))?;
 
-    let interrupted_jobs = conn.execute(
-        "UPDATE jobs SET status = 'queued', progress = 0, retry_count = 0, error_message = NULL
-         WHERE status = 'processing'
-            OR error_message LIKE '%interrumpió%'
-            OR error_message LIKE '%interrumpio%'",
+    let interrupted_jobs = transaction.execute(
+        "UPDATE jobs SET status = 'retrying', progress = 0, error_message = NULL
+         WHERE status IN ('processing', 'metadata', 'downloading', 'extracting_audio',
+                          'transcribing', 'indexing')
+            OR (status IN ('error', 'failed', 'failure', 'retrying') AND
+                (error_message LIKE '%interrumpió%' OR error_message LIKE '%interrumpio%'))",
         [],
     )?;
 
-    let mut stmt = conn.prepare(
+    let mut stmt = transaction.prepare(
         "SELECT job_id, video_path, audio_path, video_bytes, audio_bytes FROM media
          WHERE (video_path IS NOT NULL AND video_path != '')
             OR (audio_path IS NOT NULL AND audio_path != '')",
@@ -5207,70 +5233,64 @@ pub fn repair_library(conn: &Connection) -> Result<LibraryRepairReport> {
             row.get::<_, Option<i64>>(4)?,
         ))
     })?;
-    let mut missing_ids = Vec::new();
+    let mut inspected_media = Vec::new();
     for row in rows {
         let (job_id, video_path, audio_path, stored_video_bytes, stored_audio_bytes) = row?;
-        let video_missing = video_path
+        let video_status = video_path
             .as_deref()
-            .is_some_and(|path| !Path::new(path).exists());
-        let audio_missing = audio_path
+            .filter(|path| !path.trim().is_empty())
+            .map(|path| inspect_stored_path(Path::new(path), media_root));
+        let audio_status = audio_path
             .as_deref()
-            .is_some_and(|path| !Path::new(path).exists());
-        let actual_video_bytes = video_path
-            .as_deref()
-            .filter(|_| !video_missing)
-            .and_then(|path| fs::metadata(path).ok())
-            .map(|metadata| metadata.len());
-        let actual_audio_bytes = audio_path
-            .as_deref()
-            .filter(|_| !audio_missing)
-            .and_then(|path| fs::metadata(path).ok())
-            .map(|metadata| metadata.len());
-        let video_size_changed = actual_video_bytes
-            .map(|value| stored_video_bytes != Some(i64::try_from(value).unwrap_or(i64::MAX)))
-            .unwrap_or(stored_video_bytes.is_some());
-        let audio_size_changed = actual_audio_bytes
-            .map(|value| stored_audio_bytes != Some(i64::try_from(value).unwrap_or(i64::MAX)))
-            .unwrap_or(stored_audio_bytes.is_some());
-        if video_missing || audio_missing || video_size_changed || audio_size_changed {
-            missing_ids.push((
-                job_id,
-                video_missing,
-                audio_missing,
-                actual_video_bytes,
-                actual_audio_bytes,
-            ));
+            .filter(|path| !path.trim().is_empty())
+            .map(|path| inspect_stored_path(Path::new(path), media_root));
+        let actual_video_bytes = match video_status {
+            Some(StoredPathStatus::Present(bytes)) => {
+                Some(i64::try_from(bytes).unwrap_or(i64::MAX))
+            }
+            _ => stored_video_bytes,
+        };
+        let actual_audio_bytes = match audio_status {
+            Some(StoredPathStatus::Present(bytes)) => {
+                Some(i64::try_from(bytes).unwrap_or(i64::MAX))
+            }
+            _ => stored_audio_bytes,
+        };
+        let status_path = video_status.or(audio_status);
+        let source_state = match status_path {
+            Some(StoredPathStatus::Present(_)) => "local",
+            Some(StoredPathStatus::Missing) => "unavailable",
+            Some(StoredPathStatus::Inaccessible) => "storage_offline",
+            None => "local",
+        };
+        let video_size_changed = actual_video_bytes != stored_video_bytes;
+        let audio_size_changed = actual_audio_bytes != stored_audio_bytes;
+        let source_state_changed: String = transaction.query_row(
+            "SELECT source_state FROM media WHERE job_id = ?1",
+            params![job_id],
+            |row| row.get(0),
+        )?;
+        if video_size_changed || audio_size_changed || source_state_changed != source_state {
+            inspected_media.push((job_id, actual_video_bytes, actual_audio_bytes, source_state));
         }
     }
+    drop(stmt);
 
-    let missing_media_paths = missing_ids.len();
-    for (job_id, video_missing, audio_missing, actual_video_bytes, actual_audio_bytes) in
-        missing_ids
-    {
-        conn.execute(
-            "UPDATE media SET
-                video_path = CASE WHEN ?1 = 1 THEN NULL ELSE video_path END,
-                audio_path = CASE WHEN ?2 = 1 THEN NULL ELSE audio_path END,
-                video_bytes = CASE WHEN ?1 = 1 THEN NULL ELSE ?3 END,
-                audio_bytes = CASE WHEN ?2 = 1 THEN NULL ELSE ?4 END,
-                source_state = CASE
-                    WHEN (CASE WHEN ?1 = 1 THEN NULL ELSE video_path END) IS NULL
-                     AND (CASE WHEN ?2 = 1 THEN NULL ELSE audio_path END) IS NULL
-                    THEN 'unavailable' ELSE source_state END
-             WHERE job_id = ?5",
-            params![
-                video_missing,
-                audio_missing,
-                actual_video_bytes.map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-                actual_audio_bytes.map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-                job_id,
-            ],
+    let missing_media_paths =
+        rows_count_by_status(&transaction, media_root, StoredPathStatus::Missing)?;
+    let inaccessible_media_paths =
+        rows_count_by_status(&transaction, media_root, StoredPathStatus::Inaccessible)?;
+    for (job_id, video_bytes, audio_bytes, source_state) in inspected_media {
+        transaction.execute(
+            "UPDATE media SET video_bytes = ?1, audio_bytes = ?2, source_state = ?3
+             WHERE job_id = ?4",
+            params![video_bytes, audio_bytes, source_state, job_id,],
         )?;
     }
 
     // A completed transcript-only record is a valid library item, but its
     // source state must make that fact explicit after a restart.
-    conn.execute(
+    transaction.execute(
         "UPDATE media SET source_state = 'unavailable'
          WHERE (video_path IS NULL OR video_path = '')
            AND (audio_path IS NULL OR audio_path = '')
@@ -5279,13 +5299,47 @@ pub fn repair_library(conn: &Connection) -> Result<LibraryRepairReport> {
         [],
     )?;
 
+    transaction.commit()?;
+
     Ok(LibraryRepairReport {
         preserved_jobs: total_jobs,
         interrupted_jobs,
         missing_media_paths,
+        inaccessible_media_paths,
         backup_path: None,
         storage: None,
     })
+}
+
+fn rows_count_by_status(
+    transaction: &rusqlite::Transaction<'_>,
+    media_root: &Path,
+    expected: StoredPathStatus,
+) -> Result<usize> {
+    let mut statement = transaction.prepare(
+        "SELECT video_path, audio_path FROM media
+         WHERE (video_path IS NOT NULL AND video_path != '')
+            OR (audio_path IS NOT NULL AND audio_path != '')",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<String>>(1)?,
+        ))
+    })?;
+    let mut count = 0;
+    for row in rows {
+        let (video, audio) = row?;
+        let statuses = [video, audio]
+            .into_iter()
+            .flatten()
+            .filter(|path| !path.trim().is_empty())
+            .map(|path| inspect_stored_path(Path::new(&path), media_root));
+        if statuses.into_iter().any(|status| status == expected) {
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 pub fn get_search_result(conn: &Connection, job_id: i64, chunk_index: i64) -> Option<SearchResult> {
@@ -7814,9 +7868,20 @@ mod tests {
     }
 
     #[test]
-    fn repair_preserves_jobs_and_clears_only_missing_paths() {
+    fn repair_preserves_retry_budget_and_missing_media_references() {
         let conn = memory_db();
         let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/31").unwrap();
+        let media_root = std::env::temp_dir().join(format!(
+            "pulsaria-repair-media-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let job_dir = media_root.join(job_id.to_string());
+        fs::create_dir_all(&job_dir).unwrap();
+        let missing_video = job_dir.join("missing-video.mp4");
+        let transcript_path = media_root.join("transcripts").join(format!("{job_id}.txt"));
+        fs::create_dir_all(transcript_path.parent().unwrap()).unwrap();
+        fs::write(&transcript_path, "transcripción conservada").unwrap();
         insert_or_update_media_metadata(
             &conn,
             job_id,
@@ -7826,14 +7891,21 @@ mod tests {
                 thumbnail: "",
                 duration: 10,
                 upload_date: "",
-                video_path: "Z:/definitely-missing-pulsaria-video.mp4",
+                video_path: &missing_video.to_string_lossy(),
                 audio_path: "",
-                transcript_path: "",
+                transcript_path: &transcript_path.to_string_lossy(),
                 platform: "tiktok",
             },
         )
         .unwrap();
+        conn.execute(
+            "UPDATE media SET video_bytes = 321 WHERE job_id = ?1",
+            [job_id],
+        )
+        .unwrap();
         update_job_status(&conn, job_id, "processing", 50).unwrap();
+        conn.execute("UPDATE jobs SET retry_count = 2 WHERE id = ?1", [job_id])
+            .unwrap();
         let legacy_interrupted_id =
             insert_job(&conn, "https://www.tiktok.com/@test/video/32").unwrap();
         update_job_error(
@@ -7843,25 +7915,241 @@ mod tests {
             "El procesamiento se interrumpió al cerrarse Pulsaria. Puedes reintentarlo.",
         )
         .unwrap();
+        let historical_queued_id = insert_job(
+            &conn,
+            "https://www.tiktok.com/@test/video/historical-queued",
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE jobs SET retry_count = 1 WHERE id = ?1",
+            [historical_queued_id],
+        )
+        .unwrap();
+        let completed_id =
+            insert_job(&conn, "https://www.tiktok.com/@test/video/completed").unwrap();
+        conn.execute(
+            "UPDATE jobs SET status = 'complete', progress = 100, retry_count = 3,
+                error_message = 'El procesamiento se interrumpió en una fase antigua' WHERE id = ?1",
+            [completed_id],
+        )
+        .unwrap();
 
-        let report = repair_library(&conn).unwrap();
-        assert_eq!(report.preserved_jobs, 2);
+        let report = repair_library(&conn, &media_root).unwrap();
+        assert_eq!(report.preserved_jobs, 4);
         assert_eq!(report.interrupted_jobs, 2);
         assert_eq!(report.missing_media_paths, 1);
         let repaired = get_job_by_id(&conn, job_id).unwrap().unwrap();
-        assert_eq!(repaired.status, "queued");
-        assert_eq!(repaired.retry_count, 0);
+        assert_eq!(repaired.status, "retrying");
+        assert_eq!(repaired.retry_count, 2);
         assert!(repaired.error_message.is_none());
-        assert!(repaired.video_path.is_none());
+        assert_eq!(
+            repaired.video_path.as_deref(),
+            Some(missing_video.to_str().unwrap())
+        );
+        assert_eq!(
+            repaired.transcript_path.as_deref(),
+            Some(transcript_path.to_str().unwrap())
+        );
+        assert_eq!(repaired.source_state, "unavailable");
+        assert_eq!(repaired.video_bytes, Some(321));
         let repaired_legacy = get_job_by_id(&conn, legacy_interrupted_id)
             .unwrap()
             .unwrap();
-        assert_eq!(repaired_legacy.status, "queued");
+        assert_eq!(repaired_legacy.status, "retrying");
         assert!(repaired_legacy.error_message.is_none());
+        let historical_queued = get_job_by_id(&conn, historical_queued_id).unwrap().unwrap();
+        assert_eq!(historical_queued.status, "queued");
+        assert_eq!(historical_queued.retry_count, 1);
+        let completed = get_job_by_id(&conn, completed_id).unwrap().unwrap();
+        assert_eq!(completed.status, "complete");
+        assert_eq!(completed.retry_count, 3);
+        assert!(completed.error_message.is_some());
+
+        let repeated_report = repair_library(&conn, &media_root).unwrap();
+        assert_eq!(repeated_report.interrupted_jobs, 0);
+        assert_eq!(repeated_report.missing_media_paths, 1);
+        let repeated = get_job_by_id(&conn, job_id).unwrap().unwrap();
+        assert_eq!(repeated.retry_count, 2);
+        assert_eq!(
+            repeated.video_path.as_deref(),
+            Some(missing_video.to_str().unwrap())
+        );
+        fs::remove_dir_all(media_root).unwrap();
     }
 
     #[test]
-    fn storage_reconciliation_refreshes_sizes_and_removes_only_stale_references() {
+    fn repair_preserves_external_storage_reference_and_restores_it_when_reconnected() {
+        let conn = memory_db();
+        let media_root = std::env::temp_dir().join(format!(
+            "pulsaria-current-media-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let external_root = std::env::temp_dir().join(format!(
+            "pulsaria-disconnected-volume-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&media_root).unwrap();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/external").unwrap();
+        let video_path = external_root.join("Pulsaria").join("video.mp4");
+        let transcript_path = external_root.join("transcripts").join("1.txt");
+        let video_path_text = video_path.to_string_lossy().to_string();
+        let transcript_path_text = transcript_path.to_string_lossy().to_string();
+        insert_or_update_media_metadata(
+            &conn,
+            job_id,
+            &MediaMetadata {
+                title: "External media",
+                author: "Creator",
+                thumbnail: "",
+                duration: 5,
+                upload_date: "",
+                video_path: &video_path_text,
+                audio_path: "",
+                transcript_path: &transcript_path_text,
+                platform: "tiktok",
+            },
+        )
+        .unwrap();
+
+        let offline_report = repair_library(&conn, &media_root).unwrap();
+        let offline = get_job_by_id(&conn, job_id).unwrap().unwrap();
+        assert_eq!(offline_report.inaccessible_media_paths, 1);
+        assert_eq!(offline.source_state, "storage_offline");
+        assert_eq!(
+            offline.video_path.as_deref(),
+            Some(video_path_text.as_str())
+        );
+        assert_eq!(
+            offline.transcript_path.as_deref(),
+            Some(transcript_path_text.as_str())
+        );
+
+        fs::create_dir_all(video_path.parent().unwrap()).unwrap();
+        fs::write(&video_path, b"reconnected video").unwrap();
+        let reconnected_report = repair_library(&conn, &media_root).unwrap();
+        let reconnected = get_job_by_id(&conn, job_id).unwrap().unwrap();
+        assert_eq!(reconnected_report.inaccessible_media_paths, 0);
+        assert_eq!(reconnected.source_state, "local");
+        assert_eq!(
+            reconnected.video_path.as_deref(),
+            Some(video_path_text.as_str())
+        );
+        assert_eq!(reconnected.video_bytes, Some(17));
+        fs::remove_dir_all(media_root).unwrap();
+        fs::remove_dir_all(external_root).unwrap();
+    }
+
+    #[test]
+    fn repair_keeps_transcript_only_library_records() {
+        let conn = memory_db();
+        let media_root = std::env::temp_dir().join(format!(
+            "pulsaria-transcript-only-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let job_id =
+            insert_job(&conn, "https://www.tiktok.com/@test/video/transcript-only").unwrap();
+        update_job_status(&conn, job_id, "complete", 100).unwrap();
+        let transcript_path = media_root.join("transcripts").join("transcript-only.txt");
+        let transcript_path_text = transcript_path.to_string_lossy().to_string();
+        insert_or_update_media_metadata(
+            &conn,
+            job_id,
+            &MediaMetadata {
+                title: "Transcript only",
+                author: "Creator",
+                thumbnail: "",
+                duration: 5,
+                upload_date: "",
+                video_path: "",
+                audio_path: "",
+                transcript_path: &transcript_path_text,
+                platform: "tiktok",
+            },
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE media SET video_path = NULL, audio_path = NULL WHERE job_id = ?1",
+            [job_id],
+        )
+        .unwrap();
+        let report = repair_library(&conn, &media_root).unwrap();
+        let repaired = get_job_by_id(&conn, job_id).unwrap().unwrap();
+        assert_eq!(report.preserved_jobs, 1);
+        assert_eq!(repaired.source_state, "unavailable");
+        assert!(repaired
+            .video_path
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty());
+        assert_eq!(
+            repaired.transcript_path.as_deref(),
+            Some(transcript_path_text.as_str())
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM media WHERE job_id = ?1",
+                [job_id],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn repair_rolls_back_the_whole_library_update_on_sql_error() {
+        let conn = memory_db();
+        let media_root = std::env::temp_dir().join(format!(
+            "pulsaria-repair-rollback-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let missing_video = media_root.join("reachable-parent").join("missing.mp4");
+        fs::create_dir_all(missing_video.parent().unwrap()).unwrap();
+        let job_id = insert_job(&conn, "https://www.tiktok.com/@test/video/rollback").unwrap();
+        insert_or_update_media_metadata(
+            &conn,
+            job_id,
+            &MediaMetadata {
+                title: "Rollback fixture",
+                author: "Creator",
+                thumbnail: "",
+                duration: 1,
+                upload_date: "",
+                video_path: &missing_video.to_string_lossy(),
+                audio_path: "",
+                transcript_path: "synthetic-transcript.txt",
+                platform: "tiktok",
+            },
+        )
+        .unwrap();
+        update_job_status(&conn, job_id, "processing", 42).unwrap();
+        conn.execute("UPDATE jobs SET retry_count = 2 WHERE id = ?1", [job_id])
+            .unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER fail_library_repair BEFORE UPDATE ON media
+             BEGIN SELECT RAISE(ABORT, 'synthetic repair failure'); END;",
+        )
+        .unwrap();
+
+        assert!(repair_library(&conn, &media_root).is_err());
+        let unchanged = get_job_by_id(&conn, job_id).unwrap().unwrap();
+        assert_eq!(unchanged.status, "processing");
+        assert_eq!(unchanged.progress, 42);
+        assert_eq!(unchanged.retry_count, 2);
+        assert_eq!(
+            unchanged.video_path.as_deref(),
+            Some(missing_video.to_str().unwrap())
+        );
+        assert_eq!(unchanged.source_state, "local");
+        fs::remove_dir_all(media_root).unwrap();
+    }
+
+    #[test]
+    fn storage_reconciliation_refreshes_sizes_and_preserves_missing_references() {
         let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
         let previous_data_dir = std::env::var_os("PULSAR_DATA_DIR");
         let data_dir = std::env::temp_dir().join(format!(
@@ -7883,13 +8171,18 @@ mod tests {
         let artifact_path = artifact_dir.join("poster.jpg");
         fs::write(&artifact_path, b"poster").unwrap();
         let stale_artifact = artifact_dir.join("missing.jpg");
+        let external_artifact = data_dir.join("outside-artifacts").join("foreign.jpg");
+        fs::create_dir_all(external_artifact.parent().unwrap()).unwrap();
+        fs::write(&external_artifact, b"outside expected root").unwrap();
         conn.execute(
             "INSERT INTO media_artifacts (job_id, kind, path, size_bytes)
-             VALUES (?1, 'poster', ?2, 999), (?1, 'keyframe', ?3, 123)",
+             VALUES (?1, 'poster', ?2, 999), (?1, 'keyframe', ?3, 123),
+                    (?1, 'screenshot', ?4, 1)",
             params![
                 job_id,
                 artifact_path.to_string_lossy().to_string(),
-                stale_artifact.to_string_lossy().to_string()
+                stale_artifact.to_string_lossy().to_string(),
+                external_artifact.to_string_lossy().to_string()
             ],
         )
         .unwrap();
@@ -7918,13 +8211,52 @@ mod tests {
         )
         .unwrap();
 
+        let missing_output_id: i64 = conn
+            .query_row(
+                "SELECT id FROM generated_outputs WHERE path = ?1",
+                params![stale_output.to_string_lossy().to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute(
+            "INSERT INTO purge_history (job_id, reason) VALUES (?1, 'synthetic-interrupted-purge')",
+            [job_id],
+        )
+        .unwrap();
+        let purge_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO generated_output_purge (purge_id, output_id, original_path, trash_path)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                purge_id,
+                missing_output_id,
+                stale_output.to_string_lossy().to_string(),
+                media_root
+                    .join(".pulsaria")
+                    .join("trash")
+                    .join("gone.mp4")
+                    .to_string_lossy()
+                    .to_string()
+            ],
+        )
+        .unwrap();
+
         let report = reconcile_storage(&conn, &media_root).unwrap();
-        assert_eq!(report.checked_artifacts, 2);
+        assert_eq!(report.checked_artifacts, 3);
         assert_eq!(report.corrected_artifact_sizes, 1);
-        assert_eq!(report.removed_stale_artifacts, 1);
+        assert_eq!(report.preserved_missing_artifacts, 1);
+        assert_eq!(report.preserved_unavailable_artifacts, 1);
+        assert_eq!(report.removed_stale_artifacts, 0);
         assert_eq!(report.checked_generated_outputs, 2);
         assert_eq!(report.corrected_output_sizes, 1);
-        assert_eq!(report.removed_stale_outputs, 1);
+        assert_eq!(report.preserved_missing_outputs, 1);
+        assert_eq!(report.removed_stale_outputs, 0);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM generated_output_purge", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
         assert_eq!(fs::metadata(&artifact_path).unwrap().len(), 6);
         assert_eq!(fs::metadata(&output_path).unwrap().len(), 15);
         assert_eq!(
@@ -7949,13 +8281,56 @@ mod tests {
             conn.query_row("SELECT COUNT(*) FROM media_artifacts", [], |row| row
                 .get::<_, i64>(0))
                 .unwrap(),
-            1
+            3
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT size_bytes FROM media_artifacts WHERE path = ?1",
+                params![external_artifact.to_string_lossy().to_string()],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1,
+            "an existing file outside the canonical artifact root must not be adopted"
         );
         assert_eq!(
             conn.query_row("SELECT COUNT(*) FROM generated_outputs", [], |row| row
                 .get::<_, i64>(0))
                 .unwrap(),
-            1
+            2
+        );
+
+        let alternate_root = media_root.join("new-media-location");
+        let after_root_change = reconcile_storage(&conn, &alternate_root).unwrap();
+        assert_eq!(after_root_change.preserved_missing_outputs, 1);
+        assert_eq!(after_root_change.preserved_unavailable_outputs, 0);
+        assert_eq!(
+            conn.query_row(
+                "SELECT path FROM generated_outputs WHERE path = ?1",
+                params![stale_output.to_string_lossy().to_string()],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            stale_output.to_string_lossy().as_ref()
+        );
+
+        fs::write(&stale_artifact, b"reconnected poster").unwrap();
+        fs::create_dir_all(stale_output.parent().unwrap()).unwrap();
+        fs::write(&stale_output, b"reconnected output").unwrap();
+        let reconnected = reconcile_storage(&conn, &media_root).unwrap();
+        assert_eq!(reconnected.preserved_missing_artifacts, 0);
+        assert_eq!(reconnected.preserved_missing_outputs, 0);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM media_artifacts", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM generated_outputs", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
         );
 
         if let Some(previous) = previous_data_dir {
@@ -8047,7 +8422,33 @@ mod tests {
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                  );
                  INSERT INTO collection_sources (source_url, source_kind, enabled)
-                 VALUES ('https://www.tiktok.com/@creator', 'tiktok', 0);",
+                 VALUES ('https://www.tiktok.com/@creator', 'tiktok', 0);
+                 CREATE TABLE jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    progress INTEGER NOT NULL DEFAULT 0,
+                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    error_message TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                 );
+                 INSERT INTO jobs (id, url, status, progress, retry_count)
+                 VALUES (72, 'https://www.tiktok.com/@legacy/video/72', 'retrying', 38, 2);
+                 CREATE TABLE media (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id INTEGER NOT NULL UNIQUE,
+                    video_path TEXT,
+                    audio_path TEXT,
+                    transcript_path TEXT,
+                    title TEXT,
+                    author TEXT,
+                    thumbnail TEXT,
+                    duration INTEGER,
+                    upload_date TEXT,
+                    FOREIGN KEY(job_id) REFERENCES jobs(id)
+                 );
+                 INSERT INTO media (job_id, video_path, transcript_path, title)
+                 VALUES (72, 'D:/Pulsaria/legacy/72.mp4', 'D:/Pulsaria/legacy/72.txt', 'Legacy item');",
             )
             .unwrap();
         drop(legacy);
@@ -8064,6 +8465,7 @@ mod tests {
             .unwrap()
             .any(|column| matches!(column.as_deref(), Ok("browser")));
         let migrated_source = get_collection_sources(&migrated).unwrap().remove(0);
+        let legacy_job = get_job_by_id(&migrated, 72).unwrap().unwrap();
         drop(migrated);
         let backups = fs::read_dir(test_dir.join("backups")).unwrap().count();
 
@@ -8079,6 +8481,18 @@ mod tests {
         assert_eq!(migrated_source.url, "https://www.tiktok.com/@creator");
         assert_eq!(migrated_source.source_type, "profile");
         assert!(!migrated_source.active);
+        assert_eq!(legacy_job.status, "retrying");
+        assert_eq!(legacy_job.retry_count, 2);
+        assert_eq!(legacy_job.progress, 38);
+        assert_eq!(legacy_job.title.as_deref(), Some("Legacy item"));
+        assert_eq!(
+            legacy_job.video_path.as_deref(),
+            Some("D:/Pulsaria/legacy/72.mp4")
+        );
+        assert_eq!(
+            legacy_job.transcript_path.as_deref(),
+            Some("D:/Pulsaria/legacy/72.txt")
+        );
     }
 
     #[test]

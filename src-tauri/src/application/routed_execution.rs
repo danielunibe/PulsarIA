@@ -800,6 +800,7 @@ mod tests {
     use crate::domain::ai_task::AiTaskType;
     use crate::domain::routing::ContentTrust;
     use serde::{Deserialize, Serialize};
+    use std::sync::OnceLock;
 
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     struct DummyResponse {
@@ -814,17 +815,51 @@ mod tests {
     }
 
     fn test_models_dir() -> PathBuf {
-        let candidates = [
-            PathBuf::from("../data/llm-models"),
-            PathBuf::from("data/llm-models"),
-            crate::db::data_dir_path().join("llm-models"),
-        ];
-        for c in candidates {
-            if c.exists() {
-                return c;
-            }
+        // Mock-runner tests need model paths to be present for routing, but
+        // never need model weights. Create tiny placeholders in a unique temp
+        // directory so tests cannot discover repository or installed models.
+        static MODELS_DIR: OnceLock<PathBuf> = OnceLock::new();
+        MODELS_DIR
+            .get_or_init(|| {
+                let unique = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock must be after UNIX epoch")
+                    .as_nanos();
+                let dir = std::env::temp_dir().join(format!(
+                    "pulsaria-routed-model-fixtures-{}-{unique}",
+                    std::process::id()
+                ));
+                std::fs::create_dir_all(&dir)
+                    .expect("create isolated synthetic model fixture directory");
+                for filename in [
+                    "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+                    "qwen2.5-3b-instruct-q4_k_m.gguf",
+                    "gemma-2-2b-it-Q4_K_M.gguf",
+                ] {
+                    std::fs::write(dir.join(filename), b"PULSARIA SYNTHETIC TEST FIXTURE\n")
+                        .expect("write isolated synthetic model path fixture");
+                }
+                dir
+            })
+            .clone()
+    }
+
+    fn live_test_models_dir() -> Option<PathBuf> {
+        // Live inference is opt-in and restricted to an explicitly staged
+        // model directory under the OS temp root; it never probes user data.
+        let dir = PathBuf::from(std::env::var_os("PULSAR_LIVE_MODEL_TEST_DIR")?);
+        if !dir.is_absolute()
+            || dir
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+        {
+            return None;
         }
-        PathBuf::from("../data/llm-models")
+        let temp_root = std::fs::canonicalize(std::env::temp_dir()).ok()?;
+        let canonical_dir = std::fs::canonicalize(dir).ok()?;
+        canonical_dir
+            .starts_with(temp_root)
+            .then_some(canonical_dir)
     }
 
     /// TEST 1 — FAST OPERATIONAL (§18)
@@ -1167,6 +1202,10 @@ mod tests {
     /// Real execution reaching actual llama-server with real GGUF weights.
     #[tokio::test]
     async fn test_8_real_llama_server_runtime_execution() {
+        let Some(models_dir) = live_test_models_dir() else {
+            println!("SKIPPING test_8: PULSAR_LIVE_MODEL_TEST_DIR is not an isolated temp fixture directory");
+            return;
+        };
         let bin = crate::runtime::binary("llama-server.exe");
         if !bin.is_file() {
             println!(
@@ -1176,7 +1215,6 @@ mod tests {
             return;
         }
 
-        let models_dir = test_models_dir();
         let qwen_gguf = models_dir.join("qwen2.5-1.5b-instruct-q4_k_m.gguf");
         if !qwen_gguf.is_file() {
             println!(
@@ -1509,6 +1547,10 @@ mod tests {
     /// Real execution against live llama-server.exe switching between Qwen 1.5B and Qwen 3B.
     #[tokio::test]
     async fn test_16_real_runtime_controlled_model_switch() {
+        let Some(models_dir) = live_test_models_dir() else {
+            println!("SKIPPING test_16: PULSAR_LIVE_MODEL_TEST_DIR is not an isolated temp fixture directory");
+            return;
+        };
         let bin = crate::runtime::binary("llama-server.exe");
         if !bin.is_file() {
             println!(
@@ -1518,7 +1560,6 @@ mod tests {
             return;
         }
 
-        let models_dir = test_models_dir();
         let qwen15_gguf = models_dir.join("qwen2.5-1.5b-instruct-q4_k_m.gguf");
         let qwen3b_gguf = models_dir.join("qwen2.5-3b-instruct-q4_k_m.gguf");
 

@@ -4,6 +4,25 @@ Este es el único documento normativo técnico y operativo de Pulsaria. Si otro
 reporte, plan, auditoría o README contradice este archivo, prevalecen el código
 actual, las pruebas reproducidas y esta definición de verdad.
 
+## Gate P0-01 — integridad SQLite y recuperación segura — 2026-10-28
+
+La reparación del gate conserva el presupuesto real de reintentos y las
+referencias de biblioteca cuando un medio desaparece o su ubicación no se puede
+consultar. El arranque recupera solo estados interrumpidos; los trabajos
+históricos `queued` no se admiten automáticamente. El reintento explícito y la
+admisión de perfiles siguen sujetos a sus controles existentes. No se agregó una
+migración de esquema.
+
+La evidencia de implementación, matriz DB-01…DB-12, validación y límites está en
+[docs/BETA4_P0_01_EVIDENCE.md](./docs/BETA4_P0_01_EVIDENCE.md). La ejecución local
+de `npm run verify:mvp` pasó **13/13**; Rust reportó 289 PASS, 7 ignoradas y dos
+pruebas de inferencia real omitidas porque el entorno aislado no contiene
+modelos/runtime. Python reportó 33 PASS y un skip de certificación live sin URL.
+`out/` fue restaurado desde su respaldo previo al build. Estas comprobaciones no
+son aceptación instalada o visual. La CI del commit publicado queda registrada
+en la evidencia cuando finalice; este gate no publica, etiqueta ni integra Beta
+4.
+
 ## Lector de tomos e instalación local de Beta 4 — 2026-10-14
 
 El catálogo abre los tomos como libros y usa un solo lector para portada,

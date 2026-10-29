@@ -332,6 +332,27 @@ fn persist_and_log_job_error(
     }
 }
 
+pub(crate) fn retry_budget_allows_resume(attempt: u32) -> bool {
+    attempt < MAX_RETRIES
+}
+
+fn is_restart_recoverable_status(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "metadata"
+            | "processing"
+            | "downloading"
+            | "extracting_audio"
+            | "transcribing"
+            | "indexing"
+            | "retrying"
+    )
+}
+
+fn claim_job_once(active_jobs: &mut HashSet<i64>, job_id: i64) -> bool {
+    active_jobs.insert(job_id)
+}
+
 fn persist_worker_result(
     repo: &Arc<dyn JobRepository>,
     job: &JobMessage,
@@ -757,32 +778,28 @@ impl QueueService {
             .store(authorized, Ordering::SeqCst);
     }
 
-    /// Re-enqueues work that survived a previous process shutdown. SQLite is
-    /// the source of truth for jobs, but the in-memory channel is intentionally
-    /// rebuilt on every launch. Without this reconciliation, a job could stay
-    /// forever in `queued` (or in an interrupted processing state) while the UI
-    /// correctly reports that it has no worker attached to it.
+    /// Re-enqueues work that was demonstrably in flight before shutdown.
+    /// Historical `queued` records require an explicit user action because
+    /// their original admission may no longer be authorized. Profile work is
+    /// admitted separately by the consent and source-state gated feeder.
     pub async fn resume_pending_jobs(self: &Arc<Self>) -> Result<usize, String> {
         let jobs = self.job_repo.get_all_jobs()?;
         let pending_jobs = jobs
             .into_iter()
-            .filter(|job| {
-                matches!(
-                    job.status.to_ascii_lowercase().as_str(),
-                    "queued"
-                        | "metadata"
-                        | "processing"
-                        | "downloading"
-                        | "extracting_audio"
-                        | "transcribing"
-                        | "indexing"
-                        | "retrying"
-                )
-            })
+            .filter(|job| is_restart_recoverable_status(&job.status))
             .collect::<Vec<_>>();
 
         let mut resumed = 0;
         for job in pending_jobs {
+            if !retry_budget_allows_resume(job.retry_count) {
+                persist_and_log_job_error(
+                    &self.job_repo,
+                    job.id,
+                    "error_dlq",
+                    "El presupuesto de reintentos se agotó antes del reinicio. Reintenta manualmente para autorizar una nueva serie.",
+                );
+                continue;
+            }
             let profile_job = self.job_repo.get_connection().and_then(|connection| {
                 let connection = connection
                     .lock()
@@ -795,7 +812,7 @@ impl QueueService {
             let claimed = {
                 let _maintenance_guard = self.maintenance_lock.lock().await;
                 let mut active_jobs = self.active_jobs.lock().await;
-                active_jobs.insert(job.id)
+                claim_job_once(&mut active_jobs, job.id)
             };
             if !claimed {
                 continue;
@@ -1042,19 +1059,50 @@ impl QueueService {
         url: String,
         cookies_browser: Option<String>,
     ) -> Result<(), String> {
+        self.dispatch_with_attempt_and_browser(job_id, url, 0, cookies_browser)
+            .await
+    }
+
+    /// Explicitly resumes a persisted queued job without resetting its retry
+    /// budget. The caller must only use this after user authorization.
+    pub async fn dispatch_with_attempt(
+        &self,
+        job_id: i64,
+        url: String,
+        attempt: u32,
+    ) -> Result<(), String> {
+        let env_browser = std::env::var("PULSAR_COOKIES_FROM_BROWSER")
+            .ok()
+            .filter(|browser| !browser.trim().is_empty());
+        self.dispatch_with_attempt_and_browser(job_id, url, attempt, env_browser)
+            .await
+    }
+
+    async fn dispatch_with_attempt_and_browser(
+        &self,
+        job_id: i64,
+        url: String,
+        attempt: u32,
+        cookies_browser: Option<String>,
+    ) -> Result<(), String> {
+        if !retry_budget_allows_resume(attempt) {
+            return Err("El presupuesto de reintentos está agotado; revisa el trabajo antes de iniciar una nueva serie.".to_string());
+        }
         // Dispatch is idempotent per job. Keep the claim while the admission
         // decision and send complete so a concurrent retry cannot observe a
         // half-admitted job.
         let claimed = {
             let _maintenance_guard = self.maintenance_lock.lock().await;
             let mut active_jobs = self.active_jobs.lock().await;
-            active_jobs.insert(job_id)
+            claim_job_once(&mut active_jobs, job_id)
         };
         if !claimed {
             return Ok(());
         }
 
-        let result = self.enqueue_claimed(job_id, url, 0, cookies_browser).await;
+        let result = self
+            .enqueue_claimed(job_id, url, attempt, cookies_browser)
+            .await;
         if result.is_err() {
             self.active_jobs.lock().await.remove(&job_id);
         }
@@ -1611,6 +1659,31 @@ mod tests {
             .expect("profile work should resume after consent is saved")
             .unwrap();
         assert!(processed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn restart_resume_never_exceeds_the_persisted_retry_budget() {
+        assert!(super::retry_budget_allows_resume(0));
+        assert!(super::retry_budget_allows_resume(super::MAX_RETRIES - 1));
+        assert!(!super::retry_budget_allows_resume(super::MAX_RETRIES));
+        assert!(!super::retry_budget_allows_resume(super::MAX_RETRIES + 1));
+    }
+
+    #[test]
+    fn restart_admission_excludes_historical_queued_and_terminal_jobs() {
+        assert!(!super::is_restart_recoverable_status("queued"));
+        assert!(!super::is_restart_recoverable_status("complete"));
+        assert!(!super::is_restart_recoverable_status("error_dlq"));
+        assert!(super::is_restart_recoverable_status("processing"));
+        assert!(super::is_restart_recoverable_status("retrying"));
+    }
+
+    #[test]
+    fn concurrent_recovery_claims_a_job_only_once() {
+        let mut active_jobs = std::collections::HashSet::new();
+        assert!(super::claim_job_once(&mut active_jobs, 42));
+        assert!(!super::claim_job_once(&mut active_jobs, 42));
+        assert_eq!(active_jobs.len(), 1);
     }
 
     #[tokio::test]

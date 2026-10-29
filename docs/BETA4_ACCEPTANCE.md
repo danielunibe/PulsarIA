@@ -9,6 +9,12 @@ Su registro está en [BETA4_REPAIR_EVIDENCE.md](./BETA4_REPAIR_EVIDENCE.md).
 El build local y su prueba de arranque se registran por separado del artifact
 de Actions descrito en esta hoja; no cambian los resultados manuales pendientes.
 
+El gate posterior [P0-01](./BETA4_P0_01_EVIDENCE.md) conserva la recuperación
+SQLite y las referencias de almacenamiento, y requiere que el candidato exacto
+se vuelva a validar. Sus pruebas locales no sustituyen la prueba del artifact
+de Actions, la actualización en Windows limpio ni la aceptación humana de esta
+hoja.
+
 La reparación posterior de [Perfiles](./BETA4_PROFILE_REPAIR_EVIDENCE.md)
 requiere reconstruir el candidato. El hash del build previo a esa reparación
 no acredita los cambios de Perfiles ni debe utilizarse para su aceptación.

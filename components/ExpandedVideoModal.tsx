@@ -46,7 +46,7 @@ interface ExpandedVideoModalProps {
     sourceLayout?: boolean;
 }
 
-type SourceState = 'local' | 'online' | 'unavailable';
+type SourceState = 'local' | 'online' | 'unavailable' | 'storage_offline';
 type DetailTab = 'transcript' | 'karaoke' | 'intel' | 'tools';
 const DETAIL_TAB_ORDER: DetailTab[] = ['transcript', 'karaoke', 'intel', 'tools'];
 
@@ -196,7 +196,9 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
         ? t('detailSourceLocal')
         : sourceState === 'online'
             ? t('detailSourceOnline')
-            : t('detailSourceUnavailable');
+            : sourceState === 'storage_offline'
+                ? t('detailSourceStorageOffline')
+                : t('detailSourceUnavailable');
 
     const recordAccess = useCallback(async (event: 'open' | 'play' | 'search') => {
         if (!isNativeShell()) return;
@@ -864,7 +866,11 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                                 <div className="flex max-w-sm flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/55 p-6 backdrop-blur-md">
                                     <FaVideo size={28} className="text-white/30" />
                                     <p className="text-xs font-semibold text-white/80">
-                                        {sourceState === 'online' ? 'El medio local está fuera de esta cuota.' : 'La fuente remota no está disponible localmente.'}
+                                        {sourceState === 'storage_offline'
+                                            ? 'La unidad o ubicación de almacenamiento no está accesible.'
+                                            : sourceState === 'online'
+                                                ? 'El medio local está fuera de esta cuota.'
+                                                : 'La fuente remota no está disponible localmente.'}
                                     </p>
                                     <p className="text-[11px] leading-relaxed text-white/50">La ficha, el transcript y los timestamps permanecen disponibles. No se redescarga nada automáticamente.</p>
                                     {video.originalUrl && (

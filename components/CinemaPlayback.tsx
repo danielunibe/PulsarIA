@@ -559,7 +559,7 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
                             <div className="cinema-reference__shade" />
                             {cardIndex === index && !onlinePlayable && (
                                 <div className="cinema-reference__card-overlay">
-                                    <div className="cinema-reference__card-top"><span>{video.sourceState === 'unavailable' ? 'SIN SEÑAL' : video.sourceState === 'online' ? 'ONLINE' : 'LOCAL'}</span><span>{video.duration || '--:--'}</span></div>
+                                    <div className="cinema-reference__card-top"><span>{video.sourceState === 'storage_offline' ? 'UNIDAD DESCONECTADA' : video.sourceState === 'unavailable' ? 'SIN SEÑAL' : video.sourceState === 'online' ? 'ONLINE' : 'LOCAL'}</span><span>{video.duration || '--:--'}</span></div>
                                     {playing && <span className="cinema-reference__play-indicator" aria-hidden="true"><FaPause size={18} /></span>}
                                     {settings.subtitleEnabled && activeChunk && <div className={`cinema-reference__subtitle style-${activeStyle}`}>
                                         {activeStyle === 'karaoke' && activeChunk.words?.length
@@ -590,7 +590,7 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
                     <span className="cinema-reference__handle">@{current.author || 'biblioteca.local'}</span>
                     <h1>{current.title || 'Video sin título'}</h1>
                     <p>{current.visualAnalysis || current.instructionalGuide || 'Sin descripción disponible.'}</p>
-                    <small>{current.sourceState === 'unavailable' ? 'Fuente no disponible' : current.sourceState === 'online' ? 'Fuente online' : 'Disponible localmente'}</small>
+                    <small>{current.sourceState === 'storage_offline' ? 'Almacenamiento desconectado · ficha conservada' : current.sourceState === 'unavailable' ? 'Fuente no disponible' : current.sourceState === 'online' ? 'Fuente online' : 'Disponible localmente'}</small>
                 </div>}
             </aside>
 

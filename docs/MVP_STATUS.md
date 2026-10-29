@@ -1,9 +1,18 @@
 # Pulsaria — estado Beta 4
 
-Actualizado: 2026-10-12. El estado normativo y la evidencia más reciente están
+Actualizado: 2026-10-28. El estado normativo y la evidencia más reciente están
 en [PROJECT_TRUTH.md](../PROJECT_TRUTH.md).
 
 ## Preparación técnica
+
+- Gate P0-01: reparación local aprobada por `verify:mvp` **13/13**. SQLite
+  conserva reintentos, referencias a medios y salidas no disponibles; la cola
+  no reanuda trabajos históricos `queued` en el arranque. Evidencia y matriz:
+  [BETA4_P0_01_EVIDENCE.md](./BETA4_P0_01_EVIDENCE.md). Las pruebas de inferencia
+  real se omitieron por falta de fixtures y runtime aislados; la CI sobre el
+  SHA publicado debe quedar registrada antes de cerrar el gate.
+- Gate P0-01 no certifica Beta 4 instalada, interfaz aceptada ni aptitud para
+  publicar; no toca datos personales ni genera instalador/tag/release.
 
 - Candidato: `0.1.0-beta.4`, rama local `codex/pulsaria-beta4-prep`, basada en
   `d743d1d5d06f1f43fc49eb0f3c672149b9ce5d91`.

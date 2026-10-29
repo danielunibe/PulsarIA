@@ -4233,7 +4233,8 @@ pub async fn repair_library(state: State<'_, AppState>) -> Result<db::LibraryRep
             .db
             .lock()
             .map_err(|_| "Database mutex poisoned".to_string())?;
-        let mut report = db::repair_library(&connection).map_err(|error| error.to_string())?;
+        let mut report =
+            db::repair_library(&connection, &root).map_err(|error| error.to_string())?;
         report.storage =
             Some(db::reconcile_storage(&connection, &root).map_err(|error| error.to_string())?);
         report
@@ -4262,7 +4263,7 @@ pub async fn retry_job(
         return Ok(());
     }
 
-    let url = {
+    let (url, resume_attempt) = {
         let db = state
             .db
             .lock()
@@ -4271,21 +4272,44 @@ pub async fn retry_job(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "Trabajo no encontrado".to_string())?;
         let status = job.status.to_lowercase();
-        if !matches!(
-            status.as_str(),
-            "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
-        ) {
+        let explicitly_queued = status == "queued";
+        if !explicitly_queued
+            && !matches!(
+                status.as_str(),
+                "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
+            )
+        {
             return Err("El trabajo todav├¡a no est├í disponible para reintento".to_string());
+        }
+        if explicitly_queued
+            && !crate::application::queue_service::retry_budget_allows_resume(job.retry_count)
+        {
+            return Err(
+                "El presupuesto de reintentos está agotado; revisa el trabajo antes de reanudarlo."
+                    .to_string(),
+            );
         }
         // Remove only this job's processing directory and stale media paths.
         // A retry starts from a clean pipeline instead of reusing partial files.
         db::cleanup_media_files(&db, job_id, &processing_root())
             .map_err(|error| error.to_string())?;
-        db::reset_job_for_retry(&db, job_id).map_err(|error| error.to_string())?;
-        job.url
+        if explicitly_queued {
+            db::update_job_status(&db, job_id, "retrying", 0).map_err(|error| error.to_string())?;
+            (job.url, Some(job.retry_count))
+        } else {
+            db::reset_job_for_retry(&db, job_id).map_err(|error| error.to_string())?;
+            (job.url, None)
+        }
     };
 
-    state.queue.dispatch(job_id, url).await?;
+    if let Some(attempt) = resume_attempt {
+        state
+            .queue
+            .dispatch_with_attempt(job_id, url, attempt)
+            .await?;
+    } else {
+        state.queue.dispatch(job_id, url).await?;
+    }
     Ok(())
 }
 

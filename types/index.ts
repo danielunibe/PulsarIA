@@ -10,7 +10,7 @@ import React from 'react';
 export type QueueStep = 'MP4' | 'MP3' | 'TXT';
 
 export type SetupIntent = 'knowledge' | 'balanced' | 'archive';
-export type SourceState = 'local' | 'online' | 'unavailable';
+export type SourceState = 'local' | 'online' | 'unavailable' | 'storage_offline';
 export type MediaKind = 'image' | 'video';
 
 export interface StorageRecommendation {
@@ -79,7 +79,7 @@ export interface VideoData {
     isDemo?: boolean;
 }
 
-export type CinemaSourceState = 'local' | 'online' | 'unavailable';
+export type CinemaSourceState = 'local' | 'online' | 'unavailable' | 'storage_offline';
 
 export interface CinemaVideo extends VideoData {
     sourceState?: CinemaSourceState;

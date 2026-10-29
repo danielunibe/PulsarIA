@@ -106,7 +106,7 @@ async function toAssetUrl(localPath: string | undefined): Promise<string | undef
     }
 }
 
-type SourceState = 'local' | 'online' | 'unavailable';
+type SourceState = 'local' | 'online' | 'unavailable' | 'storage_offline';
 
 type UiJobRecord = SharedJobRecord & {
     content_id?: number;
@@ -130,11 +130,12 @@ type UiVideoData = VideoData & {
 };
 
 function sourceStateForJob(job: UiJobRecord): SourceState {
+    if (job.source_state === 'storage_offline') return 'storage_offline';
+    if (job.source_state === 'unavailable') return 'unavailable';
     // A durable local video is authoritative for the card state. The
     // retention preference `online` does not mean that an already-downloaded
     // file disappeared; it only controls what can be purged later.
     if (job.video_path) return 'local';
-    if (job.source_state === 'unavailable') return 'unavailable';
     if (job.source_state === 'online' || job.keep_status === 'online') return 'online';
     return 'unavailable';
 }
@@ -159,11 +160,13 @@ function OnlineLibraryCard({
     onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void;
 }) {
     const [isHovered, setIsHovered] = useState(false);
-    const stateLabel = job.source_availability === 'pending'
-        ? 'Online · procesamiento pendiente'
+    const stateLabel = sourceState === 'storage_offline'
+        ? 'Almacenamiento desconectado · ruta y ficha conservadas'
         : sourceState === 'unavailable'
-            ? 'Fuente no disponible'
-            : 'Online · ficha conservada';
+            ? 'Fuente no disponible · ficha conservada'
+            : job.source_availability === 'pending'
+                ? 'Online · procesamiento pendiente'
+                : 'Online · ficha conservada';
     return (
         <div
             onMouseEnter={() => setIsHovered(true)}
@@ -460,7 +463,11 @@ export function VideoGrid({
             const uiJob = job as UiJobRecord;
             const [thumb, video] = await Promise.all([
                 toAssetUrl(uiJob.poster_path || uiJob.thumbnail),
-                toAssetUrl(job.video_path),
+                toAssetUrl(
+                    uiJob.source_state === 'storage_offline' || uiJob.source_state === 'unavailable'
+                        ? undefined
+                        : job.video_path,
+                ),
             ]);
             updates[job.id] = { thumb, video };
         }));
@@ -725,7 +732,7 @@ export function VideoGrid({
                     const sourceState = uiJob ? sourceStateForJob(uiJob) : 'local';
                     const mediaKind = isRealJob ? 'video' : (job.mediaKind ?? 'video');
                     const isStaticDemo = !isRealJob && job.isDemo === true && mediaKind === 'image';
-                    if (uiJob && !videoSrc && (sourceState === 'online' || sourceState === 'unavailable')) {
+                    if (uiJob && !videoSrc && sourceState !== 'local') {
                         return (
                             <motion.div
                                 key={job.id}
