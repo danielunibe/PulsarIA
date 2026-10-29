@@ -22,16 +22,30 @@ miniaturas dinámicas; no se añadieron wildcards.
 fixture temporal aislado. Python: 39 PASS y un skip para URL TikTok live no
 autorizada. Pasaron los 7 tests nuevos de seguridad Tauri, API loopback
 `127.0.0.1`, TypeScript, lint, locale, export Next, formato Rust y runtime
-54/54. El NSIS Beta 4 se construyó en modo build-only: 688,141,033 bytes, SHA-256
+54/54. El NSIS local Beta 4 se construyó en modo build-only: 688,141,033 bytes, SHA-256
 `FDE2127D8192AE13F9343E172AB7D344E8E0ADCB2AD3758F34B396BCA72CF569`,
-Authenticode `NotSigned`. No se ejecutó el instalador ni se lanzó la app.
+Authenticode `NotSigned`; ese artefacto local no se ejecutó.
 
-La revisión de archivos locales, CSP en una WebView ejecutada, enlaces nativos,
-reproducción y desconexión real de medios continúan sin aceptación instalada.
-Por ello la matriz TAURI-01…13 queda parcial y P1-04 no se cierra por el build
-ni los tests automatizados. No se usaron perfiles TikTok, cookies, credenciales,
-AppData, bibliotecas ni modelos personales. La evidencia detallada y el plan de
-rollback están en [docs/BETA4_P1_04_EVIDENCE.md](./docs/BETA4_P1_04_EVIDENCE.md).
+El workflow `b883ff8b98fbd90e3aeb462eaca30fc79974693c` pasó canonical CI
+(run [40952005825](https://github.com/danielunibe/PulsarIA/actions/runs/40952005825))
+y runtime bootstrap más smoke NSIS instalado aislado (run
+[40952005843](https://github.com/danielunibe/PulsarIA/actions/runs/40952005843)).
+En `windows-latest` se construyó un instalador Beta 4 efímero
+(SHA-256 `8D1733924A9A7FDCDEE76E754FC9864E53916267215AC2FAE32BAEF4B89B01DF`),
+se instaló/desinstaló con salida 0, verificó el manifiesto instalado 54/54,
+`/health` `ok` antes y después del reinicio, perfil WebView2 aislado, marcador
+sintético preservado y cleanup. Instalación, `APPDATA` y perfil WebView2 usaron
+carpetas temporales del runner; `-RunLive` no se ejecutó. Esto demuestra smoke
+automatizado instalado/arranque/API en un runner efímero, no aceptación visual
+humana, interacción de la UI, reproducción local/TikTok ni instalación en este
+equipo.
+
+La revisión visual humana, CSP/enlaces durante interacción real, reproducción y
+desconexión real de medios continúan sin aceptación. Por ello la matriz
+TAURI-01…13 queda parcial y P1-04 no se cierra por el smoke automatizado. No se
+usaron perfiles TikTok, cookies, credenciales, AppData personal, bibliotecas ni
+modelos personales. La evidencia detallada y el plan de rollback están en
+[docs/BETA4_P1_04_EVIDENCE.md](./docs/BETA4_P1_04_EVIDENCE.md).
 El commit focal de código `6ff55a0ec7416c1de3656f2a1b69b9d7cdd9ca91` pasó
 [canonical CI (run 40946292035)](https://github.com/danielunibe/PulsarIA/actions/runs/40946292035)
 y [runtime bootstrap/source manifest

@@ -58,25 +58,36 @@ usa `noopener,noreferrer`.
   `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.4_x64-setup.exe`,
   688,141,033 bytes, SHA-256
   `FDE2127D8192AE13F9343E172AB7D344E8E0ADCB2AD3758F34B396BCA72CF569`,
-  ProductVersion/FileVersion `0.1.0-beta.4`, Authenticode `NotSigned`. Se
-  inspeccionaron metadatos y hash; el instalador no se ejecutó.
+  ProductVersion/FileVersion `0.1.0-beta.4`, Authenticode `NotSigned`. Ese
+  artefacto local fue build-only y no se ejecutó.
+- El commit de workflow `b883ff8b98fbd90e3aeb462eaca30fc79974693c` pasó
+  [canonical CI, run 40952005825](https://github.com/danielunibe/PulsarIA/actions/runs/40952005825)
+  y [runtime bootstrap + smoke instalado, run 40952005843](https://github.com/danielunibe/PulsarIA/actions/runs/40952005843).
+  El segundo generó y probó en `windows-latest` un NSIS efímero Beta 4,
+  SHA-256 `8D1733924A9A7FDCDEE76E754FC9864E53916267215AC2FAE32BAEF4B89B01DF`.
+  `verify:installed` confirmó instalación y desinstalación (códigos 0),
+  manifiesto instalado 54/54, `/health` `ok` para `0.1.0-beta.4` al inicio y
+  después del reinicio, WebView2 con perfil aislado, marcador sintético de datos
+  preservado tras desinstalar, runtime overrides limpios y cleanup correcto.
+  El instalador, `APPDATA`, datos y perfil WebView2 se ubicaron bajo carpetas
+  temporales del runner. No se usó `-RunLive`.
 
 ## Matriz de regresión TAURI-01…13
 
 | Caso | Estado | Evidencia y límite |
 |---|---|---|
-| 01 — Tauri/Next abre | PENDIENTE | La compilación y export pasaron; no se lanzó ni instaló el ejecutable. |
+| 01 — Tauri/Next abre | PARCIAL — smoke automatizado | Se instaló y arrancó la app desde NSIS en `windows-latest`; WebView2 aislado y `/health` `ok` antes/después de reiniciar. No hubo revisión humana de ventana, contenido o interacción visual. |
 | 02 — vídeo local autorizado | PARCIAL | Pruebas sintéticas de referencia persistida y rutas de medios pasan; reproducción en WebView instalada pendiente. |
 | 03 — volumen desconectado | PENDIENTE | Se rechaza el archivo que ya no existe y P0-01 conserva la referencia `storage_offline`; no se desconectó una unidad en QA instalada. |
 | 04 — TikTok embed/streaming | PARCIAL | URL/iframe oficial y guardas de mensajes tienen pruebas; no hubo reproducción online live. |
 | 05 — postMessage falso | PASS automatizado | Prueba TypeScript rechaza origen, source y marcador incorrectos. |
-| 06 — archivo no registrado bajo HOME | PASS automatizado | Scope de inicio vacío y prueba SQLite niega path HOME no registrado; sin WebView instalada. |
+| 06 — archivo no registrado bajo HOME | PASS automatizado | Scope de inicio vacío y prueba SQLite niega path HOME no registrado; queda pendiente probar la denegación desde una WebView instalada. |
 | 07 — UNC, symlink y traversal | PASS automatizado | Tests Rust con rutas sintéticas; Windows creó y rechazó un symlink de prueba. No se accedió a shares reales. |
 | 08 — búsqueda/transcripción/frames locales | PARCIAL | Regresiones de Rust/Python y autorización de recursos pasan; interacción funcional instalada pendiente. |
-| 09 — CSP bloquea origen ajeno | PARCIAL | Test estático de directivas/orígenes, sin wildcard y sin `unsafe-eval`; no se inspeccionó enforcement en WebView ejecutada. |
+| 09 — CSP bloquea origen ajeno | PARCIAL | Test estático de directivas/orígenes, sin wildcard y sin `unsafe-eval`; no se probó el bloqueo de un origen ajeno en la WebView instalada. |
 | 10 — enlaces externos controlados | PARCIAL | Casos positivos/negativos de validadores JS/Rust; no se abrió un navegador externo desde la app. |
-| 11 — API loopback, token y CORS | PARCIAL | API contract, parser, token y orígenes exactos pasan; flujo de app instalada pendiente. |
-| 12 — preflight Windows NSIS | PASS build-only | Release NSIS x64 generada desde este checkout. No certifica instalación ni aceptación funcional. |
+| 11 — API loopback, token y CORS | PARCIAL | API contract, parser, token y orígenes exactos pasan; `/health` de la app instalada respondió `ok`, pero el flujo IPC/token/CORS desde la UI queda pendiente. |
+| 12 — preflight Windows NSIS | PASS automatizado en runner aislado | NSIS x64 Beta 4 instalado/desinstalado en `windows-latest`; recursos 54/54, health/restart y cleanup PASS. No certifica firma, revisión visual ni aceptación de medios/live. |
 | 13 — idiomas y accesibilidad | PARCIAL | Contrato es-MX/en-US, onboarding y compilación pasan; teclado, lector de pantalla y revisión visual instalada pendientes. |
 
 ## Límites, riesgos y rollback
@@ -89,17 +100,24 @@ que no se ha observado con datos autorizados; no se añade un dominio genérico
 para cubrirlo. Si el QA autorizado confirma un host legítimo, se debe agregar
 ese origen exacto y una prueba.
 
-No se ejecutó el instalador, no se inició Pulsaria, no se leyeron perfiles,
-cookies, credenciales, AppData, bibliotecas reales ni modelos locales. El
-commit focal de código `6ff55a0ec7416c1de3656f2a1b69b9d7cdd9ca91` pasó ambos
-workflows CI:
+La instalación y el arranque solo ocurrieron en el runner efímero aislado de
+GitHub; no se instaló ni lanzó Pulsaria en este equipo. No se leyeron perfiles,
+cookies, credenciales, AppData personal, bibliotecas reales ni modelos locales.
+El commit focal de seguridad `6ff55a0ec7416c1de3656f2a1b69b9d7cdd9ca91` pasó
+canonical y runtime bootstrap/source manifest; el commit de workflow
+`b883ff8b98fbd90e3aeb462eaca30fc79974693c` pasó canonical y el nuevo smoke
+instalado:
 
-- [canonical, run 40946292035](https://github.com/danielunibe/PulsarIA/actions/runs/40946292035)
-- [runtime bootstrap/source manifest, run 40946292008](https://github.com/danielunibe/PulsarIA/actions/runs/40946292008)
+- [canonical del código focal, run 40946292035](https://github.com/danielunibe/PulsarIA/actions/runs/40946292035)
+- [runtime bootstrap/source manifest del código focal, run 40946292008](https://github.com/danielunibe/PulsarIA/actions/runs/40946292008)
+- [canonical del workflow de smoke, run 40952005825](https://github.com/danielunibe/PulsarIA/actions/runs/40952005825)
+- [runtime bootstrap y smoke instalado, run 40952005843](https://github.com/danielunibe/PulsarIA/actions/runs/40952005843)
 
-P1-04 permanece en DOING hasta la aceptación de Windows/WebView instalada y la
-matriz funcional pendiente. PR #3 sigue abierto y draft. No se hizo merge, tag,
-release ni publicación.
+P1-04 permanece en DOING hasta la aceptación humana/funcional de Windows/WebView
+instalada y la matriz pendiente: no hay revisión visual humana, reproducción local,
+volumen desconectado, TikTok live ni validación funcional del player. PR #3 sigue
+abierto y draft. No se hizo merge, tag, release ni publicación.
 
-Rollback del cambio fuente: `git revert <SHA focal de P1-04>` en
-`codex/pulsaria-beta4-prep`; no se requiere reset ni force-push.
+Rollback del endurecimiento fuente: `git revert 6ff55a0ec7416c1de3656f2a1b69b9d7cdd9ca91`;
+rollback independiente del workflow de smoke: `git revert b883ff8b98fbd90e3aeb462eaca30fc79974693c`,
+ambos en `codex/pulsaria-beta4-prep`, sin reset ni force-push.
