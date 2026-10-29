@@ -340,8 +340,8 @@
                                              "sourcePath":  "python-workers/source_scanner.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  8127,
-                                             "sha256":  "566A0112665EEF0309BC580E42F3DCCA7F0F57B3F03817CD0116DBD8A83416F6"
+                                             "sizeBytes":  8226,
+                                             "sha256":  "42DC480C33ED0C4C56DD63344A20229E00DE7216B2AE907B3F9AB60837932315"
                                          },
                                          {
                                              "path":  "python-workers/transcriber.py",

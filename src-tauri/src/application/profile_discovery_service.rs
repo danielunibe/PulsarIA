@@ -78,27 +78,33 @@ fn source_item_timestamp(item: &SourceScanItem) -> Option<f64> {
 /// Sort only when every row has a timestamp. A partial comparator that treats
 /// dated and undated rows as equal is non-transitive; when dates are missing,
 /// retain the stable order returned by the provider.
-fn order_discovery_items(items: &mut [SourceScanItem]) {
-    if items
+fn order_discovery_items(items: &mut [SourceScanItem]) -> bool {
+    let order_is_proven = items
         .iter()
-        .all(|item| source_item_timestamp(item).is_some())
-    {
-        items.sort_by(|left, right| {
-            let left_time = source_item_timestamp(left).unwrap_or_default();
-            let right_time = source_item_timestamp(right).unwrap_or_default();
-            right_time
-                .partial_cmp(&left_time)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        .all(|item| source_item_timestamp(item).is_some());
+    if !order_is_proven {
+        // Preserve provider order for processing, but do not treat it as proof
+        // of newest/oldest checkpoint edges when one or more dates are absent.
+        return false;
     }
+
+    items.sort_by(|left, right| {
+        let left_time = source_item_timestamp(left).unwrap_or_default();
+        let right_time = source_item_timestamp(right).unwrap_or_default();
+        right_time
+            .partial_cmp(&left_time)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    true
 }
 
 fn discovery_checkpoint_candidates(
     persisted_ids: &[String],
     oldest_scan_is_complete: bool,
+    order_is_proven: bool,
     processing_succeeded: bool,
 ) -> (Option<String>, Option<String>) {
-    if !processing_succeeded || persisted_ids.is_empty() {
+    if !processing_succeeded || !order_is_proven || persisted_ids.is_empty() {
         return (None, None);
     }
 
@@ -710,9 +716,10 @@ impl ProfileDiscoveryService {
             };
         }
 
-        // Category is available! Process items newest-first
+        // Process in a deterministic order. Checkpoint edges are advanced only
+        // when every entry has a usable date and newest-first ordering is proven.
         let mut items = category_data.items.clone();
-        order_discovery_items(&mut items);
+        let item_order_is_proven = order_discovery_items(&mut items);
 
         let mut discovered = 0i64;
         let mut queued = 0i64;
@@ -846,6 +853,7 @@ impl ProfileDiscoveryService {
         let (newest_id, oldest_id) = discovery_checkpoint_candidates(
             &persisted_ids,
             oldest_scan_is_complete,
+            item_order_is_proven,
             processing_error.is_none(),
         );
         let checkpoint_status = if processing_error.is_some() {
@@ -1066,7 +1074,7 @@ mod tests {
             scan_item("older", Some(100.0), None),
         ];
 
-        order_discovery_items(&mut items);
+        assert!(!order_discovery_items(&mut items));
 
         assert_eq!(items[0].id.as_deref(), Some("newest"));
         assert_eq!(items[1].id.as_deref(), Some("undated"));
@@ -1081,7 +1089,7 @@ mod tests {
             scan_item("newest-b", Some(300.0), None),
         ];
 
-        order_discovery_items(&mut items);
+        assert!(order_discovery_items(&mut items));
 
         assert_eq!(items[0].id.as_deref(), Some("newest-a"));
         assert_eq!(items[1].id.as_deref(), Some("newest-b"));
@@ -1092,17 +1100,21 @@ mod tests {
     fn bounded_or_failed_scans_preserve_the_oldest_checkpoint() {
         let persisted_ids = ["new-120".to_string(), "new-110".to_string()];
 
-        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, false, true);
+        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, false, true, true);
         assert_eq!(newest.as_deref(), Some("new-120"));
         assert_eq!(oldest, None);
 
-        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, true, false);
+        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, true, true, false);
         assert_eq!(newest, None);
         assert_eq!(oldest, None);
 
-        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, true, true);
+        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, true, true, true);
         assert_eq!(newest.as_deref(), Some("new-120"));
         assert_eq!(oldest.as_deref(), Some("new-110"));
+
+        let (newest, oldest) = discovery_checkpoint_candidates(&persisted_ids, true, false, true);
+        assert_eq!(newest, None, "missing dates must not claim a newest edge");
+        assert_eq!(oldest, None, "missing dates must not claim an oldest edge");
     }
 
     #[test]

@@ -97,7 +97,8 @@ class SourceScannerTests(unittest.TestCase):
 
     def test_empty_public_posts_can_be_a_confirmed_zero_but_private_activity_cannot(self):
         with patch(
-            "source_scanner.profile_identity", return_value={"private_account": False}
+            "source_scanner.profile_identity",
+            return_value={"private_account": False, "posts_count": 0},
         ), patch("source_scanner.extract_playlist_entries", return_value=[]):
             posts = scan_tiktok_source(
                 "https://www.tiktok.com/@creator", ["posts"]
@@ -110,6 +111,20 @@ class SourceScannerTests(unittest.TestCase):
         self.assertEqual(posts["status"], "available")
         self.assertFalse(saved["available"])
         self.assertEqual(saved["status"], "unknown")
+
+    def test_empty_public_posts_without_a_confirmed_count_remain_unknown(self):
+        for posts_count in (None, 12):
+            with self.subTest(posts_count=posts_count), patch(
+                "source_scanner.profile_identity",
+                return_value={"private_account": False, "posts_count": posts_count},
+            ), patch("source_scanner.extract_playlist_entries", return_value=[]):
+                posts = scan_tiktok_source(
+                    "https://www.tiktok.com/@creator", ["posts"]
+                )["categories"]["posts"]
+
+            self.assertFalse(posts["available"])
+            self.assertEqual(posts["status"], "unknown")
+            self.assertEqual(posts["items"], [])
 
     def test_generic_private_category_failure_is_concrete_without_asserting_auth_or_support(self):
         with patch(
@@ -126,17 +141,18 @@ class SourceScannerTests(unittest.TestCase):
         self.assertIn("temporary provider failure", category["reason"])
 
     def test_explicit_unsupported_category_is_not_misreported_as_auth_required(self):
-        with patch(
-            "source_scanner.extract_playlist_entries",
-            side_effect=RuntimeError("Unsupported URL: /@creator/reposts"),
-        ):
-            category = scan_tiktok_source(
-                "https://www.tiktok.com/@creator", ["reposts"]
-            )["categories"]["reposts"]
+        for category_name in ("saved", "reposts"):
+            with self.subTest(category=category_name), patch(
+                "source_scanner.extract_playlist_entries",
+                side_effect=RuntimeError(f"Unsupported URL: /@creator/{category_name}"),
+            ):
+                category = scan_tiktok_source(
+                    "https://www.tiktok.com/@creator", [category_name]
+                )["categories"][category_name]
 
-        self.assertFalse(category["available"])
-        self.assertEqual(category["status"], "unsupported")
-        self.assertFalse(category["auth_required"])
+            self.assertFalse(category["available"])
+            self.assertEqual(category["status"], "unsupported")
+            self.assertFalse(category["auth_required"])
 
     def test_history_date_filters_older_entries(self):
         entries = [

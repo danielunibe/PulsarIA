@@ -192,10 +192,12 @@ def scan_tiktok_source(
         try:
             raw_entries = extract_playlist_entries(source_url, fetch_limit)
             entries = _filter_from_date(_dedupe_video_entries(raw_entries), history_from)
-            unknown_empty = not entries and (
-                category in ("likes", "saved", "reposts")
-                or profile.get("private_account") is not False
+            empty_posts_are_confirmed = (
+                category == "posts"
+                and profile.get("private_account") is False
+                and profile.get("posts_count") == 0
             )
+            unknown_empty = not entries and not empty_posts_are_confirmed
             result["categories"][category] = {
                 "available": not unknown_empty,
                 "status": "unknown" if unknown_empty else "available",
