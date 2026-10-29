@@ -4,6 +4,35 @@ Este es el único documento normativo técnico y operativo de Pulsaria. Si otro
 reporte, plan, auditoría o README contradice este archivo, prevalecen el código
 actual, las pruebas reproducidas y esta definición de verdad.
 
+## Gate P1-03 — consistencia de descubrimiento de perfiles — 2026-10-29
+
+El gate quedó verificado en `0c1fd6225b998486bf5021fd80ecb7f489b8f268`, después
+del cambio focal `92367ca7b8dd7df23c9ce1813ccc16e8a17a2395`. La disponibilidad
+vacía de likes, guardados y reposts permanece desconocida; cero publicaciones
+solo se confirma con cuenta pública y metadato explícito `posts_count = 0`. Los
+errores de autenticación, proveedor no soportado y rate limit conservan estados
+distintos. El orden/checkpoint no avanza con fechas incompletas o ambiguas; si
+falla la persistencia, se conserva el último éxito y se registra el error. Los
+identificadores canónicos de video de TikTok prevalecen sobre aliases del
+proveedor y el escaneo vuelve a comprobar el opt-in de canal antes de admitir
+trabajo.
+
+En ese SHA, `npm run verify:mvp` pasó **13/13**; Rust reportó 304 PASS, 0 fallidas,
+7 ignoradas y 2 filtradas; Python reportó 39 PASS y una prueba live omitida por
+falta de URL. Pasaron typecheck, `cargo fmt --check`, pruebas focales TypeScript
+y Python y el manifiesto runtime 54/54. Para el SHA exacto, [canonical CI, run
+40854106231](https://github.com/danielunibe/PulsarIA/actions/runs/40854106231) y
+[runtime bootstrap/manifest preflight, run
+40854106226](https://github.com/danielunibe/PulsarIA/actions/runs/40854106226)
+terminaron PASS. No se consultaron perfiles personales ni se probó una sesión
+real de TikTok; esto no certifica instalación o aceptación funcional. PR #3
+continúa draft, abierto y sin integrar.
+
+La evidencia y las seis especificaciones de producto/arquitectura están en
+[docs/BETA4_KNOWLEDGE_PIPELINE_SPEC.md](./docs/BETA4_KNOWLEDGE_PIPELINE_SPEC.md).
+SYNC-03 se mantiene como diseño; no forma parte del código implementado por
+este gate.
+
 ## Gate P0-02 — consentimiento, revocación de cookies y admisión — 2026-10-29
 
 La implementación focal quedó publicada en
