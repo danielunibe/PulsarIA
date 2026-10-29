@@ -4,6 +4,34 @@ Este es el único documento normativo técnico y operativo de Pulsaria. Si otro
 reporte, plan, auditoría o README contradice este archivo, prevalecen el código
 actual, las pruebas reproducidas y esta definición de verdad.
 
+## Gate P0-02 — consentimiento, revocación de cookies y admisión — 2026-10-29
+
+La implementación focal quedó publicada en
+`6bc9f53fa768fc2cb32aeeb1b4942d4e989a1c7b`. El derecho de procesamiento,
+la sesión de navegador y `autoEnqueue` tienen controles separados; QueueService
+aplica el consentimiento vigente al admitir y despachar trabajos, ignora el
+snapshot legado `source.browser`, y evita heredar `PULSAR_COOKIES_FROM_BROWSER`
+en procesos secundarios. La revocación invalida admisiones en espera y pausa
+el job si ocurre entre su reclamación y el envío a la cola. Perfiles y
+colecciones comparten los guards existentes y el trabajo pausado requiere una
+acción explícita para reanudarse.
+
+`npm run verify:mvp` pasó 13/13 localmente: Rust reportó 297 PASS, 0 fallidas,
+7 ignoradas y dos filtradas por depender de modelos/runtime aislados; Python
+reportó 33 PASS y un skip que requiere URL live. Las comprobaciones reales de
+modelos se omitieron por falta de fixtures aislados y no se usaron perfiles,
+cookies ni URLs TikTok reales. Canonical CI #148 terminó success sobre el mismo
+SHA y runtime bootstrap preflight #98 también terminó success. La evidencia
+detallada y la matriz SEC-01…SEC-12 están en
+[docs/BETA4_P0_02_EVIDENCE.md](./docs/BETA4_P0_02_EVIDENCE.md).
+
+La prueba SEC-04 de caja negra HTTP con consentimiento alterado no se ejecutó;
+el gateway y los commands sí invocan el mismo guard `QueueService`, el gateway
+traduce el rechazo a 403 y las regresiones prueban la lógica de autorización del
+servicio. No se certificaron acceso privado real de TikTok, revocación contra
+proveedor real, UI instalada ni aceptación limpia de Windows. El gate no autoriza
+merge, tag, release ni instalación. PR #3 continúa draft, abierto y sin integrar.
+
 ## Gate P0-01 — integridad SQLite y recuperación segura — 2026-10-28
 
 La reparación del gate conserva el presupuesto real de reintentos y las

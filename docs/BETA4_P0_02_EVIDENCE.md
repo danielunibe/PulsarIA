@@ -2,10 +2,12 @@
 
 Fecha de corte: 2026-10-29
 
-Estado de este documento: evidencia de implementación local y validación
-automatizada. El commit y la CI del nuevo SHA se completan antes de cerrar el
-gate en Trello. P0-01 queda cerrado en c427ee6d587e95761409f63568ff6a3e92574b97;
-este gate no lo reabre ni cambia su regla sobre trabajos queued históricos.
+Estado de este documento: evidencia de la implementación publicada en
+`6bc9f53fa768fc2cb32aeeb1b4942d4e989a1c7b`. Canonical CI #148 y runtime
+bootstrap preflight #98 terminaron PASS en ese mismo SHA. P0-01 queda cerrado
+en c427ee6d587e95761409f63568ff6a3e92574b97; este gate no lo reabre ni cambia
+su regla sobre trabajos queued históricos. La aprobación automatizada no
+equivale a aceptación instalada ni a publicación de Beta 4.
 
 ## Hallazgo y causa raíz
 
@@ -26,6 +28,10 @@ comprobaba si la autorización había cambiado mientras el proceso seguía vivo.
 - La política se consulta al admitir el trabajo y al iniciar la ejecución. Un
   epoch monotónico invalida mensajes que estaban esperando capacidad cuando se
   revoca y se vuelve a aceptar el consentimiento.
+- Si la autorización cambia después de reclamar un job pero antes de enviarlo
+  al canal de la cola, el job queda persistido como `paused`, incluso si el
+  usuario vuelve a aceptar antes de que termine la admisión. Una regresión Rust
+  cubre este borde del epoch.
 - La revocación impide que trabajos en espera entren a un worker. Los trabajos
   de recuperación interrumpidos se persisten como paused cuando no hay
   consentimiento. Los queued históricos permanecen fuera de la recuperación
@@ -55,11 +61,11 @@ comprobaba si la autorización había cambiado mientras el proceso seguía vivo.
 | SEC-01 | Registrar sin permiso no inicia descarga | Implementado | La ruta de conexión de perfil y la admisión pasan por el guard común. El alta Tauri falla cerrada sin autorización. La suite completa compila y ejecuta las regresiones; no se hizo una sesión de TikTok real. |
 | SEC-02 | Revocar durante escaneo bloquea solicitudes posteriores | Implementado y probado sintéticamente | La prueba revoking_scan_policy_kills_the_child_before_its_followup_request invalida el epoch y confirma que un efecto posterior del proceso hijo no ocurre. No usa red ni cuenta real. |
 | SEC-03 | Ignorar source.browser legado | Implementado y probado | cookie_authorization_uses_only_the_current_global_selection prueba que el snapshot legado no prevalece. |
-| SEC-04 | Tauri y REST aplican el mismo gate | Implementado en código | Commands y gateway llaman ensure_processing_authorized en QueueService. La verificación de API compila y pasa dentro de verify:mvp; no se ejecutó una matriz HTTP de caja negra con el estado de consentimiento alterado. |
+| SEC-04 | Tauri y REST aplican el mismo gate | Implementado y validado en el código compartido | Los commands Tauri y los handlers REST de ingestión/reintento llaman `QueueService::ensure_processing_authorized`; el gateway transforma el rechazo en HTTP 403. La suite compila y pasa, y las regresiones de QueueService verifican el gate con autorización revocada. No se ejecutó una matriz HTTP de caja negra con el estado de consentimiento alterado. |
 | SEC-05 | Reinicio sin permiso no reanuda jobs | Implementado | Startup inicia con el resultado de ambos consentimientos. QueueService pausa los estados recuperables si no hay autorización. Los queued históricos continúan excluidos por el contrato P0-01. |
 | SEC-06 | Renovar consentimiento no reinicia jobs ordinarios por sí solo | Implementado | El consentimiento actualiza el gate, no llama a resume_pending_jobs. Los paused deben reanudarse de forma individual. Las fuentes de perfil pueden seguir su configuración activa y autoEnqueue explícita; no se interpreta una aceptación global como permiso para cambiar esa configuración. |
 | SEC-07 | autoEnqueue desactivado deja inventario sin procesamiento | Implementado | La rama de descubrimiento persiste el elemento como discovered y no crea job. Hay cobertura de DB y de la prueba frontend de perfil que comprueba que agregar no invoca un scan. |
-| SEC-08 | Pause, stop y retry no duplican admisión | Implementado y regresionado | Se conserva la reclamación idempotente del job, el epoch y las pruebas existentes de pause/retry/recovery dentro de Rust. |
+| SEC-08 | Pause, stop y retry no duplican admisión | Implementado y regresionado | Se conserva la reclamación idempotente del job y el epoch; pruebas Rust cubren pause/retry/recovery, el cambio de autorización antes del envío y mensajes invalidados después de reconsentir. |
 | SEC-09 | Navegador inválido falla cerrado | Implementado y probado | El parser admite solo chrome, edge y firefox; las demás cadenas producen None. |
 | SEC-10 | No registrar secretos | Implementado en código, sin prueba de datos reales | El proceso solo maneja el nombre del navegador; Rust no extrae ni persiste bytes de cookie. No se inspeccionó ningún perfil o log real del navegador. La salida de error del proveedor sigue tratándose como texto externo y no se considera evidencia de ausencia de cualquier dato sensible del proveedor. |
 | SEC-11 | Likes/saved privados no se presentan como cero | Implementado con fixtures | source_scanner clasifica errores de autenticación como requiere sesión y las pruebas Python validan esa distinción. El acceso real a categorías privadas no se probó. Una respuesta vacía del proveedor sin error explícito sigue siendo ambigua. |
@@ -95,16 +101,19 @@ comprobaba si la autorización había cambiado mientras el proceso seguía vivo.
 
 ## Validación local
 
-El cambio de código pasó npm run verify:mvp: 13/13 gates automatizados.
-Rust: 296 pruebas PASS, 7 ignoradas y 2 filtradas; las dos comprobaciones que
-necesitan modelos/runtime reales no se certificaron porque no había fixtures de
+El commit publicado `6bc9f53fa768fc2cb32aeeb1b4942d4e989a1c7b` pasó
+`npm run verify:mvp`: 13/13 gates automatizados en local. Rust: 297 pruebas
+PASS, 0 fallidas, 7 ignoradas y 2 filtradas; las dos comprobaciones de inferencia
+real se ejecutaron por separado y se saltaron porque no había fixtures de
 modelos aislados. Python: 33 PASS y un skip que requiere URL live. El test de
 revocación utiliza únicamente un proceso hijo sintético. No se usó TikTok,
 sesión, perfil ni cookies reales. El script de instalación/runtime usó sus
 mocks y limpieza; esto no representa una instalación ni aceptación funcional
-de Windows.
+de Windows. `verify:canonical`, API loopback, `cargo fmt --check` y
+`git diff --check` pasaron. `out/` (111 archivos) y `.next/` (228 archivos)
+se restauraron y coincidieron por SHA-256 por archivo con el snapshot previo.
 
-## Estado antes del cierre
+## Estado y límites del gate
 
 Implementado y automatizado: guard común, invalidación de admisiones en espera,
 aislamiento de entorno, cancelación de escaneos sintéticos, selección actual de
@@ -114,6 +123,7 @@ No certificado: interacción visual instalada, acceso a categorías privadas,
 revocación contra proveedor real, matriz HTTP de caja negra con autorización
 ausente, ni aceptación en una instalación Windows limpia.
 
-El gate solo puede pasar a DONE después de un commit focal publicado y de la CI
-verde de ese SHA. No merge, tag ni publicación de Beta 4 forman parte de este
-gate.
+La CI canonical #148 del mismo SHA terminó PASS; el runtime bootstrap preflight
+#98 también terminó PASS. P0-02 queda acreditado para cierre en Trello después
+de publicar esta actualización documental y verificar la CI del HEAD resultante.
+No merge, tag ni publicación de Beta 4 forman parte de este gate.
