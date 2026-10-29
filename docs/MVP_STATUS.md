@@ -9,8 +9,11 @@ en [PROJECT_TRUTH.md](../PROJECT_TRUTH.md).
   conserva reintentos, referencias a medios y salidas no disponibles; la cola
   no reanuda trabajos históricos `queued` en el arranque. Evidencia y matriz:
   [BETA4_P0_01_EVIDENCE.md](./BETA4_P0_01_EVIDENCE.md). Las pruebas de inferencia
-  real se omitieron por falta de fixtures y runtime aislados; la CI sobre el
-  SHA publicado debe quedar registrada antes de cerrar el gate.
+  real se omitieron por falta de fixtures y runtime aislados; la CI del commit
+  de implementación pasó en [Pulsaria canonical CI, run
+  40809853683](https://github.com/danielunibe/PulsarIA/actions/runs/40809853683)
+  y [runtime bootstrap preflight, run
+  40809853328](https://github.com/danielunibe/PulsarIA/actions/runs/40809853328).
 - Gate P0-01 no certifica Beta 4 instalada, interfaz aceptada ni aptitud para
   publicar; no toca datos personales ni genera instalador/tag/release.
 

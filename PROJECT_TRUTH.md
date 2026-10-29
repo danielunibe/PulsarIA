@@ -18,10 +18,13 @@ La evidencia de implementación, matriz DB-01…DB-12, validación y límites es
 de `npm run verify:mvp` pasó **13/13**; Rust reportó 289 PASS, 7 ignoradas y dos
 pruebas de inferencia real omitidas porque el entorno aislado no contiene
 modelos/runtime. Python reportó 33 PASS y un skip de certificación live sin URL.
-`out/` fue restaurado desde su respaldo previo al build. Estas comprobaciones no
-son aceptación instalada o visual. La CI del commit publicado queda registrada
-en la evidencia cuando finalice; este gate no publica, etiqueta ni integra Beta
-4.
+`out/` fue restaurado desde su respaldo previo al build. La CI del commit de
+implementación terminó success en [Pulsaria canonical CI, run
+40809853683](https://github.com/danielunibe/PulsarIA/actions/runs/40809853683) y
+[runtime bootstrap preflight, run
+40809853328](https://github.com/danielunibe/PulsarIA/actions/runs/40809853328).
+Estas comprobaciones no son aceptación instalada o visual. PR #3 sigue draft,
+abierto y sin integrar; este gate no publica, etiqueta ni integra Beta 4.
 
 ## Lector de tomos e instalación local de Beta 4 — 2026-10-14
 

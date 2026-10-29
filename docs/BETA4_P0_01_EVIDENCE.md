@@ -2,13 +2,15 @@
 
 **Fecha:** 2026-10-28
 **Alcance:** integridad SQLite, reconciliación de almacenamiento y recuperación de cola.
-**Estado:** PASS en verificación local; CI del SHA publicado pendiente.
+**Estado:** PASS en verificación local y CI del commit de implementación.
 
 ## Punto de partida y límites
 
 - Repositorio: `danielunibe/PulsarIA`, rama `codex/pulsaria-beta4-prep`.
 - HEAD de partida y de PR #3 antes de estos cambios:
   `3111dcc5f5f2b74e332f4f5d1b8a02c5e56c13c2`.
+- Commit de implementación publicado:
+  `253fa1dfd88dfeae9dcdbec9ba2006c01ffc4141`.
 - PR #3 continúa abierto como draft, con base `main` en
   `d743d1d5d06f1f43fc49eb0f3c672149b9ce5d91`.
 - Se creó la rama local de restauración `p0-01-start-3111dcc5`.
@@ -99,12 +101,15 @@ aislada.
 
 ## Publicación y seguimiento
 
-- Commit del gate: pendiente de crear.
-- SHA publicado: pendiente.
+- Commit de implementación:
+  `253fa1dfd88dfeae9dcdbec9ba2006c01ffc4141`.
 - PR: [#3](https://github.com/danielunibe/PulsarIA/pull/3); draft y abierto.
-- GitHub Actions para el SHA nuevo: pendiente de terminar después del push.
+- GitHub Actions para el commit de implementación: **PASS** — [Pulsaria
+  canonical CI, run 40809853683](https://github.com/danielunibe/PulsarIA/actions/runs/40809853683)
+  y [runtime bootstrap preflight, run
+  40809853328](https://github.com/danielunibe/PulsarIA/actions/runs/40809853328).
 - Trello: tarjeta `GATE P0-01 — Integridad SQLite y recuperación segura · Beta
-  4`, en `Pulsaria · DOING`:
+  4`:
   [abrir tarjeta](https://trello.com/c/W3yiPlmi/833-gate-p0-01-integridad-sqlite-y-recuperaci%C3%B3n-segura-beta-4).
 
 ## Riesgos residuales y reversión
@@ -118,5 +123,6 @@ aislada.
   esquema. Si se ejecuta un binario anterior, puede recuperar trabajos históricos
   `queued` con la política antigua; hacer downgrade requiere volver a verificar
   estado de cola y compatibilidad.
-- La tarjeta Trello permanece en `DOING` hasta que Actions confirme el SHA
-  publicado y la evidencia restante del gate esté revisada.
+- El estado de cierre de P0-01 y el último SHA del PR se mantienen en Trello y
+  GitHub; la aceptación instalada y los gates posteriores son evaluaciones
+  distintas y no se infieren de esta evidencia.
