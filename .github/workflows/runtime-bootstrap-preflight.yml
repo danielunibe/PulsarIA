@@ -30,6 +30,8 @@ on:
       - semantic/**
       - scripts/verify-installed-bundle.ps1
       - scripts/resolve-installed-bundle.ps1
+      - scripts/tests/installed-webview-smoke.mjs
+      - scripts/tests/seed-installed-media.py
       - scripts/prepare-tauri-frontend.mjs
       - scripts/stage-direct-release.ps1
       - scripts/verify-direct-release-artifacts.ps1
@@ -107,6 +109,8 @@ jobs:
               'package-lock.json',
               'scripts/verify-installed-bundle.ps1',
               'scripts/resolve-installed-bundle.ps1',
+              'scripts/tests/installed-webview-smoke.mjs',
+              'scripts/tests/seed-installed-media.py',
               'scripts/prepare-tauri-frontend.mjs',
               'scripts/prepare-runtime-from-pinned-release.ps1',
               'scripts/prepare-runtime.ps1',

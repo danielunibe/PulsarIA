@@ -150,11 +150,13 @@ function Stop-TestInstalledApp {
 
 $envNames = @(
     'PULSAR_DATA_DIR', 'PULSAR_DOWNLOAD_DIR', 'PULSAR_API_PORT', 'PULSAR_API_HOST', 'APPDATA', 'WEBVIEW2_USER_DATA_FOLDER',
+    'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS',
     'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
     'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
     'ONNX_MODEL_DIR', 'TESSERACT_PATH', 'PATH'
 )
 $oldEnvironment = @{}
+    $nodePath = (Get-Command node -ErrorAction Stop).Source
 foreach ($name in $envNames) {
     $oldEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
@@ -188,6 +190,8 @@ $result = [ordered]@{
         usesAppDataFallback = $false
     }
     webView2UserDataFolderIsolated = $false
+    webViewContract = $null
+    webViewRestartContract = $null
     userDataPreservedAfterUninstall = $false
     runtimeIsolation = [ordered]@{
         pathCleared = $false
@@ -239,6 +243,7 @@ try {
     $result.appPath = $appPath
 
     $installedResourceRoot = Join-Path $installDir 'resources'
+    $pythonPath = Join-Path $installedResourceRoot 'python/python.exe'
     $runtimeManifestPath = Join-Path $installedResourceRoot 'runtime-manifest.json'
     $result.resourceChecks.runtimeManifest = Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf
     $result.resourceChecks.python = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'python/python.exe')
@@ -306,6 +311,15 @@ try {
     [Environment]::SetEnvironmentVariable('PULSAR_API_PORT', "$ApiPort", 'Process')
     [Environment]::SetEnvironmentVariable('PULSAR_API_HOST', '127.0.0.1', 'Process')
     [Environment]::SetEnvironmentVariable('WEBVIEW2_USER_DATA_FOLDER', $webViewDataDir, 'Process')
+    $debugPortListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $debugPortListener.Start()
+    $webViewDebugPort = [int]$debugPortListener.LocalEndpoint.Port
+    $debugPortListener.Stop()
+    [Environment]::SetEnvironmentVariable(
+        'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS',
+        "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$webViewDebugPort",
+        'Process'
+    )
     foreach ($name in @(
         'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
         'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
@@ -341,6 +355,49 @@ try {
     if ([string]$health.version -ne $expectedVersion) {
         throw "Installed health version $($health.version) does not match expected $expectedVersion"
     }
+
+    # Exercise the installed WebView against a synthetic video and a synthetic
+    # SQLite reference. The debug port is loopback-only and exists only in this
+    # isolated runner process; it is never configured in the application.
+    $syntheticMediaPath = Join-Path $downloadsDir "pulsaria-installed-smoke-$tag.mp4"
+    $unregisteredMediaPath = Join-Path $downloadsDir "pulsaria-unregistered-smoke-$tag.mp4"
+    $ffmpegPath = Join-Path $installedResourceRoot 'bin/ffmpeg.exe'
+    $ffmpegOutput = @(& $ffmpegPath -hide_banner -loglevel error -f lavfi -i 'color=c=red:s=64x64:r=5' -t 2 -an -c:v libx264 -pix_fmt yuv420p -movflags +faststart -y $syntheticMediaPath 2>&1)
+    $ffmpegExitCode = $LASTEXITCODE
+    if ($ffmpegExitCode -ne 0 -or -not (Test-Path -LiteralPath $syntheticMediaPath -PathType Leaf)) {
+        throw "Could not generate the test-owned synthetic MP4 with packaged FFmpeg (exit $ffmpegExitCode): $($ffmpegOutput -join ' ')"
+    }
+    Copy-Item -LiteralPath $syntheticMediaPath -Destination $unregisteredMediaPath
+
+    $seedScript = Join-Path $PSScriptRoot 'tests/seed-installed-media.py'
+    $seedOutput = @(& $pythonPath $seedScript --mode seed --database (Join-Path $dataDir 'library.db') --media-path $syntheticMediaPath 2>&1)
+    $seedExitCode = $LASTEXITCODE
+    if ($seedExitCode -ne 0) {
+        throw "Could not seed the synthetic installed media reference (exit $seedExitCode): $($seedOutput -join ' ')"
+    }
+    $seedResult = ($seedOutput -join "`n") | ConvertFrom-Json
+    if (-not $seedResult.recordedPathMatches -or -not $seedResult.videoExists) {
+        throw 'The isolated installed library did not preserve the synthetic video reference'
+    }
+
+    function Invoke-InstalledWebViewSmoke {
+        param([ValidateSet('initial', 'restart')][string]$Phase)
+
+        $smokeScript = Join-Path $PSScriptRoot 'tests/installed-webview-smoke.mjs'
+        $smokeOutput = @(& $nodePath $smokeScript `
+            --phase $Phase `
+            --debug-port "$webViewDebugPort" `
+            --api-port "$ApiPort" `
+            --media-path $syntheticMediaPath `
+            --unregistered-media-path $unregisteredMediaPath 2>&1)
+        $smokeExitCode = $LASTEXITCODE
+        if ($smokeExitCode -ne 0) {
+            throw "Installed WebView $Phase smoke failed (exit $smokeExitCode): $($smokeOutput -join ' ')"
+        }
+        return (($smokeOutput -join "`n") | ConvertFrom-Json)
+    }
+
+    $result.webViewContract = Invoke-InstalledWebViewSmoke -Phase initial
     if ($RunLive) {
         # Protected API routes require the process-scoped JWT delivered to the
         # native frontend through IPC. The offline smoke intentionally does
@@ -451,6 +508,13 @@ try {
     if ([string]$healthAfterRestart.version -ne $expectedVersion) {
         throw "Restart health version $($healthAfterRestart.version) does not match expected $expectedVersion"
     }
+    $result.webViewRestartContract = Invoke-InstalledWebViewSmoke -Phase restart
+    $persistedMediaOutput = @(& $pythonPath $seedScript --mode verify --database (Join-Path $dataDir 'library.db') --media-path $syntheticMediaPath --job-id ([string]$seedResult.jobId) 2>&1)
+    $persistedMediaExitCode = $LASTEXITCODE
+    if ($persistedMediaExitCode -ne 0) {
+        throw "Synthetic media reference did not persist after installed-app restart (exit $persistedMediaExitCode): $($persistedMediaOutput -join ' ')"
+    }
+    $result.syntheticMediaPersistence = ($persistedMediaOutput -join "`n") | ConvertFrom-Json
     if ($RunLive) {
         $restartJobs = Get-JobList (Invoke-RestMethod -Method Get -Uri "$baseUrl/api/v1/jobs" -TimeoutSec 10)
         $restartJob = Find-Job $restartJobs ([int64]$result.ingest.job_id)
