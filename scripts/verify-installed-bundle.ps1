@@ -124,6 +124,30 @@ function Assert-TestWebViewIsolation {
     throw 'WebView2 did not use the test-owned WEBVIEW2_USER_DATA_FOLDER; refusing to continue with a non-isolated installed smoke.'
 }
 
+function Open-TestWebViewPolicyKey {
+    param([Parameter(Mandatory = $true)][string]$PolicyPath)
+
+    $registryPrefix = 'HKLM:\'
+    if (-not $PolicyPath.StartsWith($registryPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to open a WebView2 test policy outside HKLM: $PolicyPath"
+    }
+
+    $subKeyPath = $PolicyPath.Substring($registryPrefix.Length)
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64
+    )
+    try {
+        $policyKey = $baseKey.OpenSubKey($subKeyPath, $true)
+    } finally {
+        $baseKey.Close()
+    }
+    if ($null -eq $policyKey) {
+        throw "Could not open the writable x64 WebView2 test policy key: $PolicyPath"
+    }
+    return $policyKey
+}
+
 function Stop-TestInstalledApp {
     if ($null -ne $script:appProcess) {
         Stop-Process -Id $script:appProcess.Id -Force -ErrorAction SilentlyContinue
@@ -199,7 +223,7 @@ function Set-TestWebViewDebugPolicy {
     $policyKey = $null
     $userDataPolicyKey = $null
     try {
-        $policyKey = Get-Item -LiteralPath $script:webViewPolicyPath -ErrorAction Stop
+        $policyKey = Open-TestWebViewPolicyKey -PolicyPath $script:webViewPolicyPath
         $script:webViewPolicyOriginalValueExisted = $policyKey.GetValueNames() -contains $script:webViewPolicyValueName
         if ($script:webViewPolicyOriginalValueExisted) {
             $script:webViewPolicyOriginalValue = $policyKey.GetValue(
@@ -209,7 +233,7 @@ function Set-TestWebViewDebugPolicy {
             )
             $script:webViewPolicyOriginalKind = $policyKey.GetValueKind($script:webViewPolicyValueName)
         }
-        $userDataPolicyKey = Get-Item -LiteralPath $script:webViewUserDataPolicyPath -ErrorAction Stop
+        $userDataPolicyKey = Open-TestWebViewPolicyKey -PolicyPath $script:webViewUserDataPolicyPath
         $script:webViewUserDataPolicyOriginalValueExisted = $userDataPolicyKey.GetValueNames() -contains $script:webViewPolicyValueName
         if ($script:webViewUserDataPolicyOriginalValueExisted) {
             $script:webViewUserDataPolicyOriginalValue = $userDataPolicyKey.GetValue(
@@ -253,7 +277,7 @@ function Restore-TestWebViewDebugPolicy {
         if (-not $script:webViewPolicyConfigured -or -not (Test-Path -LiteralPath $policyState.Path)) { continue }
         $policyKey = $null
         try {
-            $policyKey = Get-Item -LiteralPath $policyState.Path -ErrorAction Stop
+            $policyKey = Open-TestWebViewPolicyKey -PolicyPath $policyState.Path
             if ($policyState.OriginalValueExisted) {
                 $policyKey.SetValue(
                     $script:webViewPolicyValueName,
