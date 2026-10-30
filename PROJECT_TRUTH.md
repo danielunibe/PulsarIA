@@ -6,52 +6,72 @@ actual, las pruebas reproducidas y esta definición de verdad.
 
 ## Gate P1-04 — seguridad Tauri, CSP y recursos locales — 2026-10-29
 
-P1-04 queda **PARTIAL / DOING**. El WebView comienza con `assetProtocol.scope`
-vacío; cada archivo renderizable exige referencia exacta persistida y validación
-de ruta antes de `allow_file`. Se eliminaron el plugin shell y
-`shell:allow-open`; los enlaces externos usan un allowlist nativo HTTPS de
-TikTok y documentos legales exactos. Producción y desarrollo tienen CSP
-separadas, sin wildcard ni `unsafe-eval`. La excepción de `'unsafe-inline'` en
-script/style se documenta a partir del export estático actual de Next; el build
-genera dos etiquetas script inline de trece. Los tres orígenes de imagen ya
-enumerados por `next.config.ts` se conservan como excepciones exactas para
-miniaturas dinámicas; no se añadieron wildcards.
+P1-04 queda **PARTIAL / DOING**. El WebView inicia con `assetProtocol.scope`
+vacío; cada archivo renderizable exige referencia exacta persistida y
+validación de ruta antes de `allow_file`. Se quitaron el plugin shell y
+`shell:allow-open`; enlaces externos usan un allowlist nativo HTTPS de TikTok
+y documentos legales exactos. Producción y desarrollo mantienen CSP separadas,
+sin wildcard ni `unsafe-eval`. `'unsafe-inline'` en script/style se conserva
+por el export estático actual de Next (2 scripts inline de 13); los tres
+orígenes de imagen explícitos que ya declara `next.config.ts` siguen como
+excepciones exactas. No se añadieron wildcards.
 
-`npm run verify:mvp` pasó **13/13** localmente. Rust: 312 PASS, 0 fallidas,
-7 ignoradas; los dos tests de runtime aislado se omitieron porque no había
-fixture temporal aislado. Python: 39 PASS y un skip para URL TikTok live no
-autorizada. Pasaron los 7 tests nuevos de seguridad Tauri, API loopback
-`127.0.0.1`, TypeScript, lint, locale, export Next, formato Rust y runtime
-54/54. El NSIS local Beta 4 se construyó en modo build-only: 688,141,033 bytes, SHA-256
+En el código `355231fc91ff64fc4ac789a279cb02d76dbd1dda`,
+`npm run verify:mvp` pasó **13/13** localmente: Rust 312 PASS, 0 fallidas,
+7 ignoradas y 2 tests de runtime aislado omitidos sin fixture temporal; Python
+39 PASS y 1 skip por falta de URL TikTok autorizada; Tauri security 7/7; API
+loopback `127.0.0.1`; TypeScript, lint, locale, build Next, formato Rust,
+runtime 54/54 y contratos de release/onboarding PASS. Este build local no
+ejecutó la aplicación ni el smoke de instalación. El NSIS local Beta 4 se
+construyó en modo build-only: 688,141,033 bytes, SHA-256
 `FDE2127D8192AE13F9343E172AB7D344E8E0ADCB2AD3758F34B396BCA72CF569`,
 Authenticode `NotSigned`; ese artefacto local no se ejecutó.
 
-El workflow `b883ff8b98fbd90e3aeb462eaca30fc79974693c` pasó canonical CI
-(run [40952005825](https://github.com/danielunibe/PulsarIA/actions/runs/40952005825))
-y runtime bootstrap más smoke NSIS instalado aislado (run
-[40952005843](https://github.com/danielunibe/PulsarIA/actions/runs/40952005843)).
-En `windows-latest` se construyó un instalador Beta 4 efímero
-(SHA-256 `8D1733924A9A7FDCDEE76E754FC9864E53916267215AC2FAE32BAEF4B89B01DF`),
-se instaló/desinstaló con salida 0, verificó el manifiesto instalado 54/54,
-`/health` `ok` antes y después del reinicio, perfil WebView2 aislado, marcador
-sintético preservado y cleanup. Instalación, `APPDATA` y perfil WebView2 usaron
-carpetas temporales del runner; `-RunLive` no se ejecutó. Esto demuestra smoke
-automatizado instalado/arranque/API en un runner efímero, no aceptación visual
-humana, interacción de la UI, reproducción local/TikTok ni instalación en este
-equipo.
+CI exacta del código `355231fc91ff64fc4ac789a279cb02d76dbd1dda`:
+[canonical PASS, run 40996169485](https://github.com/danielunibe/PulsarIA/actions/runs/40996169485)
+y [runtime bootstrap + NSIS instalado aislado PASS, run
+40996169549](https://github.com/danielunibe/PulsarIA/actions/runs/40996169549).
+El runner Windows verificó el manifest instalado **54/54** y generó el NSIS
+efímero `0.1.0-beta.4`, SHA-256
+`DB94E261E63FDC46853EE3D71DB8A6C51F1FD729A5CCE0A43F0293ACE54421C1`.
+Instalación y desinstalación devolvieron 0; `/health` respondió `ok` antes y
+después del reinicio; `APPDATA` y perfil WebView2 fueron temporales y aislados;
+la política CDP temporal se aplicó como `machine-policy` en host elevado y se
+restauró (`policyRestored=true`); marcador test-owned preservado tras
+desinstalar y cleanup PASS. No se pasó `-RunLive`.
 
-La revisión visual humana, CSP/enlaces durante interacción real, reproducción y
-desconexión real de medios continúan sin aceptación. Por ello la matriz
-TAURI-01…13 queda parcial y P1-04 no se cierra por el smoke automatizado. No se
-usaron perfiles TikTok, cookies, credenciales, AppData personal, bibliotecas ni
-modelos personales. La evidencia detallada y el plan de rollback están en
-[docs/BETA4_P1_04_EVIDENCE.md](./docs/BETA4_P1_04_EVIDENCE.md).
-El commit focal de código `6ff55a0ec7416c1de3656f2a1b69b9d7cdd9ca91` pasó
-[canonical CI (run 40946292035)](https://github.com/danielunibe/PulsarIA/actions/runs/40946292035)
-y [runtime bootstrap/source manifest
-(run 40946292008)](https://github.com/danielunibe/PulsarIA/actions/runs/40946292008).
-PR #3 permanece abierto y en borrador; no se autoriza merge, tag, release o
-publicación.
+En la WebView instalada, el probe CSP observó bajo `disposition=enforce`
+bloqueos `script-src-elem`, `script-src` para `eval`, `connect-src` y
+`frame-src`; la conexión ajena se rechazó y `window.eval` produjo `EvalError`.
+La UI obtuvo token por IPC, logró `GET /api/v1/jobs` con 200 y recibió 401 sin
+token desde `http://tauri.localhost`. Un MP4 sintético 64×64 autorizado se
+reprodujo en la WebView (readyState 4, duración 2 s, avance observado de 0.48
+s); un path sin registrar fue rechazado y el medio sintético volvió a
+decodificar tras reiniciar la app. Esto acredita controles automatizados y ese
+fixture en un runner efímero, no aceptación visual humana ni reproducción en la
+UI con biblioteca real.
+
+El run previo [40991716168](https://github.com/danielunibe/PulsarIA/actions/runs/40991716168)
+en el SHA `84fa65e60ab462a3e446b41d703e4d71dfd96853` falló en el probe inline
+anterior: el script temporal no produjo resultado de `eval` y el test lo
+interpretó erróneamente como permitido. El smoke no pasó por esa aserción; se
+corrigió el harness para desactivar el bypass CSP de CDP y comprobar `eval`
+directamente. El run 40996169549 es la evidencia positiva que la reemplaza.
+
+TAURI-02 (reproducción sintética autorizada), TAURI-09 (enforcement CSP
+observado) y TAURI-11 (token/API/CORS desde la UI instalada) tienen PASS
+automatizado en este run. TAURI-01 conserva aceptación visual e interacción
+humana pendiente; TAURI-03 unidad desconectada/`storage_offline`; TAURI-04
+TikTok live; TAURI-08 búsqueda/transcripción/frames en la app; TAURI-10 apertura
+real del navegador externo y TAURI-13 teclado, lector y revisión visual siguen
+pendientes/parciales. El ítem de aceptar artefacto exacto en Windows limpio
+sigue pendiente, por lo que la matriz global no certifica P1-04.
+
+No se instalaron ni lanzaron builds de Pulsaria en este equipo. No se usaron
+perfiles TikTok, cookies, credenciales, AppData personal, bibliotecas ni modelos
+personales. La evidencia completa y el plan de rollback están en
+[docs/BETA4_P1_04_EVIDENCE.md](./docs/BETA4_P1_04_EVIDENCE.md). PR #3 permanece
+abierto y en borrador; no hay merge, tag, release o publicación autorizados.
 
 ## Gate P1-03 — consistencia de descubrimiento de perfiles — 2026-10-29
 
