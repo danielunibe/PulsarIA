@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 
+async function main() {
 const args = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
   args.set(process.argv[index], process.argv[index + 1]);
@@ -22,11 +23,24 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 async function waitForPageTarget() {
   const deadline = Date.now() + 90_000;
   let lastError = 'WebView2 DevTools endpoint has no page target';
+  let lastTargets = [];
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
       if (response.ok) {
         const targets = await response.json();
+        lastTargets = targets.slice(0, 10).map((candidate) => {
+          let url = 'unavailable';
+          try {
+            const parsed = new URL(candidate.url);
+            url = `${parsed.origin}${parsed.pathname}`;
+          } catch { }
+          return {
+            type: candidate.type,
+            url,
+            debuggerAvailable: Boolean(candidate.webSocketDebuggerUrl),
+          };
+        });
         const page = targets.find((target) => target.type === 'page'
           && target.url !== 'about:blank'
           && target.webSocketDebuggerUrl);
@@ -39,7 +53,7 @@ async function waitForPageTarget() {
     }
     await delay(500);
   }
-  throw new Error(`Installed WebView2 page target did not become ready: ${lastError}`);
+  throw new Error(`Installed WebView2 page target did not become ready: ${lastError}; targets=${JSON.stringify(lastTargets)}`);
 }
 
 const target = await waitForPageTarget();
@@ -280,3 +294,11 @@ try {
 } finally {
   socket.close();
 }
+}
+
+main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : undefined;
+  process.stdout.write(`PULSARIA_WEBVIEW_SMOKE_ERROR ${JSON.stringify({ message, stack })}\n`);
+  process.exitCode = 1;
+});

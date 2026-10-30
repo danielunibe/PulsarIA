@@ -156,9 +156,146 @@ $envNames = @(
     'ONNX_MODEL_DIR', 'TESSERACT_PATH', 'PATH'
 )
 $oldEnvironment = @{}
-    $nodePath = (Get-Command node -ErrorAction Stop).Source
+$nodePath = (Get-Command node -ErrorAction Stop).Source
 foreach ($name in $envNames) {
     $oldEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+
+$webViewPolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+$webViewUserDataPolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2\UserDataFolder'
+$webViewPolicyValueName = 'Pulsaria.exe'
+$webViewPolicyOriginalValueExisted = $false
+$webViewPolicyOriginalValue = $null
+$webViewPolicyOriginalKind = $null
+$webViewUserDataPolicyOriginalValueExisted = $false
+$webViewUserDataPolicyOriginalValue = $null
+$webViewUserDataPolicyOriginalKind = $null
+$webViewPolicyCreatedPaths = [System.Collections.Generic.List[string]]::new()
+$webViewPolicyConfigured = $false
+$webViewPolicyRestored = $true
+$webViewDebugOverrideMode = 'environment'
+$windowsPrincipal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+$webViewHostIsElevated = $windowsPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+function Set-TestWebViewDebugPolicy {
+    param([Parameter(Mandatory = $true)][string]$Arguments)
+
+    if (-not $script:webViewHostIsElevated) { return }
+
+    foreach ($policyPath in @(
+        'HKLM:\SOFTWARE\Policies',
+        'HKLM:\SOFTWARE\Policies\Microsoft',
+        'HKLM:\SOFTWARE\Policies\Microsoft\Edge',
+        'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2',
+        $script:webViewPolicyPath,
+        $script:webViewUserDataPolicyPath
+    )) {
+        if (-not (Test-Path -LiteralPath $policyPath)) {
+            New-Item -Path $policyPath -Force -ErrorAction Stop | Out-Null
+            [void]$script:webViewPolicyCreatedPaths.Add($policyPath)
+        }
+    }
+
+    $policyKey = $null
+    $userDataPolicyKey = $null
+    try {
+        $policyKey = Get-Item -LiteralPath $script:webViewPolicyPath -ErrorAction Stop
+        $script:webViewPolicyOriginalValueExisted = $policyKey.GetValueNames() -contains $script:webViewPolicyValueName
+        if ($script:webViewPolicyOriginalValueExisted) {
+            $script:webViewPolicyOriginalValue = $policyKey.GetValue(
+                $script:webViewPolicyValueName,
+                $null,
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+            )
+            $script:webViewPolicyOriginalKind = $policyKey.GetValueKind($script:webViewPolicyValueName)
+        }
+        $userDataPolicyKey = Get-Item -LiteralPath $script:webViewUserDataPolicyPath -ErrorAction Stop
+        $script:webViewUserDataPolicyOriginalValueExisted = $userDataPolicyKey.GetValueNames() -contains $script:webViewPolicyValueName
+        if ($script:webViewUserDataPolicyOriginalValueExisted) {
+            $script:webViewUserDataPolicyOriginalValue = $userDataPolicyKey.GetValue(
+                $script:webViewPolicyValueName,
+                $null,
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+            )
+            $script:webViewUserDataPolicyOriginalKind = $userDataPolicyKey.GetValueKind($script:webViewPolicyValueName)
+        }
+        $script:webViewPolicyConfigured = $true
+        $script:webViewPolicyRestored = $false
+        $policyKey.SetValue($script:webViewPolicyValueName, $Arguments, [Microsoft.Win32.RegistryValueKind]::String)
+        $userDataPolicyKey.SetValue(
+            $script:webViewPolicyValueName,
+            $script:webViewDataDir,
+            [Microsoft.Win32.RegistryValueKind]::String
+        )
+        $script:webViewDebugOverrideMode = 'machine-policy'
+    } finally {
+        if ($null -ne $policyKey) { $policyKey.Close() }
+        if ($null -ne $userDataPolicyKey) { $userDataPolicyKey.Close() }
+    }
+}
+
+function Restore-TestWebViewDebugPolicy {
+    $restoreErrors = [System.Collections.Generic.List[string]]::new()
+    foreach ($policyState in @(
+        @{
+            Path = $script:webViewPolicyPath
+            OriginalValueExisted = $script:webViewPolicyOriginalValueExisted
+            OriginalValue = $script:webViewPolicyOriginalValue
+            OriginalKind = $script:webViewPolicyOriginalKind
+        },
+        @{
+            Path = $script:webViewUserDataPolicyPath
+            OriginalValueExisted = $script:webViewUserDataPolicyOriginalValueExisted
+            OriginalValue = $script:webViewUserDataPolicyOriginalValue
+            OriginalKind = $script:webViewUserDataPolicyOriginalKind
+        }
+    )) {
+        if (-not $script:webViewPolicyConfigured -or -not (Test-Path -LiteralPath $policyState.Path)) { continue }
+        $policyKey = $null
+        try {
+            $policyKey = Get-Item -LiteralPath $policyState.Path -ErrorAction Stop
+            if ($policyState.OriginalValueExisted) {
+                $policyKey.SetValue(
+                    $script:webViewPolicyValueName,
+                    $policyState.OriginalValue,
+                    $policyState.OriginalKind
+                )
+            } else {
+                $policyKey.DeleteValue($script:webViewPolicyValueName, $false)
+            }
+        } catch {
+            [void]$restoreErrors.Add("$($policyState.Path): $($_.Exception.Message)")
+        } finally {
+            if ($null -ne $policyKey) { $policyKey.Close() }
+        }
+    }
+
+    for ($index = $script:webViewPolicyCreatedPaths.Count - 1; $index -ge 0; $index--) {
+        $createdPath = $script:webViewPolicyCreatedPaths[$index]
+        if (-not (Test-Path -LiteralPath $createdPath)) { continue }
+        $policyKey = $null
+        try {
+            $policyKey = Get-Item -LiteralPath $createdPath -ErrorAction Stop
+            $isEmpty = $policyKey.ValueCount -eq 0 -and $policyKey.SubKeyCount -eq 0
+        } catch {
+            [void]$restoreErrors.Add("${createdPath}: $($_.Exception.Message)")
+            break
+        } finally {
+            if ($null -ne $policyKey) { $policyKey.Close() }
+        }
+        if (-not $isEmpty) { break }
+        try {
+            Remove-Item -LiteralPath $createdPath -Force -ErrorAction Stop
+        } catch {
+            [void]$restoreErrors.Add("${createdPath}: $($_.Exception.Message)")
+            break
+        }
+    }
+    if ($restoreErrors.Count -gt 0) {
+        $script:webViewPolicyRestored = $false
+        throw ($restoreErrors -join '; ')
+    }
+    $script:webViewPolicyRestored = $true
 }
 
 $appProcess = $null
@@ -192,6 +329,11 @@ $result = [ordered]@{
     webView2UserDataFolderIsolated = $false
     webViewContract = $null
     webViewRestartContract = $null
+    webViewDebugging = [ordered]@{
+        hostElevated = $webViewHostIsElevated
+        overrideMode = $null
+        policyRestored = $true
+    }
     userDataPreservedAfterUninstall = $false
     runtimeIsolation = [ordered]@{
         pathCleared = $false
@@ -241,6 +383,8 @@ try {
         throw "Installed $productSlug.exe was not found"
     }
     $result.appPath = $appPath
+    $webViewPolicyValueName = [System.IO.Path]::GetFileName($appPath)
+    $script:webViewPolicyValueName = $webViewPolicyValueName
 
     $installedResourceRoot = Join-Path $installDir 'resources'
     $pythonPath = Join-Path $installedResourceRoot 'python/python.exe'
@@ -320,6 +464,8 @@ try {
         "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$webViewDebugPort",
         'Process'
     )
+    Set-TestWebViewDebugPolicy -Arguments "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$webViewDebugPort"
+    $result.webViewDebugging.overrideMode = $webViewDebugOverrideMode
     foreach ($name in @(
         'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
         'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
@@ -542,6 +688,16 @@ try {
     $result.error = $_.Exception.Message
 } finally {
     Stop-TestInstalledApp
+    try {
+        Restore-TestWebViewDebugPolicy
+    } catch {
+        $result.webViewDebugging.policyRestored = $false
+        $script:webViewPolicyRestored = $false
+        if ([string]::IsNullOrWhiteSpace([string]$result.error)) {
+            $result.error = "Could not restore the temporary WebView2 debug policy: $($_.Exception.Message)"
+        }
+    }
+    $result.webViewDebugging.policyRestored = $webViewPolicyRestored
     foreach ($name in $envNames) {
         if ($null -eq $oldEnvironment[$name]) {
             [Environment]::SetEnvironmentVariable($name, $null, 'Process')
@@ -612,7 +768,8 @@ $uninstallFailed = $null -eq $result.uninstallExit -or "$($result.uninstallExit)
 $verificationFailed = (-not [string]::IsNullOrWhiteSpace([string]$result.error)) -or
     $installFailed -or
     $uninstallFailed -or -not [bool]$result.userDataPreservedAfterUninstall -or
-    -not [bool]$result.cleanup
+    -not [bool]$result.cleanup -or
+    -not [bool]$result.webViewDebugging.policyRestored
 if ($verificationFailed) {
     exit 1
 }
