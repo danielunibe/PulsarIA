@@ -518,12 +518,21 @@ Orden de trabajo posterior:
    canonical y runtime preflight PASS.
 2. P1-03 está cerrado con el SHA `0c1fd6225b998486bf5021fd80ecb7f489b8f268`,
    CI canonical y runtime preflight PASS; SYNC-03 sigue como diseño, no código.
-3. P1-04 es el siguiente gate técnico: auditar la configuración Tauri efectiva
-   con pruebas negativas antes de avanzar.
-4. Implementar micro-gates de MEDIA-05: inventario, persistencia de evidencia,
-   política segura de retención, luego lote/streaming sujeto a viabilidad.
-5. AI-02 consume evidencia estable; UX-01/QUEUE-04/SETTINGS-06 se implementan
-   con resultados medidos.
+3. P1-04 ya tiene hardening focal en `355231fc91ff64fc4ac789a279cb02d76dbd1dda`,
+   verificación local `verify:mvp` 13/13 y smoke NSIS instalado aislado PASS
+   (run 40996169549). `PROJECT_TRUTH.md` y `docs/BETA4_P1_04_EVIDENCE.md` se
+   actualizaron en `c96a0f0e629d2ce51ef58cd34e4c7e88ae3f16ec` con CI canonical
+   PASS (run 40999432730). El gate permanece PARTIAL/DOING hasta completar
+   aceptación humana, matriz funcional restante y aceptación integral en
+   Windows limpio; el runtime run 40999432353 es docs-only y omitió smoke.
+4. El siguiente trabajo técnico es completar esos criterios pendientes de
+   P1-04. Después de la aprobación correspondiente, priorizar micro-gates de
+   MEDIA-05: inventario, persistencia de evidencia y retención segura; lote y
+   streaming progresivo siguen sujetos a pruebas de viabilidad independientes.
+5. Las seis secciones de este documento son especificaciones de producto, no
+   implementación ni autorización de construir features. AI-02 consume
+   evidencia estable; UX-01, SYNC-03, QUEUE-04, MEDIA-05 y SETTINGS-06 avanzan
+   mediante gates aprobados y resultados medidos.
 
 ## Decisiones abiertas
 
