@@ -114,6 +114,7 @@ async function evaluate(expression) {
     awaitPromise: true,
     returnByValue: true,
     userGesture: true,
+    allowUnsafeEvalBlockedByCSP: false,
   });
   if (response.exceptionDetails) {
     const description = response.exceptionDetails.exception?.description ?? response.exceptionDetails.text;
@@ -147,13 +148,12 @@ try {
 
   if (phase === 'initial') {
     const cspProbeHost = 'pulsaria-csp-probe.invalid';
-    const inlineEvalProbe = "try { window.__pulsariaInstalledCspEval = { result: window.eval('1 + 1') }; } catch (error) { window.__pulsariaInstalledCspEval = { name: error.name }; }";
     csp = await evaluate(`(() => new Promise((resolve) => {
       const host = ${JSON.stringify(cspProbeHost)};
       const violations = [];
       const onViolation = (event) => {
         if (String(event.blockedURI || '').includes(host) || event.blockedURI === 'eval') {
-          violations.push({ directive: event.effectiveDirective, blockedURI: event.blockedURI });
+          violations.push({ directive: event.effectiveDirective, blockedURI: event.blockedURI, disposition: event.disposition });
         }
       };
       document.addEventListener('securitypolicyviolation', onViolation, true);
@@ -163,19 +163,19 @@ try {
       const blockedScript = document.createElement('script');
       blockedScript.src = 'https://' + host + '/script.js';
       document.head.appendChild(blockedScript);
-      const evalProbe = document.createElement('script');
-      evalProbe.textContent = ${JSON.stringify(inlineEvalProbe)};
-      document.head.appendChild(evalProbe);
+      let unsafeEval;
+      try {
+        unsafeEval = { result: window.eval('1 + 1') };
+      } catch (error) {
+        unsafeEval = { name: error.name };
+      }
       const fetchProbe = fetch('https://' + host + '/connect').then(() => false, () => true);
       Promise.race([fetchProbe, new Promise((done) => setTimeout(() => done(false), 1500))]).then((connectBlocked) => {
         setTimeout(() => {
-          const evalResult = window.__pulsariaInstalledCspEval || null;
           blockedFrame.remove();
           blockedScript.remove();
-          evalProbe.remove();
           document.removeEventListener('securitypolicyviolation', onViolation, true);
-          delete window.__pulsariaInstalledCspEval;
-          resolve({ violations, connectBlocked, unsafeEval: evalResult });
+          resolve({ violations, connectBlocked, unsafeEval });
         }, 300);
       });
     }))()`);
@@ -183,8 +183,8 @@ try {
     assert.ok(directives.has('frame-src'), 'Installed CSP did not block an unapproved frame origin');
     assert.ok(directives.has('script-src-elem') || directives.has('script-src'), 'Installed CSP did not block an unapproved script origin');
     assert.ok(directives.has('connect-src') && csp.connectBlocked, 'Installed CSP did not block an unapproved connection');
-    assert.equal(csp.unsafeEval?.name, 'EvalError', 'Installed CSP unexpectedly allowed eval');
-    assert.ok(directives.has('script-src'), 'Installed CSP did not report the eval restriction');
+    assert.equal(csp.unsafeEval?.name, 'EvalError', `Installed CSP did not block eval: ${JSON.stringify(csp)}`);
+    assert.ok(directives.has('script-src'), `Installed CSP did not report the eval restriction: ${JSON.stringify(csp)}`);
 
     api = await evaluate(`(async () => {
       const token = await window.__TAURI_INTERNALS__.invoke('get_api_session_token');
