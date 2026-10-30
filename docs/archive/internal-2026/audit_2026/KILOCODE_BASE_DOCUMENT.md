@@ -20,17 +20,17 @@
 ## 📋 ÍNDICE DE AUDITORÍA CONECTADA
 
 Antes de comenzar cada tarea, consulta el documento técnico correspondiente:
-- **Stack & Dependencias:** [`01_STACK_TECNOLOGICO.md`](01_STACK_TECNOLOGICO.md)
-- **Arquitectura & Flujos:** [`02_ARQUITECTURA_SISTEMA.md`](02_ARQUITECTURA_SISTEMA.md)
-- **Estado de Componentes:** [`03_ESTADO_ACTUAL_COMPONENTES.md`](03_ESTADO_ACTUAL_COMPONENTES.md)
-- **Catálogo de Bugs:** [`04_BUGS_CRITICOS.md`](04_BUGS_CRITICOS.md)
-- **Auditoría UI/UX:** [`05_AUDITORIA_UI_UX.md`](05_AUDITORIA_UI_UX.md)
-- **Backend Rust:** [`06_AUDITORIA_BACKEND_RUST.md`](06_AUDITORIA_BACKEND_RUST.md)
-- **Pipeline Python:** [`07_AUDITORIA_PIPELINE_PYTHON.md`](07_AUDITORIA_PIPELINE_PYTHON.md)
-- **Modelos IA & Gemini:** [`08_AUDITORIA_IA_MODELOS.md`](08_AUDITORIA_IA_MODELOS.md)
-- **Features Faltantes:** [`09_FEATURES_FALTANTES.md`](09_FEATURES_FALTANTES.md)
-- **Plan por Fases:** [`10_PLAN_IMPLEMENTACION_POR_FASES.md`](10_PLAN_IMPLEMENTACION_POR_FASES.md)
-- **Contratos & Tipos:** [`11_CONTRATO_DATOS_TIPOS.md`](11_CONTRATO_DATOS_TIPOS.md)
+- **Stack & Dependencias:** [`01_STACK_TECNOLOGICO.md`](./01_STACK_TECNOLOGICO.md)
+- **Arquitectura & Flujos:** [`02_ARQUITECTURA_SISTEMA.md`](./02_ARQUITECTURA_SISTEMA.md)
+- **Estado de Componentes:** [`03_ESTADO_ACTUAL_COMPONENTES.md`](./03_ESTADO_ACTUAL_COMPONENTES.md)
+- **Catálogo de Bugs:** [`04_BUGS_CRITICOS.md`](./04_BUGS_CRITICOS.md)
+- **Auditoría UI/UX:** [`05_AUDITORIA_UI_UX.md`](./05_AUDITORIA_UI_UX.md)
+- **Backend Rust:** [`06_AUDITORIA_BACKEND_RUST.md`](./06_AUDITORIA_BACKEND_RUST.md)
+- **Pipeline Python:** [`07_AUDITORIA_PIPELINE_PYTHON.md`](./07_AUDITORIA_PIPELINE_PYTHON.md)
+- **Modelos IA & Gemini:** [`08_AUDITORIA_IA_MODELOS.md`](./08_AUDITORIA_IA_MODELOS.md)
+- **Features Faltantes:** [`09_FEATURES_FALTANTES.md`](./09_FEATURES_FALTANTES.md)
+- **Plan por Fases:** [`10_PLAN_IMPLEMENTACION_POR_FASES.md`](./10_PLAN_IMPLEMENTACION_POR_FASES.md)
+- **Contratos & Tipos:** [`11_CONTRATO_DATOS_TIPOS.md`](./11_CONTRATO_DATOS_TIPOS.md)
 
 ---
 

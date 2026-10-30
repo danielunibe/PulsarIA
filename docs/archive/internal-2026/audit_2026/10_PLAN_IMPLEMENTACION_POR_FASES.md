@@ -66,4 +66,4 @@
 
 ---
 
-*Siguiente documento: [11_CONTRATO_DATOS_TIPOS.md](11_CONTRATO_DATOS_TIPOS.md)*
+*Siguiente documento: [11_CONTRATO_DATOS_TIPOS.md](./11_CONTRATO_DATOS_TIPOS.md)*

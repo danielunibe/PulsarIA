@@ -104,8 +104,9 @@ function optionalJobNumber(job: StorageAwareJob, keys: Array<keyof StorageAwareJ
 }
 
 function jobSourceState(job: StorageAwareJob) {
-    if (job.video_path) return 'local';
+    if (job.source_state === 'storage_offline') return 'storage_offline';
     if (job.source_state === 'unavailable') return 'unavailable';
+    if (job.video_path) return 'local';
     if (job.source_state === 'online' || job.keep_status === 'online') return 'online';
     return 'unavailable';
 }

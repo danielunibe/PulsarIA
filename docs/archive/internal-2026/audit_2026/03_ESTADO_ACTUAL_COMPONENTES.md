@@ -77,4 +77,4 @@
 
 ---
 
-*Siguiente documento: [04_BUGS_CRITICOS.md](04_BUGS_CRITICOS.md)*
+*Siguiente documento: [04_BUGS_CRITICOS.md](./04_BUGS_CRITICOS.md)*

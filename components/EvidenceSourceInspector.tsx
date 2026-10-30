@@ -17,7 +17,7 @@ import {
  * EvidenceSourceInspector — inspector de fuentes del Reader editorial.
  *
  * Resuelve `Evidence → Source → Media` por IPC y reproduce con el mecanismo
- * canónico de Pulsaria (`<video>` + `convertFileSrc`, seek por `currentTime`
+ * canónico de Pulsaria (`<video>` + asset protocol autorizado, seek por `currentTime`
  * en `loadedmetadata` con clamp, mismo patrón que `ExpandedVideoModal`).
  * Sin video local declara honestamente que la reproducción no está
  * disponible; nunca inventa una ruta.
@@ -35,6 +35,7 @@ function sourceStateLabel(sourceState: string, jobStatus: string, locale: 'es-MX
   if (sourceState === 'local') return en ? 'Local' : 'Local';
   if (sourceState === 'online') return en ? 'Online · entry retained' : 'Online · ficha conservada';
   if (sourceState === 'unavailable') return en ? 'Unavailable · entry retained' : 'No disponible · ficha conservada';
+  if (sourceState === 'storage_offline') return en ? 'Storage disconnected · path and entry retained' : 'Almacenamiento desconectado · ruta y ficha conservadas';
   return `${sourceState} · job ${jobStatus}`;
 }
 
@@ -79,6 +80,11 @@ function SourceVideo({
 
   useEffect(() => {
     let live = true;
+    if (media.source_state === 'storage_offline' || media.source_state === 'unavailable') {
+      setVideoUrl(null);
+      setPosterUrl(null);
+      return () => { live = false; };
+    }
     void resolveAssetUrl(media.video_path).then((resolved) => {
       if (live) setVideoUrl(resolved ?? null);
     });
@@ -88,7 +94,7 @@ function SourceVideo({
     return () => {
       live = false;
     };
-  }, [media.video_path, media.poster_path]);
+  }, [media.source_state, media.video_path, media.poster_path]);
 
   useEffect(() => {
     if (startSec === null || !Number.isFinite(startSec)) return;

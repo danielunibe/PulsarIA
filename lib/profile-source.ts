@@ -7,8 +7,9 @@
 export const PROFILE_SOURCE_KEYS = ['posts', 'reposts', 'saved', 'favorites'] as const;
 
 export type ProfileSourceKey = (typeof PROFILE_SOURCE_KEYS)[number];
-export type ProfileStatus = 'registering' | 'ready' | 'error' | 'paused';
+export type ProfileStatus = 'registering' | 'pending' | 'discovering' | 'ready' | 'error' | 'paused';
 export type ProfileSourceSyncState =
+  | 'pending'
   | 'idle'
   | 'discovering'
   | 'discovering_recent'
@@ -18,6 +19,7 @@ export type ProfileSourceSyncState =
   | 'requires_session'
   | 'requires_auth'
   | 'rate_limited'
+  | 'unknown'
   | 'unavailable'
   | 'unsupported'
   | 'error';
@@ -40,6 +42,7 @@ export interface ProfileSourceEntry {
   enabled: boolean;
   discoveredCount: number | null;
   syncState: ProfileSourceSyncState;
+  errorMessage: string | null;
 }
 
 export interface ProfileSourceRules {
@@ -63,6 +66,10 @@ export interface ProfileSource {
   createdAt: string;
   updatedAt: string;
   status: ProfileStatus;
+  scanLimit: number;
+  lastSyncAt: string | null;
+  nextSyncAt: string | null;
+  lastError: string | null;
 }
 
 export interface NormalizedTikTokProfileInput {
@@ -157,48 +164,63 @@ export interface PersistedCollectionSourceRecord {
   discovered_count: number;
   created_at: string;
   updated_at?: string | null;
+  history_limit?: number | null;
+  last_sync_at?: string | null;
+  next_sync_at?: string | null;
+  last_error?: string | null;
+}
+
+export interface PersistedProfileChannelRecord {
+  kind: string;
+  enabled: boolean;
+  status: string;
+  discovered_count: number;
+  last_successful_discovery_at: string | null;
+  error_message: string | null;
 }
 
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {
-    return JSON.parse(value) as T;
+    return (JSON.parse(value) as T) ?? fallback;
   } catch {
     return fallback;
   }
 }
 
-type BackendWatchConfig = { posts?: boolean; likes?: boolean; saved?: boolean; reposts?: boolean };
+type BackendWatchConfig = { posts?: boolean; likes?: boolean; favorites?: boolean; saved?: boolean; reposts?: boolean };
 type BackendSummary = {
   categories?: Record<string, { discovered?: number; state?: string }>;
 };
 
 function sourceState(enabled: boolean, status: string, category: string): ProfileSourceSyncState {
   if (!enabled || status === 'paused') return 'paused';
+  if (status === 'checking') return 'discovering';
   if (category === 'requires_session' || category === 'requires_auth' || status === 'needs_auth') return 'requires_session';
   if (category === 'rate_limited') return 'rate_limited';
+  if (category === 'unknown') return 'unknown';
   if (category === 'unsupported' || category === 'unavailable') return 'unsupported';
-  if (status === 'error' || category === 'error') return 'error';
-  if (status === 'checking' || category === 'discovering' || category === 'discovering_recent' || category === 'backfilling') {
+  if (category === 'error' || category === 'private') return 'error';
+  if (category === 'discovering' || category === 'discovering_recent' || category === 'backfilling') {
     return 'discovering';
   }
   if (category === 'syncing') return 'syncing';
-  return 'idle';
-}
-
-function discoveredCount(summary: BackendSummary | null, key: string): number | null {
-  const category = summary?.categories?.[key];
-  return typeof category?.discovered === 'number' ? category.discovered : null;
+  if (category === 'idle' || category === 'completed_initial_backfill') return 'idle';
+  if (status === 'error') return 'error';
+  return 'pending';
 }
 
 function profileStatus(source: PersistedCollectionSourceRecord): ProfileStatus {
   if (!source.active || source.status === 'paused') return 'paused';
   if (source.status === 'error' || source.status === 'needs_auth') return 'error';
+  if (source.status === 'partial') return 'error';
+  if (source.status === 'checking') return 'discovering';
+  if (source.status === 'pending' || !source.last_sync_at) return 'pending';
   return 'ready';
 }
 
 /** Maps the existing collection_sources row into the profile domain model. */
-export function toProfileSource(source: PersistedCollectionSourceRecord): ProfileSource {
+export function toProfileSource(source: PersistedCollectionSourceRecord, channels: PersistedProfileChannelRecord[] = []): ProfileSource {
   const normalized = normalizeTikTokProfileInput(source.profile_url || source.url);
   const fallbackHandle = source.username?.startsWith('@')
     ? source.username
@@ -210,28 +232,17 @@ export function toProfileSource(source: PersistedCollectionSourceRecord): Profil
   const watch = parseJson<BackendWatchConfig>(source.watch_config_json, {});
   const summary = parseJson<BackendSummary | null>(source.last_sync_summary_json, null);
   const status = source.status || 'ready';
-  const entries = {
-    posts: {
-      enabled: Boolean(watch.posts),
-      discoveredCount: discoveredCount(summary, 'posts'),
-      syncState: sourceState(Boolean(watch.posts), status, summary?.categories?.posts?.state || 'pending'),
-    },
-    reposts: {
-      enabled: Boolean(watch.reposts),
-      discoveredCount: discoveredCount(summary, 'reposts'),
-      syncState: sourceState(Boolean(watch.reposts), status, summary?.categories?.reposts?.state || 'pending'),
-    },
-    saved: {
-      enabled: Boolean(watch.saved),
-      discoveredCount: discoveredCount(summary, 'saved'),
-      syncState: sourceState(Boolean(watch.saved), status, summary?.categories?.saved?.state || 'pending'),
-    },
-    favorites: {
-      enabled: Boolean(watch.likes),
-      discoveredCount: discoveredCount(summary, 'likes'),
-      syncState: sourceState(Boolean(watch.likes), status, summary?.categories?.likes?.state || 'pending'),
-    },
-  } satisfies Record<ProfileSourceKey, ProfileSourceEntry>;
+  const entries = Object.fromEntries(PROFILE_SOURCE_KEYS.map((key) => {
+    const channel = channels.find((item) => item.kind === key);
+    const category = summary?.categories?.[key] ?? (key === 'favorites' ? summary?.categories?.likes : undefined);
+    const enabled = channel?.enabled ?? Boolean(key === 'favorites' ? watch.likes ?? watch.favorites : watch[key]);
+    const state = channel && channel.status === 'idle' && !channel.last_successful_discovery_at
+      ? 'pending' : channel?.status ?? category?.state ?? 'pending';
+    const count = channel
+      ? channel.last_successful_discovery_at ? channel.discovered_count : null
+      : typeof category?.discovered === 'number' && ['idle', 'completed_initial_backfill'].includes(state) ? category.discovered : null;
+    return [key, { enabled, discoveredCount: count, syncState: sourceState(enabled, status, state), errorMessage: channel?.error_message ?? null }];
+  })) as Record<ProfileSourceKey, ProfileSourceEntry>;
 
   return {
     id: source.id,
@@ -263,6 +274,10 @@ export function toProfileSource(source: PersistedCollectionSourceRecord): Profil
     createdAt: source.created_at,
     updatedAt: source.updated_at || source.created_at,
     status: profileStatus(source),
+    scanLimit: source.history_limit ?? 0,
+    lastSyncAt: source.last_sync_at ?? null,
+    nextSyncAt: source.next_sync_at ?? null,
+    lastError: source.last_error ?? null,
   };
 }
 

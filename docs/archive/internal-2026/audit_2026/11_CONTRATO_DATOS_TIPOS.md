@@ -110,4 +110,4 @@ pub struct SearchResult {
 
 ---
 
-*Documento Maestro de Ejecución: [KILOCODE_BASE_DOCUMENT.md](KILOCODE_BASE_DOCUMENT.md)*
+*Documento Maestro de Ejecución: [KILOCODE_BASE_DOCUMENT.md](./KILOCODE_BASE_DOCUMENT.md)*

@@ -102,26 +102,19 @@ def classify_category_error(category: str, error: str) -> dict[str, Any]:
             "reason": "Esta categoría está marcada como privada en TikTok",
         }
 
-    # If reposts/saved/likes fail with unsupported URL or general error without cookies,
-    # treat as requires_session or unsupported per product rule
-    if category in ("saved", "likes"):
-        return {
-            "status": "requires_session",
-            "auth_required": True,
-            "reason": "Esta categoría requiere una sesión de usuario activa en el navegador",
-        }
-
-    if category == "reposts":
+    if any(token in normalized for token in ("unsupported", "not supported", "unsupported url")):
         return {
             "status": "unsupported",
             "auth_required": False,
-            "reason": "Los reposts no están disponibles públicamente sin sesión autorizada",
+            "reason": error.strip() or "El proveedor no admite esta categoría",
         }
 
     return {
         "status": "error",
         "auth_required": False,
-        "reason": error.strip() or "TikTok no devolvió una respuesta utilizable",
+        "reason": f"No se pudo consultar {category}: {error.strip()}"
+        if error.strip()
+        else "TikTok no devolvió una respuesta utilizable",
     }
 
 
@@ -187,9 +180,10 @@ def scan_tiktok_source(
     if not requested:
         requested = list(ACTIVITY_SUFFIXES)
 
-    fetch_limit = max(1, min(1000, limit or 200))
+    fetch_limit = 0 if limit == 0 else max(1, min(1000, limit or 200))
+    profile = profile_identity(profile_url)
     result = {
-        "profile": profile_identity(profile_url),
+        "profile": profile,
         "categories": {},
     }
 
@@ -198,13 +192,23 @@ def scan_tiktok_source(
         try:
             raw_entries = extract_playlist_entries(source_url, fetch_limit)
             entries = _filter_from_date(_dedupe_video_entries(raw_entries), history_from)
+            empty_posts_are_confirmed = (
+                category == "posts"
+                and profile.get("private_account") is False
+                and profile.get("posts_count") == 0
+            )
+            unknown_empty = not entries and not empty_posts_are_confirmed
             result["categories"][category] = {
-                "available": True,
-                "status": "available",
-                "reason": None,
+                "available": not unknown_empty,
+                "status": "unknown" if unknown_empty else "available",
+                "reason": (
+                    "TikTok devolvió una lista vacía sin confirmar si esta categoría es visible"
+                    if unknown_empty
+                    else None
+                ),
                 "auth_required": False,
-                "truncated": len(raw_entries) >= fetch_limit,
-                "items": entries[:fetch_limit],
+                "truncated": fetch_limit > 0 and len(raw_entries) >= fetch_limit,
+                "items": entries if fetch_limit == 0 else entries[:fetch_limit],
             }
         except Exception as error:
             diagnosis = classify_category_error(category, str(error))

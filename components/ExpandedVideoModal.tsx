@@ -18,6 +18,10 @@ import { toast } from 'sonner';
 import { useSemanticIO } from '@/hooks/useSemanticIO';
 import { apiFetch } from '@/lib/api-client';
 import { useI18n } from '@/lib/i18n';
+import { TikTokOnlinePlayer } from '@/components/TikTokOnlinePlayer';
+import { tiktokPlayerUrl } from '@/lib/tiktok-player';
+import { resolveAuthorizedAssetUrl } from '@/lib/authorized-assets';
+import { openTrustedExternalUrl } from '@/lib/external-links.mjs';
 
 // ============================================================
 // ExpandedVideoModal — AAA Multimodal Knowledge Hub
@@ -44,7 +48,7 @@ interface ExpandedVideoModalProps {
     sourceLayout?: boolean;
 }
 
-type SourceState = 'local' | 'online' | 'unavailable';
+type SourceState = 'local' | 'online' | 'unavailable' | 'storage_offline';
 type DetailTab = 'transcript' | 'karaoke' | 'intel' | 'tools';
 const DETAIL_TAB_ORDER: DetailTab[] = ['transcript', 'karaoke', 'intel', 'tools'];
 
@@ -102,13 +106,7 @@ function isNativeShell(): boolean {
 }
 
 async function resolveArtifactUrl(path: string): Promise<string | undefined> {
-    if (/^(https?:\/\/|data:)/i.test(path)) return path;
-    try {
-        const { convertFileSrc } = await import('@tauri-apps/api/core');
-        return convertFileSrc(path);
-    } catch {
-        return undefined;
-    }
+    return resolveAuthorizedAssetUrl(path);
 }
 
 /**
@@ -189,11 +187,14 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
 
     const sourceState: SourceState = video.sourceState || (video.videoSrc ? 'local' : 'unavailable');
     const transcriptOnly = !video.videoSrc;
+    const onlinePlayable = !video.videoSrc && sourceState === 'online' && Boolean(tiktokPlayerUrl(video.originalUrl));
     const sourceStateLabel = sourceState === 'local'
         ? t('detailSourceLocal')
         : sourceState === 'online'
             ? t('detailSourceOnline')
-            : t('detailSourceUnavailable');
+            : sourceState === 'storage_offline'
+                ? t('detailSourceStorageOffline')
+                : t('detailSourceUnavailable');
 
     const recordAccess = useCallback(async (event: 'open' | 'play' | 'search') => {
         if (!isNativeShell()) return;
@@ -386,18 +387,8 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
     const openOriginal = useCallback(async () => {
         const url = video.originalUrl;
         if (!url) return;
-        try {
-            const parsed = new URL(url);
-            if (parsed.protocol !== 'https:') throw new Error('Unsupported URL protocol');
-        } catch {
-            toast.error('La URL original no es segura o está incompleta.');
-            return;
-        }
-        try {
-            const { open } = await import('@tauri-apps/plugin-shell');
-            await open(url);
-        } catch {
-            window.open(url, '_blank', 'noopener,noreferrer');
+        if (!await openTrustedExternalUrl(url)) {
+            toast.error('La URL original no está autorizada o no se pudo abrir.');
         }
     }, [video.originalUrl]);
 
@@ -854,12 +845,18 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                                 </span>
                             </div>
                             </>
+                        ) : onlinePlayable ? (
+                            <TikTokOnlinePlayer originalUrl={video.originalUrl!} title={video.title || 'Video de TikTok'} />
                         ) : (
                             <div className="relative z-10 flex h-full w-full flex-col items-center justify-center gap-3 overflow-hidden p-8 text-center">
                                 <div className="flex max-w-sm flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/55 p-6 backdrop-blur-md">
                                     <FaVideo size={28} className="text-white/30" />
                                     <p className="text-xs font-semibold text-white/80">
-                                        {sourceState === 'online' ? 'El medio local está fuera de esta cuota.' : 'La fuente remota no está disponible localmente.'}
+                                        {sourceState === 'storage_offline'
+                                            ? 'La unidad o ubicación de almacenamiento no está accesible.'
+                                            : sourceState === 'online'
+                                                ? 'El medio local está fuera de esta cuota.'
+                                                : 'La fuente remota no está disponible localmente.'}
                                     </p>
                                     <p className="text-[11px] leading-relaxed text-white/50">La ficha, el transcript y los timestamps permanecen disponibles. No se redescarga nada automáticamente.</p>
                                     {video.originalUrl && (

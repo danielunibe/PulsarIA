@@ -18,6 +18,16 @@ use tracing::{info, warn};
 /// Keep this as a single contract so a future host configurability change
 /// cannot silently turn the desktop API into a network service.
 pub const API_BIND_HOST: &str = "127.0.0.1";
+const API_CORS_ALLOWED_ORIGINS: [&str; 6] = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3344",
+    "http://127.0.0.1:3344",
+    // Tauri 2 uses this local origin for the bundled Windows WebView.
+    "http://tauri.localhost",
+    // macOS Tauri 2 uses this scheme/host for the bundled WebView.
+    "tauri://localhost",
+];
 
 pub fn validate_api_bind_host(host: &str) -> Result<(), &'static str> {
     if host == API_BIND_HOST {
@@ -205,6 +215,10 @@ async fn ingest_handler(
     State(state): State<ApiState>,
     Json(payload): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>, (StatusCode, String)> {
+    state
+        .queue_service
+        .ensure_processing_authorized()
+        .map_err(|error| (StatusCode::FORBIDDEN, error))?;
     validate_ingest_url(&payload.url).map_err(|error| (StatusCode::BAD_REQUEST, error))?;
 
     if is_collection_source(&payload.url) {
@@ -451,6 +465,10 @@ async fn retry_job_handler(
     State(state): State<ApiState>,
     Path(job_id): Path<i64>,
 ) -> Result<Json<IngestResponse>, (StatusCode, String)> {
+    state
+        .queue_service
+        .ensure_processing_authorized()
+        .map_err(|error| (StatusCode::FORBIDDEN, error))?;
     if state.queue_service.is_active(job_id).await {
         return Ok(Json(IngestResponse {
             job_id,
@@ -458,7 +476,7 @@ async fn retry_job_handler(
         }));
     }
 
-    let job_url = {
+    let (job_url, resume_attempt) = {
         let connection = state
             .job_repo
             .get_connection()
@@ -472,13 +490,27 @@ async fn retry_job_handler(
         let job = crate::db::get_job_by_id(&connection, job_id)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
             .ok_or_else(|| (StatusCode::NOT_FOUND, "Job not found".to_string()))?;
-        if !matches!(
-            job.status.to_lowercase().as_str(),
-            "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
-        ) {
+        let explicitly_resumed = matches!(
+            job.status.to_ascii_lowercase().as_str(),
+            "queued" | "paused"
+        );
+        if !explicitly_resumed
+            && !matches!(
+                job.status.to_lowercase().as_str(),
+                "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
+            )
+        {
             return Err((
                 StatusCode::CONFLICT,
                 "Job is not available for retry".to_string(),
+            ));
+        }
+        if explicitly_resumed
+            && !crate::application::queue_service::retry_budget_allows_resume(job.retry_count)
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                "Retry budget is exhausted; review the job before resuming it".to_string(),
             ));
         }
         let media_root = std::env::var_os("PULSAR_DOWNLOAD_DIR")
@@ -487,12 +519,26 @@ async fn retry_job_handler(
         let processing_root = crate::storage::staging_root(&media_root);
         crate::db::cleanup_media_files(&connection, job_id, &processing_root)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-        crate::db::reset_job_for_retry(&connection, job_id)
-            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-        job.url
+        if explicitly_resumed {
+            crate::db::update_job_status(&connection, job_id, "retrying", 0)
+                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+            (job.url, Some(job.retry_count))
+        } else {
+            crate::db::reset_job_for_retry(&connection, job_id)
+                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+            (job.url, None)
+        }
     };
 
-    if let Err(error) = state.queue_service.dispatch(job_id, job_url).await {
+    let dispatch_result = if let Some(attempt) = resume_attempt {
+        state
+            .queue_service
+            .dispatch_with_attempt(job_id, job_url, attempt)
+            .await
+    } else {
+        state.queue_service.dispatch(job_id, job_url).await
+    };
+    if let Err(error) = dispatch_result {
         // El retry debe ser transaccional desde la perspectiva del usuario:
         // si la cola rechaza el despacho, no dejamos el registro atascado en
         // queued ni obligamos a esperar al scheduler de mantenimiento.
@@ -567,7 +613,7 @@ async fn get_source_collection_items_handler(
             "Database mutex poisoned".to_string(),
         )
     })?;
-    crate::db::get_channel_content_views(&connection, source_id, &channel_kind, 500)
+    crate::db::get_channel_content_views(&connection, source_id, &channel_kind, 0)
         .map(Json)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
 }
@@ -767,12 +813,7 @@ pub async fn start_api_server(port: u16, state: ApiState) {
     let runtime = state.runtime.clone();
     // Configurar CORS para desarrollo Next.js y el servidor estático de producción.
     let cors = CorsLayer::new()
-        .allow_origin([
-            HeaderValue::from_static("http://localhost:3000"),
-            HeaderValue::from_static("http://127.0.0.1:3000"),
-            HeaderValue::from_static("http://localhost:3344"),
-            HeaderValue::from_static("http://127.0.0.1:3344"),
-        ])
+        .allow_origin(API_CORS_ALLOWED_ORIGINS.map(HeaderValue::from_static))
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS, Method::DELETE])
         .allow_headers([
             HeaderName::from_static("content-type"),
@@ -879,7 +920,10 @@ pub async fn start_api_server(port: u16, state: ApiState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_collection_source, validate_api_bind_host, validate_ingest_url, API_BIND_HOST};
+    use super::{
+        is_collection_source, validate_api_bind_host, validate_ingest_url, API_BIND_HOST,
+        API_CORS_ALLOWED_ORIGINS,
+    };
     use crate::api::middleware::security::MAX_URL_LENGTH;
 
     #[test]
@@ -890,6 +934,15 @@ mod tests {
         assert!(validate_api_bind_host("192.168.1.50").is_err());
         assert!(validate_api_bind_host("::").is_err());
         assert!(validate_api_bind_host("::1").is_err());
+    }
+
+    #[test]
+    fn api_cors_allows_only_known_development_and_tauri_origins() {
+        assert!(API_CORS_ALLOWED_ORIGINS.contains(&"http://tauri.localhost"));
+        assert!(API_CORS_ALLOWED_ORIGINS.contains(&"tauri://localhost"));
+        assert!(API_CORS_ALLOWED_ORIGINS.contains(&"http://127.0.0.1:3000"));
+        assert!(!API_CORS_ALLOWED_ORIGINS.contains(&"https://evil.example"));
+        assert_eq!(API_CORS_ALLOWED_ORIGINS.len(), 6);
     }
 
     #[test]

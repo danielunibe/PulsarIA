@@ -2,7 +2,7 @@
     "schemaVersion":  1,
     "manifestKind":  "pulsaria-runtime-resources",
     "productName":  "Pulsaria",
-    "version":  "0.1.0-beta.3",
+    "version":  "0.1.0-beta.4",
     "platform":  "windows-x86_64",
     "resourceRoot":  "resources",
     "generatedBy":  "scripts/generate-runtime-manifest.ps1",
@@ -252,8 +252,8 @@
                                              "sourcePath":  "python-workers/downloader.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  15893,
-                                             "sha256":  "46AFDA74A1911E4FCF00FDF1F0653C665742D45A1E00D6F5289DD8C0841FA324"
+                                             "sizeBytes":  16046,
+                                             "sha256":  "7DB2E6718CA4F6CD77037FF9A899E5C53EF066B8FF749E26041CD2CACBBFF746"
                                          },
                                          {
                                              "path":  "python-workers/embed_query.py",
@@ -292,8 +292,8 @@
                                              "sourcePath":  "python-workers/main.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  15430,
-                                             "sha256":  "026C2E39797503325A5CC3DCFD57001F771565738C7953E828E817ABC9ED159F"
+                                             "sizeBytes":  15456,
+                                             "sha256":  "9101E7AAB98E7DF17448D91B910BC8B8C6896946B9EC36545555543A53A931AB"
                                          },
                                          {
                                              "path":  "python-workers/models.py",
@@ -340,8 +340,8 @@
                                              "sourcePath":  "python-workers/source_scanner.py",
                                              "required":  true,
                                              "status":  "present",
-                                             "sizeBytes":  7888,
-                                             "sha256":  "E904D87FE687F8463BA5C34DE7063D6CC69010CD3D3074F2A33E9F6A23CF27EC"
+                                             "sizeBytes":  8226,
+                                             "sha256":  "42DC480C33ED0C4C56DD63344A20229E00DE7216B2AE907B3F9AB60837932315"
                                          },
                                          {
                                              "path":  "python-workers/transcriber.py",

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { REST_API_BASE } from '@/lib/api-config';
 import { apiFetch, isNativeShell, localApiErrorMessage } from '@/lib/api-client';
+import { resolveAuthorizedAssetUrl } from '@/lib/authorized-assets';
 
 export interface JobRecord {
   id: number;
@@ -96,14 +97,7 @@ export function isFailedJob(job: Pick<JobRecord, 'status'>): boolean {
 }
 
 export async function resolveAssetUrl(localPath: string | undefined): Promise<string | undefined> {
-  if (!localPath) return undefined;
-  if (/^https?:\/\//i.test(localPath) || /^data:/i.test(localPath)) return localPath;
-  try {
-    const { convertFileSrc } = await import('@tauri-apps/api/core');
-    return convertFileSrc(localPath);
-  } catch {
-    return undefined;
-  }
+  return resolveAuthorizedAssetUrl(localPath);
 }
 
 async function invokeTauri<T>(command: string, args?: Record<string, unknown>): Promise<T> {

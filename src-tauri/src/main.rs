@@ -41,6 +41,7 @@
 mod commands;
 mod db;
 mod embedding;
+mod external_links;
 mod process_control;
 mod runtime;
 mod storage;
@@ -163,14 +164,14 @@ async fn main() {
             return;
         }
     };
-    if let Err(error) = db::repair_library(&conn) {
-        tracing::error!("Automatic library reconciliation failed: {}", error);
-    }
     let media_root = if initial_app_settings.download_dir.trim().is_empty() {
         storage::default_media_root()
     } else {
         std::path::PathBuf::from(&initial_app_settings.download_dir)
     };
+    if let Err(error) = db::repair_library(&conn, &media_root) {
+        tracing::error!("Automatic library reconciliation failed: {}", error);
+    }
     if let Err(error) = db::reconcile_storage(&conn, &media_root) {
         tracing::error!("Automatic storage reconciliation failed: {}", error);
     }
@@ -303,6 +304,11 @@ async fn main() {
         search_service.clone(),
         maintenance_lock,
     ));
+    let processing_authorized = commands::has_current_processing_consent();
+    queue_service.set_processing_authorized(processing_authorized);
+    if !processing_authorized {
+        tracing::info!("Processing is waiting for current legal and content-rights consent");
+    }
     match queue_service.resume_pending_jobs().await {
         Ok(resumed) if resumed > 0 => {
             tracing::info!(
@@ -411,7 +417,6 @@ async fn main() {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--background"]),
@@ -718,11 +723,14 @@ async fn main() {
             commands::get_collection_source_activity,
             commands::get_health_events,
             commands::get_api_session_token,
+            commands::open_external_url,
             commands::get_runtime_health,
             commands::get_processing_pause,
             commands::set_processing_pause,
             commands::get_legal_consent,
             commands::save_legal_consent,
+            commands::get_content_rights_consent,
+            commands::set_content_rights_consent,
             commands::get_app_settings,
             commands::save_app_settings,
             commands::get_autostart_status,
@@ -758,6 +766,7 @@ async fn main() {
             commands::record_media_access,
             commands::get_job_artifacts,
             commands::get_generated_outputs,
+            commands::authorize_renderable_asset,
             commands::save_video_frame,
             commands::get_processing_settings,
             commands::set_processing_settings,

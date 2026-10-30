@@ -71,4 +71,4 @@ El archivo registra 23 comandos en `.invoke_handler(tauri::generate_handler![...
 
 ---
 
-*Siguiente documento: [07_AUDITORIA_PIPELINE_PYTHON.md](07_AUDITORIA_PIPELINE_PYTHON.md)*
+*Siguiente documento: [07_AUDITORIA_PIPELINE_PYTHON.md](./07_AUDITORIA_PIPELINE_PYTHON.md)*

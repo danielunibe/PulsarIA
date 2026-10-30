@@ -150,6 +150,7 @@ function Inspector({
   const presentation = presentActivityStatus(job.status, job.progress);
   const isError = isActivityError(job.status);
   const isComplete = isActivityComplete(job.status);
+  const isQueued = job.status.toLowerCase() === 'queued';
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4 custom-scrollbar">
@@ -187,6 +188,12 @@ function Inspector({
         <div className="border-b border-white/[.08] py-4">
           <p className="text-[10px] font-semibold text-[var(--color-status-error)]">{job.error_message || 'Pulsaria no pudo completar este trabajo.'}</p>
           <button type="button" onClick={onRetry} className="mt-3 rounded-lg border border-[var(--color-status-accent)]/35 bg-[var(--color-status-accent)]/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[var(--color-status-error)] hover:bg-[var(--color-status-accent)]/20">Reintentar</button>
+        </div>
+      )}
+      {isQueued && (
+        <div className="border-b border-white/[.08] py-4">
+          <p className="text-[10px] leading-relaxed text-white/55">Este pendiente requiere autorización para continuar después del reinicio.</p>
+          <button type="button" onClick={onRetry} className="mt-3 rounded-lg border border-[var(--color-status-accent)]/35 bg-[var(--color-status-accent)]/10 px-3 py-2 text-[9px] font-black uppercase tracking-wider text-[var(--color-status-accent)] hover:bg-[var(--color-status-accent)]/20">Reanudar</button>
         </div>
       )}
       {isComplete && (

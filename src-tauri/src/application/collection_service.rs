@@ -171,24 +171,56 @@ pub fn register_profile_source(
     profile_input: &str,
     selection: &ProfileSourceSelection,
 ) -> Result<RegisterProfileSourceResult, String> {
+    register_profile_source_with_options(connection, profile_input, selection, false, 0, None)
+}
+
+pub fn register_profile_source_with_options(
+    connection: &rusqlite::Connection,
+    profile_input: &str,
+    selection: &ProfileSourceSelection,
+    auto_enqueue: bool,
+    history_limit: i64,
+    browser: Option<&str>,
+) -> Result<RegisterProfileSourceResult, String> {
     if !selection.is_active() {
         return Err("Selecciona al menos una fuente del perfil".into());
+    }
+    if !(0..=100).contains(&history_limit) {
+        return Err(
+            "Elige todo el contenido disponible o un límite de 1 a 100 videos por fuente".into(),
+        );
     }
     let identity = normalize_tiktok_profile_input(profile_input)
         .ok_or_else(|| "La entrada no corresponde a un perfil TikTok válido".to_string())?;
     let watch = selection.to_watch_config();
     let watch_json = serde_json::to_string(&watch)
         .map_err(|error| format!("No se pudo serializar la selección: {error}"))?;
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
     let (source_id, duplicate) = db::register_profile_source(
-        connection,
+        &transaction,
         &identity.canonical_url,
         &identity.handle,
         &watch_json,
         selection.is_active(),
     )
     .map_err(|error| error.to_string())?;
+    if !duplicate {
+        db::configure_profile_discovery(
+            &transaction,
+            source_id,
+            auto_enqueue,
+            history_limit,
+            browser,
+        )
+        .map_err(|error| error.to_string())?;
+    }
     let source =
-        db::get_collection_source(connection, source_id).map_err(|error| error.to_string())?;
+        db::get_collection_source(&transaction, source_id).map_err(|error| error.to_string())?;
+    db::ensure_profile_channels(&transaction, source_id, &source.watch_config_json)
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
     Ok(RegisterProfileSourceResult { source, duplicate })
 }
 
@@ -198,6 +230,8 @@ pub fn update_profile_source_settings(
     selection: &ProfileSourceSelection,
     auto_enqueue: Option<bool>,
 ) -> Result<db::CollectionSourceRecord, String> {
+    let source =
+        db::get_collection_source(connection, source_id).map_err(|error| error.to_string())?;
     let watch = selection.to_watch_config();
     let watch_json = serde_json::to_string(&watch)
         .map_err(|error| format!("No se pudo serializar la selección: {error}"))?;
@@ -212,7 +246,7 @@ pub fn update_profile_source_settings(
         connection,
         source_id,
         &watch_json,
-        selection.is_active(),
+        source.active && selection.is_active(),
         rules_json.as_deref(),
     )
     .map_err(|error| error.to_string())
@@ -685,6 +719,7 @@ pub async fn connect_tiktok_source(
     history_from: Option<&str>,
     app_handle: tauri::AppHandle,
 ) -> Result<ConnectTikTokSourceResult, String> {
+    queue.ensure_processing_authorized()?;
     let profile_url = tiktok_profile_url(profile_url)
         .ok_or_else(|| "La URL no corresponde a un perfil TikTok válido".to_string())?;
     let source_id = {
@@ -855,6 +890,7 @@ pub async fn sync_collection_source_by_id(
     source_id: i64,
     app_handle: tauri::AppHandle,
 ) -> Result<SourceSyncSummary, String> {
+    queue.ensure_processing_authorized()?;
     let source = {
         let connection = db_connection
             .lock()
@@ -1027,15 +1063,26 @@ pub async fn sync_due_collections(
     };
 
     for source in sources {
-        if sync_collection_source_by_id(
-            db_connection.clone(),
-            queue.clone(),
-            source.id,
-            app_handle.clone(),
-        )
-        .await
-        .is_err()
-        {
+        let result = if source.source_type == "profile" {
+            super::profile_discovery_service::ProfileDiscoveryService::new(
+                db_connection.clone(),
+                queue.clone(),
+                app_handle.clone(),
+            )
+            .discover_profile(source.id, false)
+            .await
+            .map(|_| ())
+        } else {
+            sync_collection_source_by_id(
+                db_connection.clone(),
+                queue.clone(),
+                source.id,
+                app_handle.clone(),
+            )
+            .await
+            .map(|_| ())
+        };
+        if result.is_err() {
             crate::commands::emit_log(
                 &app_handle,
                 format!(

@@ -5,6 +5,8 @@ import type { CinemaVideo, TranscriptChunk } from '@/types';
 import { useSettings } from '@/lib/settings-context';
 import { isTauriRuntime } from '@/hooks/use-processing-settings';
 import { PulsariaIcon } from '@/components/Header';
+import { TikTokOnlinePlayer } from '@/components/TikTokOnlinePlayer';
+import { tiktokPlayerUrl } from '@/lib/tiktok-player';
 import {
     FaBookmark,
     FaChevronLeft,
@@ -115,6 +117,7 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
     const activeChunk = chunks.find((chunk) => currentTime >= chunk.start && currentTime <= chunk.end);
     const comments = current ? commentMap[current.id] ?? [] : [];
     const isPlayable = Boolean(current?.videoSrc) && current?.mediaKind !== 'image';
+    const onlinePlayable = !current?.videoSrc && current?.sourceState === 'online' && Boolean(tiktokPlayerUrl(current?.originalUrl));
     const hue = (320 + index * 47) % 360;
     const cardStep = metrics.step || 1;
 
@@ -544,13 +547,19 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
                                         } else setPlaying(false);
                                     }}
                                 />
+                            ) : cardIndex === index && video.sourceState === 'online' && tiktokPlayerUrl(video.originalUrl) ? (
+                                <div className="cinema-reference__media" onClick={(event) => event.stopPropagation()}>
+                                    <TikTokOnlinePlayer originalUrl={video.originalUrl!} title={video.title || 'Video de TikTok'} playing={playing} muted={muted}
+                                      onStateChange={setPlaying} onTimeChange={(time, length) => { setCurrentTime(time); setDuration(length); }}
+                                      onEnded={() => { if (autoAdvance && index < videos.length - 1) move(1); else setPlaying(false); }} />
+                                </div>
                             ) : (
                                 <div className={`cinema-reference__media cinema-reference__media-image ${settings.videoFit === 'contain' ? 'is-contain' : 'is-cover'}`} style={{ backgroundImage: `url(${video.thumb || '/pulsaria-icon.png'})` }} role="img" aria-label={video.title} />
                             )}
                             <div className="cinema-reference__shade" />
-                            {cardIndex === index && (
+                            {cardIndex === index && !onlinePlayable && (
                                 <div className="cinema-reference__card-overlay">
-                                    <div className="cinema-reference__card-top"><span>{video.sourceState === 'unavailable' ? 'SIN SEÑAL' : video.sourceState === 'online' ? 'ONLINE' : 'LOCAL'}</span><span>{video.duration || '--:--'}</span></div>
+                                    <div className="cinema-reference__card-top"><span>{video.sourceState === 'storage_offline' ? 'UNIDAD DESCONECTADA' : video.sourceState === 'unavailable' ? 'SIN SEÑAL' : video.sourceState === 'online' ? 'ONLINE' : 'LOCAL'}</span><span>{video.duration || '--:--'}</span></div>
                                     {playing && <span className="cinema-reference__play-indicator" aria-hidden="true"><FaPause size={18} /></span>}
                                     {settings.subtitleEnabled && activeChunk && <div className={`cinema-reference__subtitle style-${activeStyle}`}>
                                         {activeStyle === 'karaoke' && activeChunk.words?.length
@@ -581,14 +590,14 @@ export function CinemaPlayback({ videos, initialVideoId, onClose }: CinemaPlayba
                     <span className="cinema-reference__handle">@{current.author || 'biblioteca.local'}</span>
                     <h1>{current.title || 'Video sin título'}</h1>
                     <p>{current.visualAnalysis || current.instructionalGuide || 'Sin descripción disponible.'}</p>
-                    <small>{current.sourceState === 'unavailable' ? 'Fuente no disponible' : current.sourceState === 'online' ? 'Fuente online' : 'Disponible localmente'}</small>
+                    <small>{current.sourceState === 'storage_offline' ? 'Almacenamiento desconectado · ficha conservada' : current.sourceState === 'unavailable' ? 'Fuente no disponible' : current.sourceState === 'online' ? 'Fuente online' : 'Disponible localmente'}</small>
                 </div>}
             </aside>
 
             <div className="cinema-reference__playback-rail" role="group" aria-label="Controles de reproducción">
                 <div className="cinema-reference__rail-group">
                     <button type="button" onClick={() => move(-1)} disabled={index === 0} title="Anterior" aria-label="Video anterior"><FaChevronLeft size={18} /></button>
-                    <button type="button" className="is-play" onClick={togglePlayback} disabled={!isPlayable} title="Play / Pausa" aria-label={playing ? 'Pausar' : 'Reproducir'}>{playing ? <FaPause size={17} /> : <FaPlay size={17} />}</button>
+                    <button type="button" className="is-play" onClick={togglePlayback} disabled={!isPlayable && !onlinePlayable} title="Play / Pausa" aria-label={playing ? 'Pausar' : 'Reproducir'}>{playing ? <FaPause size={17} /> : <FaPlay size={17} />}</button>
                     <button type="button" onClick={() => move(1)} disabled={index === videos.length - 1} title="Siguiente" aria-label="Video siguiente"><FaChevronRight size={18} /></button>
                 </div>
                 <span className="cinema-reference__separator" />

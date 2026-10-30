@@ -11,6 +11,7 @@ import {
   FaCheck
 } from '@/components/icon-library';
 import { useI18n } from '@/lib/i18n';
+import { isNativeShell, openTrustedExternalUrl } from '@/lib/external-links.mjs';
 
 const LEGAL_LINKS = {
   eula: 'https://github.com/danielunibe/PulsarIA/blob/main/EULA.es.md',
@@ -163,6 +164,11 @@ export function LegalConsentModal({ loading, saving, error, onAccept, allowClose
               href={href}
               target="_blank"
               rel="noreferrer"
+              onClick={(event) => {
+                if (!isNativeShell()) return;
+                event.preventDefault();
+                void openTrustedExternalUrl(href);
+              }}
               className="flex items-center justify-between rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] p-3.5 text-xs font-semibold text-white/80 transition-all duration-200 group cursor-pointer focus-visible:bg-white/[0.08] focus-visible:shadow-[0_0_0_2px_rgba(37,244,238,0.4)]"
             >
               <div className="flex items-center gap-2.5 min-w-0">

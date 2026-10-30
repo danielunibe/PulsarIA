@@ -7,6 +7,7 @@ import type { VideoCardProps } from '@/types';
 import { toast } from 'sonner';
 import { useCallback, useState } from 'react';
 import { useSettings } from '@/lib/settings-context';
+import { openTrustedExternalUrl } from '@/lib/external-links.mjs';
 
 // ============================================================
 // VideoCard — Componente Principal de Card de Video
@@ -94,19 +95,8 @@ export function VideoCard({
         event.stopPropagation();
         if (!url || typeof window === 'undefined') return;
 
-        try {
-            const parsed = new URL(url);
-            if (parsed.protocol !== 'https:') throw new Error('Unsupported URL protocol');
-        } catch {
-            toast.error('La URL original no es segura o está incompleta.');
-            return;
-        }
-
-        try {
-            const { open } = await import('@tauri-apps/plugin-shell');
-            await open(url);
-        } catch {
-            window.open(url, '_blank', 'noopener,noreferrer');
+        if (!await openTrustedExternalUrl(url)) {
+            toast.error('La URL original no está autorizada o no se pudo abrir.');
         }
     };
 

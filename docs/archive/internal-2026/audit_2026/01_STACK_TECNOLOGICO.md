@@ -105,7 +105,7 @@ La dependencia @google/genai: ^1.17.0 está en package.json pero **no se encontr
 
 #### Riesgo de instalación:
 - fmpeg debe estar en el PATH del sistema. No hay verificación programática antes de iniciar el pipeline.
-- No hay equirements.lock — versiones no están fijadas, posibles incompatibilidades futuras.
+- No hayequirements.lock — versiones no están fijadas, posibles incompatibilidades futuras.
 
 ---
 
@@ -187,4 +187,4 @@ Con @google/genai ^1.17.0 ya instalado, se pueden agregar:
 
 ---
 
-*Siguiente documento: [02_ARQUITECTURA_SISTEMA.md](02_ARQUITECTURA_SISTEMA.md)*
+*Siguiente documento: [02_ARQUITECTURA_SISTEMA.md](./02_ARQUITECTURA_SISTEMA.md)*

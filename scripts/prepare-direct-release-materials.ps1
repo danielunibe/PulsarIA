@@ -2,6 +2,7 @@
 param([Parameter(Mandatory = $true)][string]$DestinationRoot)
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'file-integrity.ps1')
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $manifest = Get-Content -LiteralPath (Join-Path $projectRoot 'legal/third-party-materials.json') -Raw | ConvertFrom-Json
 if ($manifest.schema_version -ne 1 -or $manifest.review_status -ne 'reviewed' -or @($manifest.files).Count -eq 0) {
@@ -21,7 +22,7 @@ foreach ($file in $manifest.files) {
     }
     $destination = Join-Path $DestinationRoot $name
     Invoke-WebRequest -Uri $uri.AbsoluteUri -OutFile $destination
-    if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -ne [string]$file.sha256) {
+    if ((Get-PulsariaSha256 -Path $destination) -ne [string]$file.sha256) {
         throw "Third-party material checksum mismatch: $name"
     }
 }
