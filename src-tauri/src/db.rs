@@ -3834,6 +3834,7 @@ fn activity_error_code(message: &str) -> String {
     if normalized.contains("[rate_limited]")
         || normalized.contains("http 429")
         || normalized.contains("http error 429")
+        || normalized.contains("status code 429")
         || normalized.contains("too many requests")
         || normalized.contains("rate limit")
     {
@@ -5895,6 +5896,25 @@ mod tests {
         assert_eq!(
             activity_error_code("local job 429 failed"),
             "PIPELINE_FAILED"
+        );
+    }
+
+    #[test]
+    fn update_job_error_persists_rate_limit_code_for_status_429() {
+        let conn = memory_db();
+        conn.execute(
+            "INSERT INTO jobs (url, status) VALUES (?1, 'queued')",
+            ["https://www.tiktok.com/@test/video/429"],
+        )
+        .unwrap();
+        let job_id = conn.last_insert_rowid();
+
+        update_job_error(&conn, job_id, "error", "upstream status code 429").unwrap();
+
+        let events = get_job_activity(&conn, job_id).unwrap();
+        assert_eq!(
+            events.last().and_then(|event| event.error_code.as_deref()),
+            Some("RATE_LIMITED")
         );
     }
 
