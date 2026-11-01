@@ -141,18 +141,34 @@ El instalador NSIS probado reportó SHA-256
 El dispatch con retención también terminó PASS
 ([run 41339471997](https://github.com/danielunibe/PulsarIA/actions/runs/41339471997))
 y conserva el artefacto `pulsaria-p1-04-acceptance-41339471997-1`
-(586,732,312 bytes) para aceptación final. HEAD documental
+(586,732,312 bytes). Ese candidato queda como evidencia histórica, no usarlo
+para aceptación final porque fue superseded por la corrección adicional
+`6196f63e882d5bbb3e760cda99c9807780f9640c`. El commit documental
 `af61015a9f86986fbec430b260d783016a27ea14` pasó canonical
 ([run 41339538599](https://github.com/danielunibe/PulsarIA/actions/runs/41339538599));
 su runtime docs-only 41339538584 terminó correctamente con build/smoke omitidos.
 
+La revisión adicional del registro SQLite halló que QueueService reconocía
+`status code 429`, pero `db::activity_error_code` no lo hacía cuando
+`update_job_error` recibía el mensaje sin prefijo. La regresión
+`update_job_error_persists_rate_limit_code_for_status_429` falló antes del fix
+guardando `PIPELINE_FAILED`; en `6196f63e` persiste `RATE_LIMITED`. La prueba
+focal rate limit pasó 4/4. `npm run verify:mvp` pasó 13/13: Rust 316 PASS,
+0 fallidos, 7 ignorados y 2 filtrados; Python 39 PASS y 1 skip por falta de URL
+TikTok live; seguridad Tauri 7/7 y runtime 54/54.
+
+La CI exacta de `6196f63e882d5bbb3e760cda99c9807780f9640c` está en curso:
+canonical 41344508807, runtime/NSIS 41344508817 y dispatch con retención
+41344562943. El artefacto exacto nuevo queda pendiente de estos runs.
+
 P1-04 permanece **PARTIAL / DOING** y QA-05 **DOING / sin aceptación**. El
-smoke instalado sintético pasa, pero falta la sesión conjunta con Windows limpio,
-unidad física, navegador externo, accesibilidad y live TikTok autorizado. Los
-cuatro criterios de aceptación real de QA-05 siguen incompletos mientras falte
-el dataset propio/autorizado y el ensayo instalado con transcripción inteligible,
-búsqueda, seek, reinicio y negativos. No se usaron medios ni cuentas reales para
-esta revisión.
+smoke instalado sintético de `d71d2750` pasó, pero su instalador queda
+superseded para aceptación final. Falta el nuevo smoke exacto, además de la
+sesión conjunta con Windows limpio, unidad física, navegador externo,
+accesibilidad y live TikTok autorizado. Los cuatro criterios de aceptación real
+de QA-05 siguen incompletos mientras falte el dataset propio/autorizado y el
+ensayo instalado con transcripción inteligible, búsqueda, seek, reinicio y
+negativos. No se usaron medios ni cuentas reales para esta revisión.
 
 ## Gate P1-03 — consistencia de descubrimiento de perfiles — 2026-10-29
 
