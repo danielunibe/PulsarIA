@@ -3831,7 +3831,14 @@ pub fn update_job_error(conn: &Connection, id: i64, status: &str, message: &str)
 
 fn activity_error_code(message: &str) -> String {
     let normalized = message.to_ascii_lowercase();
-    if normalized.contains("spawn") || normalized.contains("python worker") {
+    if normalized.contains("[rate_limited]")
+        || normalized.contains("http 429")
+        || normalized.contains("http error 429")
+        || normalized.contains("too many requests")
+        || normalized.contains("rate limit")
+    {
+        "RATE_LIMITED".to_string()
+    } else if normalized.contains("spawn") || normalized.contains("python worker") {
         "LOCAL_WORKER_START_FAILED".to_string()
     } else if normalized.contains("timed out") || normalized.contains("timeout") {
         "PIPELINE_TIMEOUT".to_string()
@@ -5878,6 +5885,18 @@ pub fn get_channel_content_items(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipeline_rate_limit_errors_keep_their_specific_activity_code() {
+        assert_eq!(
+            activity_error_code("[RATE_LIMITED] HTTP Error 429: Too Many Requests"),
+            "RATE_LIMITED"
+        );
+        assert_eq!(
+            activity_error_code("local job 429 failed"),
+            "PIPELINE_FAILED"
+        );
+    }
 
     #[test]
     fn renderable_asset_paths_require_exact_persisted_media_or_evidence_records() {

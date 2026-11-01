@@ -375,30 +375,7 @@ fn persist_job_error(
     status: &str,
     message: &str,
 ) -> Result<(), String> {
-    let lower = message.to_ascii_lowercase();
-    let category =
-        if lower.contains("cookie") || lower.contains("sign in") || lower.contains("login") {
-            "SESSION_EXPIRED"
-        } else if lower.contains("blocked")
-            || lower.contains("403")
-            || lower.contains("unexpected response")
-        {
-            "TIKTOK_BLOCKED"
-        } else if lower.contains("unavailable")
-            || lower.contains("private")
-            || lower.contains("removed")
-        {
-            "CONTENT_UNAVAILABLE"
-        } else if lower.contains("network")
-            || lower.contains("timed out")
-            || lower.contains("connection")
-        {
-            "NETWORK"
-        } else if lower.contains("yt-dlp") || lower.contains("extractor") {
-            "EXTRACTOR_INCOMPATIBLE"
-        } else {
-            "INTERNAL"
-        };
+    let category = classify_pipeline_error(message);
     let classified = format!("[{}] {}", category, message);
     let result = repo.get_connection().and_then(|connection| {
         let connection = connection
@@ -417,6 +394,76 @@ fn persist_job_error(
         .map_err(|error| error.to_string())
     });
     result
+}
+
+fn classify_pipeline_error(message: &str) -> &'static str {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("cookie") || lower.contains("sign in") || lower.contains("login") {
+        "SESSION_EXPIRED"
+    } else if is_rate_limited_error(&lower) {
+        "RATE_LIMITED"
+    } else if lower.contains("blocked")
+        || lower.contains("403")
+        || lower.contains("unexpected response")
+    {
+        "TIKTOK_BLOCKED"
+    } else if lower.contains("unavailable")
+        || lower.contains("private")
+        || lower.contains("removed")
+    {
+        "CONTENT_UNAVAILABLE"
+    } else if lower.contains("network")
+        || lower.contains("timed out")
+        || lower.contains("connection")
+    {
+        "NETWORK"
+    } else if lower.contains("yt-dlp") || lower.contains("extractor") {
+        "EXTRACTOR_INCOMPATIBLE"
+    } else {
+        "INTERNAL"
+    }
+}
+
+fn is_rate_limited_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("http 429")
+        || lower.contains("http error 429")
+        || lower.contains("status code 429")
+        || lower.contains("too many requests")
+        || lower.contains("rate limit")
+        || lower.contains("rate_limited")
+}
+
+fn retry_after_seconds(message: &str) -> Option<u64> {
+    message.lines().find_map(|line| {
+        let (header, value) = line.split_once(':')?;
+        if !header.trim().eq_ignore_ascii_case("retry-after") {
+            return None;
+        }
+        let value = value.trim();
+        if let Ok(seconds) = value.parse() {
+            return Some(seconds);
+        }
+
+        let deadline = chrono::DateTime::parse_from_rfc2822(value).ok()?;
+        let seconds = deadline.timestamp() - chrono::Utc::now().timestamp();
+        Some(seconds.max(0) as u64)
+    })
+}
+
+fn retry_delay_seconds(message: &str, attempt: u32) -> u64 {
+    let exponential = 2_u64.pow(attempt.min(5));
+    if !is_rate_limited_error(message) {
+        return exponential;
+    }
+
+    const DEFAULT_RATE_LIMIT_DELAY_SECONDS: u64 = 60;
+    const MAX_RETRY_AFTER_SECONDS: u64 = 24 * 60 * 60;
+    exponential.max(
+        retry_after_seconds(message)
+            .unwrap_or(DEFAULT_RATE_LIMIT_DELAY_SECONDS)
+            .min(MAX_RETRY_AFTER_SECONDS),
+    )
 }
 
 fn persist_and_log_job_error(
@@ -1665,7 +1712,7 @@ impl QueueService {
                         return;
                     }
 
-                    let backoff_seconds = 2_u64.pow(message.attempt.min(5));
+                    let backoff_seconds = retry_delay_seconds(&error.to_string(), message.attempt);
                     tokio::time::sleep(Duration::from_secs(backoff_seconds)).await;
                 }
             }
@@ -1845,7 +1892,10 @@ impl QueueService {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_worker_progress, rewrite_visual_artifact_paths, worker_count_for};
+    use super::{
+        classify_pipeline_error, normalize_worker_progress, retry_delay_seconds,
+        rewrite_visual_artifact_paths, worker_count_for,
+    };
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -1856,6 +1906,24 @@ mod tests {
             normalize_worker_progress("completed", 100),
             ("indexing", 99)
         );
+    }
+
+    #[test]
+    fn rate_limited_download_errors_are_classified_and_backed_off() {
+        let without_header = "HTTP Error 429: Too Many Requests";
+        let with_header = "HTTP Error 429: Too Many Requests\nRetry-After: 120";
+
+        assert_eq!(classify_pipeline_error(without_header), "RATE_LIMITED");
+        assert_eq!(retry_delay_seconds(without_header, 1), 60);
+        assert_eq!(retry_delay_seconds(with_header, 1), 120);
+        let retry_date = (chrono::Utc::now() + chrono::Duration::minutes(5))
+            .format("%a, %d %b %Y %H:%M:%S GMT")
+            .to_string();
+        let with_http_date = format!("{without_header}\nRetry-After: {retry_date}");
+        assert!((298..=300).contains(&retry_delay_seconds(&with_http_date, 1)));
+        assert_eq!(retry_delay_seconds("network timeout", 2), 4);
+        assert_eq!(classify_pipeline_error("local job 429 failed"), "INTERNAL");
+        assert_eq!(retry_delay_seconds("local job 429 failed", 1), 2);
     }
 
     #[test]
