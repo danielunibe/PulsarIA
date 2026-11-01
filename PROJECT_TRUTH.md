@@ -4,7 +4,7 @@ Este es el único documento normativo técnico y operativo de Pulsaria. Si otro
 reporte, plan, auditoría o README contradice este archivo, prevalecen el código
 actual, las pruebas reproducidas y esta definición de verdad.
 
-## Gate P1-04 — seguridad Tauri, CSP y recursos locales — 2026-10-29
+## Gate P1-04 — seguridad Tauri, CSP y recursos locales — 2026-11-01
 
 P1-04 queda **PARTIAL / DOING**. El WebView inicia con `assetProtocol.scope`
 vacío; cada archivo renderizable exige referencia exacta persistida y
@@ -51,6 +51,19 @@ decodificar tras reiniciar la app. Esto acredita controles automatizados y ese
 fixture en un runner efímero, no aceptación visual humana ni reproducción en la
 UI con biblioteca real.
 
+El commit `3cf56c0093005f0366680d712d0d2052dab85042` pasó
+[canonical CI, run 41319547431](https://github.com/danielunibe/PulsarIA/actions/runs/41319547431)
+y [runtime bootstrap + smoke NSIS instalado, run 41319547533](https://github.com/danielunibe/PulsarIA/actions/runs/41319547533).
+El runner Windows generó el instalador Beta 4 efímero, SHA-256
+`DA889B4B6DA07D25E0695EA39B54BF6639D0C208CD8B98D24D171E35D2C6303B`;
+instalación/desinstalación devolvieron 0, el manifiesto pasó 54/54, `/health`
+respondió `ok` antes y después del reinicio, y el fixture se limpió. En la
+misma app instalada, el contrato de reparación sintética preservó job y
+referencia al reubicar su carpeta temporal: `local → storage_offline → local`,
+1 ruta inaccesible durante la desconexión simulada, 0 al reconectar,
+`interrupted_jobs=0`, `cleanup=true`, sin error. Es evidencia automatizada de
+una ruta sintética ausente; no es desconexión de hardware ni aceptación humana.
+
 El run previo [40991716168](https://github.com/danielunibe/PulsarIA/actions/runs/40991716168)
 en el SHA `84fa65e60ab462a3e446b41d703e4d71dfd96853` falló en el probe inline
 anterior: el script temporal no produjo resultado de `eval` y el test lo
@@ -59,9 +72,10 @@ corrigió el harness para desactivar el bypass CSP de CDP y comprobar `eval`
 directamente. El run 40996169549 es la evidencia positiva que la reemplaza.
 
 TAURI-02 (reproducción sintética autorizada), TAURI-09 (enforcement CSP
-observado) y TAURI-11 (token/API/CORS desde la UI instalada) tienen PASS
-automatizado en este run. TAURI-01 conserva aceptación visual e interacción
-humana pendiente; TAURI-03 unidad desconectada/`storage_offline`; TAURI-04
+observado), TAURI-11 (token/API/CORS desde la UI instalada) y la transición
+sintética TAURI-03 `local → storage_offline → local` tienen PASS automatizado.
+TAURI-01 conserva aceptación visual e interacción humana pendiente; TAURI-03
+desconexión física de unidad/`storage_offline`; TAURI-04
 TikTok live; TAURI-08 búsqueda/transcripción/frames en la app; TAURI-10 apertura
 real del navegador externo y TAURI-13 teclado, lector y revisión visual siguen
 pendientes/parciales. El ítem de aceptar artefacto exacto en Windows limpio

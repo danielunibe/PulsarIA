@@ -1,6 +1,6 @@
 # Pulsaria Beta 4 — evidencia de Gate P1-04
 
-Fecha de corte: 2026-10-29
+Fecha de corte: 2026-11-01
 Estado: **PARTIAL — permanece en DOING**
 PR: [#3, borrador y abierto](https://github.com/danielunibe/PulsarIA/pull/3)
 
@@ -110,9 +110,29 @@ pruebe `window.eval` directamente. La prueba positiva y exacta es el run
 
 Este smoke demuestra los caminos automatizados con un fixture sintético dentro
 de una instalación efímera. No es aceptación humana de la ventana ni del player
-visual; tampoco ejercita biblioteca real, volumen desconectado, TikTok live,
-búsqueda/transcripción/frames funcionales, apertura de navegador, accesibilidad
-manual ni una instalación Windows limpia destinada a aceptación.
+visual; tampoco ejercita biblioteca real, desconexión física de una unidad,
+TikTok live, búsqueda/transcripción/frames funcionales, apertura de navegador,
+accesibilidad manual ni una instalación Windows limpia destinada a aceptación.
+
+## CI exacta más reciente — instalación NSIS y reparación de almacenamiento
+
+El commit `3cf56c0093005f0366680d712d0d2052dab85042` pasó
+[canonical CI, run 41319547431](https://github.com/danielunibe/PulsarIA/actions/runs/41319547431)
+y [runtime bootstrap + smoke instalado, run 41319547533](https://github.com/danielunibe/PulsarIA/actions/runs/41319547533).
+El runner aislado de Windows generó el NSIS Beta 4 con SHA-256
+`DA889B4B6DA07D25E0695EA39B54BF6639D0C208CD8B98D24D171E35D2C6303B`.
+La instalación y desinstalación devolvieron 0, el runtime instalado pasó
+54/54, `/health` respondió `ok` antes y después del reinicio, el medio sintético
+decodificó de nuevo y la limpieza del fixture finalizó sin error.
+
+El smoke movió únicamente su fixture sintético de una carpeta temporal de
+prueba: verificó `local → storage_offline → local`, preservó la referencia y el
+job, reportó 1 ruta de medio inaccesible durante el estado desconectado y 0 al
+reconectar. `interrupted_jobs=0`, `referencePreserved=true`, `cleanup=true` y
+`error=null`. Esto cubre automatizadamente la lógica instalada de recuperación
+con una ruta sintética no disponible; no equivale a retirar/reconectar una
+unidad física ni a aceptación humana. TAURI-03 y P1-04 siguen abiertos hasta
+esa aceptación y el resto de la matriz pendiente.
 
 ## Matriz de regresión TAURI-01…13
 
@@ -120,7 +140,7 @@ manual ni una instalación Windows limpia destinada a aceptación.
 |---|---|---|
 | 01 — Tauri/Next abre | PARCIAL — smoke automatizado | Se instaló y arrancó la app desde NSIS en `windows-latest`; WebView2 aislado y `/health` `ok` antes/después de reiniciar. No hubo revisión humana de ventana, contenido o interacción visual. |
 | 02 — vídeo local autorizado | PASS automatizado sintético | En NSIS temporal, la UI instalada pidió autorización IPC para el archivo sintético persistido; el no registrado fue denegado; MP4 64×64 decodificó y avanzó 0.48 s, también tras reinicio. No cubre interacción visual con una biblioteca real. |
-| 03 — volumen desconectado | PENDIENTE | Se rechaza el archivo que ya no existe y P0-01 conserva la referencia `storage_offline`; no se desconectó una unidad en QA instalada. |
+| 03 — volumen desconectado | PASS automatizado sintético; unidad física pendiente | El NSIS del run 41319547533 conservó referencia/job y observó `local → storage_offline → local` al reubicar un fixture temporal: 1 ruta inaccesible, luego 0; no se retiró/reconectó una unidad real. |
 | 04 — TikTok embed/streaming | PARCIAL | URL/iframe oficial y guardas de mensajes tienen pruebas; no hubo reproducción online live. |
 | 05 — postMessage falso | PASS automatizado | Prueba TypeScript rechaza origen, source y marcador incorrectos. |
 | 06 — archivo no registrado bajo HOME | PASS automatizado | Scope de inicio vacío y prueba SQLite niega path HOME no registrado; queda pendiente probar la denegación desde una WebView instalada. |
