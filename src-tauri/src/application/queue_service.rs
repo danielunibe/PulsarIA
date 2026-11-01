@@ -447,6 +447,30 @@ fn is_restart_recoverable_status(status: &str) -> bool {
     )
 }
 
+fn normalize_worker_progress(step: &str, progress: i32) -> (&'static str, i32) {
+    let status = match step {
+        "download_started" | "downloading" => "downloading",
+        "audio_extraction" | "audio_extracted" => "processing",
+        "transcription_started" | "transcribing" => "transcribing",
+        "indexing" => "indexing",
+        // Python has finished media analysis, but Rust still persists results
+        // and snapshots the semantic index before the job is truly complete.
+        "completed" | "complete" => "indexing",
+        // The worker reports a failed attempt before the queue applies backoff.
+        // Keep that transient state out of the final-error surface so the UI
+        // cannot race the retry.
+        "error" => "retrying",
+        _ => "processing",
+    };
+    let progress = if matches!(step, "completed" | "complete") {
+        // Keep the UI below 100% until QueueService finishes persistence/indexing.
+        progress.clamp(0, 99)
+    } else {
+        progress
+    };
+    (status, progress)
+}
+
 fn claim_job_once(active_jobs: &mut HashSet<i64>, job_id: i64) -> bool {
     active_jobs.insert(job_id)
 }
@@ -1678,19 +1702,10 @@ impl QueueService {
         let worker_output = tokio::time::timeout(
             Duration::from_secs(JOB_TIMEOUT_SECONDS),
             worker.run_job(job, move |step, progress, metadata| {
-                let normalized = match step {
-                    "download_started" | "downloading" => "downloading",
-                    "audio_extraction" | "audio_extracted" => "processing",
-                    "transcription_started" | "transcribing" => "transcribing",
-                    "indexing" => "indexing",
-                    "completed" | "complete" => "complete",
-                    // The worker reports a failed attempt before the queue
-                    // applies backoff. Keep that transient state out of the
-                    // final-error surface so the UI cannot race the retry.
-                    "error" => "retrying",
-                    _ => "processing",
-                };
-                if let Err(error) = progress_repo.update_status(job_id, normalized, progress) {
+                let (normalized, normalized_progress) = normalize_worker_progress(step, progress);
+                if let Err(error) =
+                    progress_repo.update_status(job_id, normalized, normalized_progress)
+                {
                     if let Ok(mut recorded) = progress_error_for_callback.lock() {
                         if recorded.is_none() {
                             *recorded = Some(format!(
@@ -1830,9 +1845,18 @@ impl QueueService {
 
 #[cfg(test)]
 mod tests {
-    use super::{rewrite_visual_artifact_paths, worker_count_for};
+    use super::{normalize_worker_progress, rewrite_visual_artifact_paths, worker_count_for};
     use serde_json::json;
     use std::path::PathBuf;
+
+    #[test]
+    fn worker_completion_waits_for_queue_indexing_before_publishing_complete() {
+        assert_eq!(normalize_worker_progress("complete", 100), ("indexing", 99));
+        assert_eq!(
+            normalize_worker_progress("completed", 100),
+            ("indexing", 99)
+        );
+    }
 
     #[test]
     fn policy_guarded_scan_child_writes_its_completion_marker() {
