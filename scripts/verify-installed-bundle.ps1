@@ -101,6 +101,9 @@ $webViewDataDir = Join-Path $appDataRoot 'WebView2UserData'
 $dataDir = Join-Path $appDataRoot 'Pulsar Eventide'
 $preservationMarker = Join-Path $dataDir 'settings\mvp-uninstall-preservation.txt'
 $downloadsDir = Join-Path $env:TEMP "pulsaria-current-bundle-downloads-$tag"
+$externalMediaRoot = Join-Path $env:TEMP "pulsaria-current-bundle-external-media-$tag"
+$disconnectedMediaRoot = Join-Path $env:TEMP "pulsaria-current-bundle-disconnected-media-$tag"
+$externalMediaPath = Join-Path $externalMediaRoot 'synthetic-video.mp4'
 $msiLog = Join-Path $installDir 'msiexec.log'
 $baseUrl = "http://127.0.0.1:$ApiPort"
 
@@ -353,6 +356,13 @@ $result = [ordered]@{
     webView2UserDataFolderIsolated = $false
     webViewContract = $null
     webViewRestartContract = $null
+    storageRepairContract = [ordered]@{
+        referenceRelocated = $false
+        localState = $null
+        disconnectedState = $null
+        reconnectedState = $null
+        referencePreserved = $false
+    }
     webViewDebugging = [ordered]@{
         hostElevated = $webViewHostIsElevated
         overrideMode = $null
@@ -551,20 +561,65 @@ try {
     }
 
     function Invoke-InstalledWebViewSmoke {
-        param([ValidateSet('initial', 'restart')][string]$Phase)
+        param(
+            [ValidateSet('initial', 'restart', 'repair')][string]$Phase,
+            [int]$ExpectedInaccessible = -1
+        )
 
         $smokeScript = Join-Path $PSScriptRoot 'tests/installed-webview-smoke.mjs'
-        $smokeOutput = @(& $nodePath $smokeScript `
-            --phase $Phase `
-            --debug-port "$webViewDebugPort" `
-            --api-port "$ApiPort" `
-            --media-path $syntheticMediaPath `
-            --unregistered-media-path $unregisteredMediaPath 2>&1)
+        if ($Phase -eq 'repair' -and $ExpectedInaccessible -lt 0) {
+            throw 'Repair smoke requires an expected inaccessible media path count'
+        }
+        if ($Phase -ne 'repair' -and $ExpectedInaccessible -ge 0) {
+            throw 'ExpectedInaccessible is only valid for the repair smoke phase'
+        }
+        $smokeArguments = @(
+            $smokeScript,
+            '--phase', $Phase,
+            '--debug-port', "$webViewDebugPort",
+            '--api-port', "$ApiPort",
+            '--media-path', $syntheticMediaPath,
+            '--unregistered-media-path', $unregisteredMediaPath
+        )
+        if ($Phase -eq 'repair') {
+            $smokeArguments += @('--expect-inaccessible', "$ExpectedInaccessible")
+        }
+        $smokeOutput = @(& $nodePath @smokeArguments 2>&1)
         $smokeExitCode = $LASTEXITCODE
         if ($smokeExitCode -ne 0) {
             throw "Installed WebView $Phase smoke failed (exit $smokeExitCode): $($smokeOutput -join ' ')"
         }
         return (($smokeOutput -join "`n") | ConvertFrom-Json)
+    }
+
+    function Invoke-SyntheticMediaDatabaseCheck {
+        param(
+            [ValidateSet('set-path', 'verify-state')][string]$Mode,
+            [string]$MediaPath,
+            [int64]$JobId,
+            [ValidateSet('local', 'storage_offline')][string]$ExpectedState
+        )
+
+        $seedScript = Join-Path $PSScriptRoot 'tests/seed-installed-media.py'
+        $arguments = @(
+            $seedScript,
+            '--mode', $Mode,
+            '--database', (Join-Path $dataDir 'library.db'),
+            '--media-path', $MediaPath,
+            '--job-id', "$JobId"
+        )
+        if ($Mode -eq 'verify-state') {
+            if ([string]::IsNullOrWhiteSpace($ExpectedState)) {
+                throw 'State verification requires an expected media state'
+            }
+            $arguments += @('--expected-state', $ExpectedState)
+        }
+        $output = @(& $pythonPath @arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            throw "Synthetic installed media $Mode check failed (exit $exitCode): $($output -join ' ')"
+        }
+        return (($output -join "`n") | ConvertFrom-Json)
     }
 
     $result.webViewContract = Invoke-InstalledWebViewSmoke -Phase initial
@@ -703,6 +758,72 @@ try {
         }
     }
 
+    # Exercise the existing repair_library command with a synthetic reference
+    # outside the configured download root. Moving only this test-owned folder
+    # simulates an unavailable external location without touching user media.
+    New-Item -ItemType Directory -Path $externalMediaRoot -Force | Out-Null
+    Copy-Item -LiteralPath $syntheticMediaPath -Destination $externalMediaPath
+    $relocatedMedia = Invoke-SyntheticMediaDatabaseCheck `
+        -Mode set-path `
+        -MediaPath $externalMediaPath `
+        -JobId ([int64]$seedResult.jobId)
+    if (-not $relocatedMedia.recordedPathMatches -or -not $relocatedMedia.videoExists -or $relocatedMedia.sourceState -ne 'local') {
+        throw 'The isolated installed library did not accept the test-owned external media reference'
+    }
+    $result.storageRepairContract.referenceRelocated = $true
+
+    $localRepair = Invoke-InstalledWebViewSmoke -Phase repair -ExpectedInaccessible 0
+    $localState = Invoke-SyntheticMediaDatabaseCheck `
+        -Mode verify-state `
+        -MediaPath $externalMediaPath `
+        -JobId ([int64]$seedResult.jobId) `
+        -ExpectedState local
+    $result.storageRepairContract.localState = $localState.sourceState
+    if (-not $localState.pathMatches -or -not $localState.videoExists -or $localState.jobStatus -ne 'completed') {
+        throw "repair_library changed the local synthetic media reference or completed job: $($localState | ConvertTo-Json -Compress)"
+    }
+
+    Move-Item -LiteralPath $externalMediaRoot -Destination $disconnectedMediaRoot
+    try {
+        if (Test-Path -LiteralPath $externalMediaPath) {
+            throw 'The simulated external media location remained accessible after isolation'
+        }
+        $offlineRepair = Invoke-InstalledWebViewSmoke -Phase repair -ExpectedInaccessible 1
+        $offlineState = Invoke-SyntheticMediaDatabaseCheck `
+            -Mode verify-state `
+            -MediaPath $externalMediaPath `
+            -JobId ([int64]$seedResult.jobId) `
+            -ExpectedState storage_offline
+        $result.storageRepairContract.disconnectedState = $offlineState.sourceState
+        $result.storageRepairContract.referencePreserved = [bool]$offlineState.pathMatches
+        if (-not $offlineState.pathMatches -or $offlineState.videoExists -or $offlineState.jobStatus -ne 'completed') {
+            throw "repair_library changed the offline synthetic media reference or completed job: $($offlineState | ConvertTo-Json -Compress)"
+        }
+        $result.storageRepairContract.disconnectedReport = $offlineRepair.repair
+    } finally {
+        if (Test-Path -LiteralPath $externalMediaRoot) {
+            throw 'Refusing to overwrite the existing test-owned external media directory during recovery'
+        }
+        if (Test-Path -LiteralPath $disconnectedMediaRoot) {
+            Move-Item -LiteralPath $disconnectedMediaRoot -Destination $externalMediaRoot
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $externalMediaPath -PathType Leaf)) {
+        throw 'The synthetic external media fixture was not restored after the offline repair check'
+    }
+    $reconnectedRepair = Invoke-InstalledWebViewSmoke -Phase repair -ExpectedInaccessible 0
+    $reconnectedState = Invoke-SyntheticMediaDatabaseCheck `
+        -Mode verify-state `
+        -MediaPath $externalMediaPath `
+        -JobId ([int64]$seedResult.jobId) `
+        -ExpectedState local
+    $result.storageRepairContract.reconnectedState = $reconnectedState.sourceState
+    if (-not $reconnectedState.pathMatches -or -not $reconnectedState.videoExists -or $reconnectedState.jobStatus -ne 'completed') {
+        throw "repair_library did not restore the connected synthetic media state: $($reconnectedState | ConvertTo-Json -Compress)"
+    }
+    $result.storageRepairContract.reconnectedReport = $reconnectedRepair.repair
+
     # The uninstaller must remove the application without deleting user data.
     # This marker lives only in the test-owned APPDATA root and is removed by
     # the cleanup block after the preservation assertion.
@@ -768,7 +889,7 @@ try {
     }
 
     $clean = $true
-    foreach ($path in @($installDir, $appDataRoot, $downloadsDir)) {
+    foreach ($path in @($installDir, $appDataRoot, $downloadsDir, $externalMediaRoot, $disconnectedMediaRoot)) {
         Assert-OwnedTempPath $path $tag
         if (Test-Path -LiteralPath $path) {
             try {

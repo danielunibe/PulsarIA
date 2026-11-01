@@ -12,11 +12,17 @@ const debugPort = Number(args.get('--debug-port'));
 const apiPort = Number(args.get('--api-port'));
 const mediaPath = args.get('--media-path');
 const unregisteredMediaPath = args.get('--unregistered-media-path');
+const expectedInaccessible = args.get('--expect-inaccessible');
 
 for (const [name, value] of Object.entries({ phase, debugPort, apiPort, mediaPath, unregisteredMediaPath })) {
   assert.ok(value, `Missing required installed WebView smoke argument: ${name}`);
 }
-assert.ok(['initial', 'restart'].includes(phase), 'Unsupported installed WebView smoke phase');
+assert.ok(['initial', 'restart', 'repair'].includes(phase), 'Unsupported installed WebView smoke phase');
+if (phase === 'repair') {
+  assert.match(expectedInaccessible ?? '', /^\d+$/, 'Repair phase requires a non-negative expected inaccessible path count');
+} else {
+  assert.equal(expectedInaccessible, undefined, '--expect-inaccessible is only valid for the repair phase');
+}
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -145,6 +151,7 @@ try {
   let csp = null;
   let api = null;
   let media = null;
+  let repair = null;
 
   if (phase === 'initial') {
     const cspProbeHost = 'pulsaria-csp-probe.invalid';
@@ -262,7 +269,7 @@ try {
     assert.equal(media.decoded.width, 64, 'Installed video has an unexpected decoded width');
     assert.equal(media.decoded.height, 64, 'Installed video has an unexpected decoded height');
     assert.ok(media.decoded.duration > 0 && media.decoded.currentTime > 0, 'Installed video did not advance during playback');
-  } else {
+  } else if (phase === 'restart') {
     const authorizedPath = JSON.stringify(mediaPath);
     media = await evaluate(`(async () => {
       const internals = window.__TAURI_INTERNALS__;
@@ -287,10 +294,17 @@ try {
     })()`);
     assert.ok(!media.error, `Restarted installed WebView lost its synthetic media reference: ${media.error}`);
     assert.ok(media.readyState >= 2 && media.width === 64 && media.height === 64, 'Restarted installed WebView could not decode the persisted media');
+  } else {
+    repair = await evaluate(`window.__TAURI_INTERNALS__.invoke('repair_library')`);
+    const inaccessible = repair?.inaccessible_media_paths ?? repair?.inaccessibleMediaPaths;
+    assert.ok(Number.isInteger(inaccessible), `Installed repair_library returned no inaccessible path count: ${JSON.stringify(repair)}`);
+    if (expectedInaccessible !== undefined) {
+      assert.equal(inaccessible, Number(expectedInaccessible), 'Installed repair_library reported an unexpected inaccessible path count');
+    }
   }
 
   page = await evaluate(`({ origin: location.origin, readyState: document.readyState, nativeShell: Boolean(window.__TAURI_INTERNALS__) })`);
-  process.stdout.write(`${JSON.stringify({ phase, page, csp, api, media })}\n`);
+  process.stdout.write(`${JSON.stringify({ phase, page, csp, api, media, repair })}\n`);
 } finally {
   socket.close();
 }
