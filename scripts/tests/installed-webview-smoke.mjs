@@ -12,6 +12,10 @@ const debugPort = Number(args.get('--debug-port'));
 const apiPort = Number(args.get('--api-port'));
 const mediaPath = args.get('--media-path');
 const unregisteredMediaPath = args.get('--unregistered-media-path');
+const framePath = args.get('--frame-path');
+const unregisteredFramePath = args.get('--unregistered-frame-path');
+const searchQuery = args.get('--search-query');
+const exerciseExternalOpener = args.get('--exercise-external-opener') === 'true';
 const expectedInaccessible = args.get('--expect-inaccessible');
 
 for (const [name, value] of Object.entries({ phase, debugPort, apiPort, mediaPath, unregisteredMediaPath })) {
@@ -151,6 +155,8 @@ try {
   let csp = null;
   let api = null;
   let media = null;
+  let content = null;
+  let external = null;
   let repair = null;
 
   if (phase === 'initial') {
@@ -269,6 +275,87 @@ try {
     assert.equal(media.decoded.width, 64, 'Installed video has an unexpected decoded width');
     assert.equal(media.decoded.height, 64, 'Installed video has an unexpected decoded height');
     assert.ok(media.decoded.duration > 0 && media.decoded.currentTime > 0, 'Installed video did not advance during playback');
+
+    for (const [name, value] of Object.entries({ framePath, unregisteredFramePath, searchQuery })) {
+      assert.ok(value, `Initial installed content smoke requires ${name}`);
+    }
+    const deniedFramePath = JSON.stringify(unregisteredFramePath);
+    const authorizedFramePath = JSON.stringify(framePath);
+    const query = JSON.stringify(searchQuery);
+    content = await evaluate(`(async () => {
+      const internals = window.__TAURI_INTERNALS__;
+      let unregisteredRejected = false;
+      try {
+        await internals.invoke('authorize_renderable_asset', { path: ${deniedFramePath} });
+      } catch {
+        unregisteredRejected = true;
+      }
+      const authorizedPath = await internals.invoke('authorize_renderable_asset', { path: ${authorizedFramePath} });
+      const image = new Image();
+      image.style.cssText = 'position:fixed;left:-10000px;top:0;width:64px;height:64px';
+      document.body.appendChild(image);
+      const decoded = await new Promise((resolve) => {
+        let finished = false;
+        const finish = (value) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeout);
+          resolve(value);
+        };
+        const timeout = setTimeout(() => finish({ error: 'authorized keyframe decode timed out' }), 12000);
+        image.addEventListener('load', () => finish({ width: image.naturalWidth, height: image.naturalHeight }), { once: true });
+        image.addEventListener('error', () => finish({ error: 'authorized keyframe decode failed' }), { once: true });
+        image.src = internals.convertFileSrc(authorizedPath);
+      });
+      image.remove();
+      const response = await internals.invoke('search_library', {
+        request: { query: ${query}, mode: 'exact', limit: 10, context: null }
+      });
+      const match = (response.results || []).find((item) =>
+        item.primaryMoment?.representation === 'transcript'
+        && String(item.primaryMoment?.excerpt || '').toLowerCase().includes(${query}.toLowerCase())
+      );
+      return {
+        unregisteredRejected,
+        authorizedPathMatches: authorizedPath === ${authorizedFramePath},
+        decoded,
+        lexical: response.capabilities?.lexical === true,
+        resultCount: Array.isArray(response.results) ? response.results.length : 0,
+        transcriptMatch: Boolean(match),
+        matchedRepresentation: match?.primaryMoment?.representation ?? null,
+        matchedThumbnail: match?.primaryMoment?.matchThumbnail ?? null
+      };
+    })()`);
+    assert.equal(content.unregisteredRejected, true, 'Installed IPC authorized an unregistered synthetic keyframe');
+    assert.equal(content.authorizedPathMatches, true, 'Installed IPC changed the exact persisted keyframe path');
+    assert.ok(!content.decoded?.error, `Installed WebView could not decode the persisted keyframe: ${content.decoded?.error}`);
+    assert.ok(content.decoded.width > 0 && content.decoded.height > 0, 'Installed WebView returned empty keyframe dimensions');
+    assert.equal(content.lexical, true, 'Installed unified search did not report lexical search as available');
+    assert.ok(content.resultCount > 0 && content.transcriptMatch, 'Installed unified search did not find the transcribed synthetic fixture');
+    assert.equal(content.matchedRepresentation, 'transcript', 'Installed search returned a non-transcript match for the Whisper fixture');
+    assert.equal(content.matchedThumbnail, framePath, 'Installed search did not preserve the exact keyframe artifact path');
+
+    if (exerciseExternalOpener) {
+      const legalUrl = 'https://github.com/danielunibe/PulsarIA/blob/main/PRIVACY.es.md';
+      external = await evaluate(`(async () => {
+        let unapprovedRejected = false;
+        try {
+          await window.__TAURI_INTERNALS__.invoke('open_external_url', { url: 'https://example.invalid/' });
+        } catch {
+          unapprovedRejected = true;
+        }
+        try {
+          await window.__TAURI_INTERNALS__.invoke('open_external_url', { url: ${JSON.stringify(legalUrl)} });
+          return { unapprovedRejected, approvedUrlDispatched: true };
+        } catch (error) {
+          return { unapprovedRejected, approvedUrlDispatched: false, error: String(error) };
+        }
+      })()`);
+      assert.equal(external.unapprovedRejected, true, 'Installed app accepted an unapproved external URL');
+      assert.equal(external.approvedUrlDispatched, true, `Installed OS opener rejected an approved legal URL: ${external.error || 'unknown error'}`);
+    } else {
+      external = { skipped: true, reason: 'Opening a system browser is exercised only on an isolated CI runner' };
+    }
   } else if (phase === 'restart') {
     const authorizedPath = JSON.stringify(mediaPath);
     media = await evaluate(`(async () => {
@@ -304,7 +391,7 @@ try {
   }
 
   page = await evaluate(`({ origin: location.origin, readyState: document.readyState, nativeShell: Boolean(window.__TAURI_INTERNALS__) })`);
-  process.stdout.write(`${JSON.stringify({ phase, page, csp, api, media, repair })}\n`);
+  process.stdout.write(`${JSON.stringify({ phase, page, csp, api, media, content, external, repair })}\n`);
 } finally {
   socket.close();
 }

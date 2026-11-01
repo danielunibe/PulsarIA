@@ -32,6 +32,7 @@ on:
       - scripts/resolve-installed-bundle.ps1
       - scripts/tests/installed-webview-smoke.mjs
       - scripts/tests/seed-installed-media.py
+      - scripts/tests/process-installed-fixture.py
       - scripts/prepare-tauri-frontend.mjs
       - scripts/stage-direct-release.ps1
       - scripts/verify-direct-release-artifacts.ps1
@@ -111,6 +112,7 @@ jobs:
               'scripts/resolve-installed-bundle.ps1',
               'scripts/tests/installed-webview-smoke.mjs',
               'scripts/tests/seed-installed-media.py',
+              'scripts/tests/process-installed-fixture.py',
               'scripts/prepare-tauri-frontend.mjs',
               'scripts/prepare-runtime-from-pinned-release.ps1',
               'scripts/prepare-runtime.ps1',

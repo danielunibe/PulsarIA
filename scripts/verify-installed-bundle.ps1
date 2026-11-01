@@ -541,8 +541,27 @@ try {
     # isolated runner process; it is never configured in the application.
     $syntheticMediaPath = Join-Path $downloadsDir "pulsaria-installed-smoke-$tag.mp4"
     $unregisteredMediaPath = Join-Path $downloadsDir "pulsaria-unregistered-smoke-$tag.mp4"
+    $syntheticSpeechPath = Join-Path $downloadsDir "pulsaria-installed-speech-$tag.wav"
+    $processedContentPath = Join-Path $downloadsDir "pulsaria-installed-content-$tag.json"
+    $syntheticArtifactsDir = Join-Path $downloadsDir ".pulsaria/artifacts"
+    $syntheticTranscriptDir = Join-Path $downloadsDir ".pulsaria/transcripts"
     $ffmpegPath = Join-Path $installedResourceRoot 'bin/ffmpeg.exe'
-    $ffmpegOutput = @(& $ffmpegPath -hide_banner -loglevel error -f lavfi -i 'color=c=red:s=64x64:r=5' -t 2 -an -c:v libx264 -pix_fmt yuv420p -movflags +faststart -y $syntheticMediaPath 2>&1)
+    Add-Type -AssemblyName System.Speech
+    $speechSynthesizer = [System.Speech.Synthesis.SpeechSynthesizer]::new()
+    try {
+        if ($speechSynthesizer.GetInstalledVoices().Count -lt 1) {
+            throw 'The isolated Windows runner has no speech synthesis voice for the synthetic media fixture'
+        }
+        $speechSynthesizer.SetOutputToWaveFile($syntheticSpeechPath)
+        $speechSynthesizer.Speak('Pulsaria synthetic acceptance test. Blue sky over the quiet valley.')
+        $speechSynthesizer.SetOutputToNull()
+    } finally {
+        $speechSynthesizer.Dispose()
+    }
+    if (-not (Test-Path -LiteralPath $syntheticSpeechPath -PathType Leaf) -or (Get-Item -LiteralPath $syntheticSpeechPath).Length -lt 1000) {
+        throw 'Windows speech synthesis did not produce the test-owned audio fixture'
+    }
+    $ffmpegOutput = @(& $ffmpegPath -hide_banner -loglevel error -f lavfi -i 'color=c=red:s=64x64:r=5' -i $syntheticSpeechPath -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 64k -movflags +faststart -y $syntheticMediaPath 2>&1)
     $ffmpegExitCode = $LASTEXITCODE
     if ($ffmpegExitCode -ne 0 -or -not (Test-Path -LiteralPath $syntheticMediaPath -PathType Leaf)) {
         throw "Could not generate the test-owned synthetic MP4 with packaged FFmpeg (exit $ffmpegExitCode): $($ffmpegOutput -join ' ')"
@@ -558,6 +577,55 @@ try {
     $seedResult = ($seedOutput -join "`n") | ConvertFrom-Json
     if (-not $seedResult.recordedPathMatches -or -not $seedResult.videoExists) {
         throw 'The isolated installed library did not preserve the synthetic video reference'
+    }
+
+    # Run the packaged FFmpeg, Whisper and visual-analysis modules against the
+    # generated audio/video. These outputs and all model writes are confined to
+    # this test-owned TEMP profile and downloads directory.
+    $processFixtureScript = Join-Path $PSScriptRoot 'tests/process-installed-fixture.py'
+    $whisperModelDir = Join-Path $installedResourceRoot 'assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356'
+    [Environment]::SetEnvironmentVariable('PULSAR_RUNTIME_ROOT', $installedResourceRoot, 'Process')
+    [Environment]::SetEnvironmentVariable('PULSAR_DATA_DIR', $dataDir, 'Process')
+    [Environment]::SetEnvironmentVariable('PULSAR_WHISPER_MODEL_DIR', $whisperModelDir, 'Process')
+    [Environment]::SetEnvironmentVariable('PULSAR_DOWNLOAD_DIR', $downloadsDir, 'Process')
+    try {
+        $processingOutput = @(& $pythonPath $processFixtureScript `
+            --resource-root $installedResourceRoot `
+            --video-path $syntheticMediaPath `
+            --transcript-dir $syntheticTranscriptDir `
+            --artifacts-dir $syntheticArtifactsDir `
+            --job-id ([string]$seedResult.jobId) `
+            --output $processedContentPath 2>&1)
+        $processingExitCode = $LASTEXITCODE
+        if ($processingExitCode -ne 0) {
+            throw "Installed synthetic transcription/frame processing failed (exit $processingExitCode): $($processingOutput -join ' ')"
+        }
+        $result.installedContentProcessing = ($processingOutput -join "`n") | ConvertFrom-Json
+    } finally {
+        foreach ($name in @('PULSAR_RUNTIME_ROOT', 'PULSAR_DATA_DIR', 'PULSAR_WHISPER_MODEL_DIR', 'PULSAR_DOWNLOAD_DIR')) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        }
+    }
+
+    $processedContent = Get-Content -LiteralPath $processedContentPath -Raw | ConvertFrom-Json
+    $keyframeArtifact = @($processedContent.visualAnalysis.artifacts | Where-Object { $_.kind -eq 'keyframe' } | Select-Object -First 1)
+    if ($keyframeArtifact.Count -ne 1 -or -not (Test-Path -LiteralPath $keyframeArtifact[0].path -PathType Leaf)) {
+        throw 'The installed visual-analysis worker did not return a persisted synthetic keyframe'
+    }
+    $syntheticFramePath = [string]$keyframeArtifact[0].path
+    $unregisteredFramePath = Join-Path $downloadsDir "pulsaria-unregistered-frame-$tag.jpg"
+    Copy-Item -LiteralPath $syntheticFramePath -Destination $unregisteredFramePath
+    $indexOutput = @(& $pythonPath $seedScript --mode index-content `
+        --database (Join-Path $dataDir 'library.db') `
+        --job-id ([string]$seedResult.jobId) `
+        --content-json $processedContentPath 2>&1)
+    $indexExitCode = $LASTEXITCODE
+    if ($indexExitCode -ne 0) {
+        throw "Could not persist installed synthetic transcript/keyframes for the UI smoke (exit $indexExitCode): $($indexOutput -join ' ')"
+    }
+    $installedContentIndex = ($indexOutput -join "`n") | ConvertFrom-Json
+    if (-not $installedContentIndex.transcriptPersisted -or $installedContentIndex.keyframeCount -lt 1) {
+        throw 'The isolated installed library did not index the real worker transcript and keyframe'
     }
 
     function Invoke-InstalledWebViewSmoke {
@@ -579,8 +647,14 @@ try {
             '--debug-port', "$webViewDebugPort",
             '--api-port', "$ApiPort",
             '--media-path', $syntheticMediaPath,
-            '--unregistered-media-path', $unregisteredMediaPath
+            '--unregistered-media-path', $unregisteredMediaPath,
+            '--frame-path', $syntheticFramePath,
+            '--unregistered-frame-path', $unregisteredFramePath,
+            '--search-query', [string]$installedContentIndex.searchQuery
         )
+        if ($Phase -eq 'initial' -and $env:GITHUB_ACTIONS -eq 'true') {
+            $smokeArguments += @('--exercise-external-opener', 'true')
+        }
         if ($Phase -eq 'repair') {
             $smokeArguments += @('--expect-inaccessible', "$ExpectedInaccessible")
         }

@@ -1,6 +1,7 @@
-"""Seed a test-owned video reference into an isolated installed smoke library."""
+"""Seed test-owned media and derived content into an isolated smoke library."""
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
@@ -14,17 +15,22 @@ def emit(payload: dict[str, object]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--mode", choices=("seed", "verify", "set-path", "verify-state"), required=True
+        "--mode",
+        choices=("seed", "verify", "set-path", "verify-state", "index-content"),
+        required=True,
     )
     parser.add_argument("--database", required=True)
-    parser.add_argument("--media-path", required=True)
+    parser.add_argument("--media-path")
     parser.add_argument("--job-id", type=int)
     parser.add_argument("--expected-state", choices=("local", "storage_offline"))
+    parser.add_argument("--content-json")
     args = parser.parse_args()
 
     if not os.path.isfile(args.database):
         raise RuntimeError("The isolated installed library database does not exist")
-    if args.mode != "verify-state" and not os.path.isfile(args.media_path):
+    if args.mode in ("seed", "verify", "set-path") and not args.media_path:
+        raise RuntimeError("This mode requires a synthetic media path")
+    if args.mode in ("seed", "verify", "set-path") and not os.path.isfile(args.media_path):
         raise RuntimeError("The synthetic video fixture does not exist")
 
     connection = sqlite3.connect(args.database, timeout=30)
@@ -39,7 +45,7 @@ def main() -> int:
             job_id = int(cursor.lastrowid)
             connection.execute(
                 "INSERT INTO media (job_id, title, author, duration, video_path, platform, source_state) "
-                "VALUES (?, 'Synthetic installed smoke video', 'Pulsaria CI', 2, ?, 'synthetic', 'local')",
+                "VALUES (?, 'Synthetic installed smoke video', 'Pulsaria CI', 4, ?, 'synthetic', 'local')",
                 (job_id, args.media_path),
             )
             connection.commit()
@@ -60,6 +66,109 @@ def main() -> int:
                 raise RuntimeError("Could not update exactly one synthetic media reference")
             connection.commit()
             job_id = args.job_id
+
+        elif args.mode == "index-content":
+            if args.job_id is None or not args.content_json:
+                raise RuntimeError("Content indexing requires a job ID and processing result")
+            with open(args.content_json, encoding="utf-8") as result_file:
+                content = json.load(result_file)
+            transcript = str(content.get("transcript", "")).strip()
+            segments = content.get("segments") or []
+            duration = float(content.get("duration") or 0.0)
+            analysis = content.get("visualAnalysis") or {}
+            artifacts = analysis.get("artifacts") or []
+            keyframes = [item for item in artifacts if item.get("kind") == "keyframe"]
+            if not transcript or not segments or not keyframes:
+                raise RuntimeError("Processed synthetic transcript or keyframe output is incomplete")
+            if duration <= 0:
+                raise RuntimeError("Processed synthetic transcript has no positive media duration")
+
+            job = connection.execute(
+                "SELECT jobs.status FROM jobs JOIN media ON media.job_id = jobs.id "
+                "WHERE jobs.id = ? AND jobs.url LIKE 'https://synthetic.invalid/%' "
+                "AND media.platform = 'synthetic'",
+                (args.job_id,),
+            ).fetchone()
+            if job is None:
+                raise RuntimeError("Content indexing refused a job outside the synthetic fixture")
+            connection.execute(
+                "UPDATE media SET duration = ? WHERE job_id = ? AND platform = 'synthetic'",
+                (duration, args.job_id),
+            )
+
+            for index, segment in enumerate(segments):
+                segment_text = str(segment.get("text", "")).strip()
+                if not segment_text:
+                    continue
+                connection.execute(
+                    "INSERT INTO transcript_segments "
+                    "(job_id, segment_index, start_time, end_time, text) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        args.job_id,
+                        index,
+                        float(segment.get("start", 0.0)),
+                        float(segment.get("end", 0.0)),
+                        segment_text,
+                    ),
+                )
+
+            artifact_ids: dict[str, int] = {}
+            for artifact in artifacts:
+                artifact_path = str(artifact.get("path", ""))
+                if not os.path.isfile(artifact_path):
+                    raise RuntimeError("Visual analysis returned a missing synthetic artifact")
+                cursor = connection.execute(
+                    "INSERT INTO media_artifacts "
+                    "(job_id, kind, path, timestamp, label, protected, size_bytes) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        args.job_id,
+                        artifact["kind"],
+                        artifact_path,
+                        artifact.get("timestamp"),
+                        artifact.get("label"),
+                        int(bool(artifact.get("protected", False))),
+                        int(artifact.get("size_bytes", os.path.getsize(artifact_path))),
+                    ),
+                )
+                artifact_ids.setdefault(artifact["kind"], int(cursor.lastrowid))
+
+            first_segment = segments[0]
+            last_segment = segments[-1]
+            cursor = connection.execute(
+                "INSERT INTO search_units "
+                "(job_id, representation, ordinal, text, start_time, end_time, "
+                "artifact_id, provenance_json, source_hash) "
+                "VALUES (?, 'transcript', 0, ?, ?, ?, ?, ?, ?)",
+                (
+                    args.job_id,
+                    transcript,
+                    float(first_segment.get("start", 0.0)),
+                    float(last_segment.get("end", 0.0)),
+                    artifact_ids.get("keyframe") or artifact_ids["poster"],
+                    json.dumps({"source": "whisper"}, separators=(",", ":")),
+                    hashlib.sha256(transcript.encode("utf-8")).hexdigest(),
+                ),
+            )
+            unit_id = int(cursor.lastrowid)
+            connection.execute(
+                "INSERT INTO search_units_fts (rowid, text, representation, job_id) "
+                "VALUES (?, ?, 'transcript', ?)",
+                (unit_id, transcript, args.job_id),
+            )
+            connection.commit()
+            emit(
+                {
+                    "mode": args.mode,
+                    "jobId": args.job_id,
+                    "segmentCount": len(segments),
+                    "artifactCount": len(artifacts),
+                    "keyframeCount": len(keyframes),
+                    "searchQuery": content["searchQuery"],
+                    "transcriptPersisted": True,
+                }
+            )
+            return 0
 
         if args.mode in ("seed", "verify", "set-path"):
             row = connection.execute(
