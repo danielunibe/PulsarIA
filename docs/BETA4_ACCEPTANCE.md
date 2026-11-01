@@ -25,12 +25,12 @@ Registrar en la evidencia privada de aceptación:
 
 | Dato | Valor |
 | --- | --- |
-| Archivo `.exe` y tamaño | Pendiente del artifact de Actions |
-| SHA-256 | Pendiente del artifact de Actions |
-| Tag / commit | `v0.1.0-beta.4` / pendiente |
-| Workflow run / artifact ID | Pendiente |
-| Windows x64 / WebView2 | Pendiente |
-| Fecha / operador | Pendiente |
+| Archivo `.exe` y tamaño | `Pulsaria_0.1.0-beta.4_x64-setup.exe`, dentro del artifact ZIP `pulsaria-p1-04-acceptance-41344562943-1` (586,707,269 bytes; tamaño del `.exe` aún pendiente de extraer) |
+| SHA-256 del `.exe` | `EC096B4876BCD0989E6C6DBCE81DE8A5C31C69C1EC5C3AD171A56C21A43DC15B` |
+| Tag / commit | Sin tag / `6196f63e882d5bbb3e760cda99c9807780f9640c` |
+| Workflow run / artifact ID | [run 41344562943](https://github.com/danielunibe/PulsarIA/actions/runs/41344562943) / `13100120194` |
+| Windows x64 / WebView2 | Smoke instalado aislado PASS en runner de Actions; aceptación final en Windows limpio pendiente |
+| Fecha / operador | 2026-11-01 / runner de GitHub Actions; aceptación por operador humano pendiente |
 
 La aprobación humana se aplica únicamente al hash registrado. Cualquier
 reconstrucción o cambio de archivo invalida la aceptación.
