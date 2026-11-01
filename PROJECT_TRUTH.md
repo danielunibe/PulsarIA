@@ -110,6 +110,24 @@ personales. La evidencia completa y el plan de rollback están en
 [docs/BETA4_P1_04_EVIDENCE.md](./docs/BETA4_P1_04_EVIDENCE.md). PR #3 permanece
 abierto y en borrador; no hay merge, tag, release o publicación autorizados.
 
+## QA-05 — orden de estado e indexación — 2026-11-01
+
+La revisión de `QueueService::run_pipeline` detectó que el evento `completed`
+del worker Python adelantaba `complete/100` mientras Rust aún persistía los
+resultados y actualizaba el índice semántico. En `33e8227650a19d8dbec734362c48b493ad24c5dd`,
+ese evento conserva el estado `indexing/99`; QueueService publica `complete/100`
+solo después de que persistencia, indexación y snapshot terminan correctamente.
+La regresión focal falló antes del arreglo con `complete/100` y pasó después con
+`indexing/99` para los pasos `complete` y `completed`. `cargo fmt --check` y
+`git diff --check` pasan localmente.
+
+La CI canónica 41338256378, el smoke de runtime/NSIS 41338256367 y la ejecución
+manual con retención del instalador 41338355543 siguen pendientes de resultado.
+QA-05 permanece **DOING / sin aceptación**: los cuatro criterios de la tarjeta
+siguen incompletos mientras falta el dataset propio/autorizado y el ensayo real
+instalado con transcripción inteligible, búsqueda, seek, reinicio y negativos.
+No se usaron medios ni cuentas reales para esta revisión.
+
 ## Gate P1-03 — consistencia de descubrimiento de perfiles — 2026-10-29
 
 El gate quedó verificado en `0c1fd6225b998486bf5021fd80ecb7f489b8f268`, después
