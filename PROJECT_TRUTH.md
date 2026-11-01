@@ -63,6 +63,10 @@ referencia al reubicar su carpeta temporal: `local → storage_offline → local
 1 ruta inaccesible durante la desconexión simulada, 0 al reconectar,
 `interrupted_jobs=0`, `cleanup=true`, sin error. Es evidencia automatizada de
 una ruta sintética ausente; no es desconexión de hardware ni aceptación humana.
+En el HEAD documental `5420b636c93adb74ea397e5f18c460e2488fefdf`,
+`npm run verify:frontend-a11y` también terminó PASS. Es un contrato estático
+de alertas, diálogo accesible, etiquetas de tarjetas, foco visible y excepciones
+de imágenes; no es una prueba instalada de teclado/lector ni aceptación visual.
 
 El run previo [40991716168](https://github.com/danielunibe/PulsarIA/actions/runs/40991716168)
 en el SHA `84fa65e60ab462a3e446b41d703e4d71dfd96853` falló en el probe inline

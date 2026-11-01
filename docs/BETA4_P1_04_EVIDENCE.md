@@ -134,6 +134,13 @@ con una ruta sintética no disponible; no equivale a retirar/reconectar una
 unidad física ni a aceptación humana. TAURI-03 y P1-04 siguen abiertos hasta
 esa aceptación y el resto de la matriz pendiente.
 
+`npm run verify:frontend-a11y` terminó **PASS** en el HEAD documental
+`5420b636c93adb74ea397e5f18c460e2488fefdf`. El script comprueba contratos
+estáticos (alerta de error, diálogo `aria-modal`, etiqueta accesible de cards,
+estilo de foco visible y excepciones revisadas para `<img>`); no automatiza
+teclado, lector de pantalla, evaluación visual de la ventana instalada ni
+aceptación humana. Por eso TAURI-13 permanece parcial.
+
 ## Matriz de regresión TAURI-01…13
 
 | Caso | Estado | Evidencia y límite |
