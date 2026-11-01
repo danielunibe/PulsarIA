@@ -82,6 +82,10 @@ def main() -> int:
                 raise RuntimeError("Processed synthetic transcript or keyframe output is incomplete")
             if duration <= 0:
                 raise RuntimeError("Processed synthetic transcript has no positive media duration")
+            # The existing media.duration column and JobRecord contract store
+            # whole seconds (INTEGER/i32), while the worker reports a float.
+            # Keep the fixture faithful to the product's storage contract.
+            stored_duration = max(1, int(duration))
 
             job = connection.execute(
                 "SELECT jobs.status FROM jobs JOIN media ON media.job_id = jobs.id "
@@ -93,7 +97,7 @@ def main() -> int:
                 raise RuntimeError("Content indexing refused a job outside the synthetic fixture")
             connection.execute(
                 "UPDATE media SET duration = ? WHERE job_id = ? AND platform = 'synthetic'",
-                (duration, args.job_id),
+                (stored_duration, args.job_id),
             )
 
             for index, segment in enumerate(segments):
