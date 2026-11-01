@@ -132,12 +132,27 @@ que no son de rate limit. Una espera externa queda limitada a 24 horas.
 Regresiones focales: rate limit 3/3 PASS y completitud/indexación 1/1 PASS;
 `cargo fmt --check` y `git diff --check` PASS.
 
-La CI exacta del SHA `d71d2750` sigue en curso: canonical 41339459352,
-runtime/NSIS 41339459363 y dispatch con retención del instalador 41339471997.
-QA-05 permanece **DOING / sin aceptación**: los cuatro criterios de la tarjeta
-siguen incompletos mientras falta el dataset propio/autorizado y el ensayo real
-instalado con transcripción inteligible, búsqueda, seek, reinicio y negativos.
-No se usaron medios ni cuentas reales para esta revisión.
+La CI exacta del código `d71d2750653c4e46352eebd338a8fa39d8c2d959` terminó
+PASS: [canonical, run 41339459352](https://github.com/danielunibe/PulsarIA/actions/runs/41339459352)
+y [runtime bootstrap + smoke NSIS instalado aislado, run
+41339459363](https://github.com/danielunibe/PulsarIA/actions/runs/41339459363).
+El instalador NSIS probado reportó SHA-256
+`08C1E48A012E5BA6380339165EAE0BDF02AE3D608FF0A61C7EA08F0170DCDAFC`.
+El dispatch con retención también terminó PASS
+([run 41339471997](https://github.com/danielunibe/PulsarIA/actions/runs/41339471997))
+y conserva el artefacto `pulsaria-p1-04-acceptance-41339471997-1`
+(586,732,312 bytes) para aceptación final. HEAD documental
+`af61015a9f86986fbec430b260d783016a27ea14` pasó canonical
+([run 41339538599](https://github.com/danielunibe/PulsarIA/actions/runs/41339538599));
+su runtime docs-only 41339538584 terminó correctamente con build/smoke omitidos.
+
+P1-04 permanece **PARTIAL / DOING** y QA-05 **DOING / sin aceptación**. El
+smoke instalado sintético pasa, pero falta la sesión conjunta con Windows limpio,
+unidad física, navegador externo, accesibilidad y live TikTok autorizado. Los
+cuatro criterios de aceptación real de QA-05 siguen incompletos mientras falte
+el dataset propio/autorizado y el ensayo instalado con transcripción inteligible,
+búsqueda, seek, reinicio y negativos. No se usaron medios ni cuentas reales para
+esta revisión.
 
 ## Gate P1-03 — consistencia de descubrimiento de perfiles — 2026-10-29
 
