@@ -75,15 +75,34 @@ interpretó erróneamente como permitido. El smoke no pasó por esa aserción; s
 corrigió el harness para desactivar el bypass CSP de CDP y comprobar `eval`
 directamente. El run 40996169549 es la evidencia positiva que la reemplaza.
 
+En el commit `8c3b6d9f665374c7ab230793b91b3f79393f8eee`, la CI canónica pasó
+([run 41329400762](https://github.com/danielunibe/PulsarIA/actions/runs/41329400762))
+y el smoke de NSIS instalado aislado pasó
+([run 41329400779](https://github.com/danielunibe/PulsarIA/actions/runs/41329400779)).
+El instalador temporal tuvo SHA-256
+`745A7F4179ABF24C17901A51A81E84E3C3779FC850D76E73096EABB6EA1238DC`;
+instalación/desinstalación devolvieron 0, el manifiesto pasó 54/54, `/health`
+fue `ok` antes y después del reinicio y los datos/perfil WebView2 fueron
+aislados y limpiados. En la misma WebView instalada, TAURI-08 tuvo PASS
+automatizado con medios sintéticos: Whisper creó 2 segmentos, el análisis
+visual creó 24 frames y 6 artefactos, `search_library` encontró la transcripción
+y su thumbnail autorizado, y el frame registrado decodificó mientras una copia
+no registrada fue rechazada. TAURI-10 pasó su dispatch automatizado: la URL no
+aprobada fue rechazada y se envió la URL legal HTTPS exacta al opener. Un smoke
+anterior falló solo porque el fixture de prueba guardó duración fraccionaria en
+el campo SQLite `INTEGER`; el seeder quedó alineado a `max(1, int(duration))`.
+
 TAURI-02 (reproducción sintética autorizada), TAURI-09 (enforcement CSP
-observado), TAURI-11 (token/API/CORS desde la UI instalada) y la transición
-sintética TAURI-03 `local → storage_offline → local` tienen PASS automatizado.
-TAURI-01 conserva aceptación visual e interacción humana pendiente; TAURI-03
-desconexión física de unidad/`storage_offline`; TAURI-04
-TikTok live; TAURI-08 búsqueda/transcripción/frames en la app; TAURI-10 apertura
-real del navegador externo y TAURI-13 teclado, lector y revisión visual siguen
-pendientes/parciales. El ítem de aceptar artefacto exacto en Windows limpio
-sigue pendiente, por lo que la matriz global no certifica P1-04.
+observado), TAURI-11 (token/API/CORS desde la UI instalada), TAURI-08
+(búsqueda/transcripción/frames sintéticos) y TAURI-10 (dispatch automatizado de
+URL permitida) tienen PASS automatizado. TAURI-01 conserva aceptación visual e
+interacción humana pendiente; TAURI-03 desconexión física de unidad;
+TAURI-04 TikTok live; TAURI-08 aceptación visual con biblioteca real; TAURI-10
+confirmación humana del navegador externo; y TAURI-13 teclado, lector y
+revisión visual siguen pendientes/parciales. La ejecución NSIS aislada no es
+aceptación en una instalación Windows limpia del usuario. P1-04 permanece
+**PARTIAL / DOING** hasta las pruebas conjuntas pendientes; la evidencia completa
+está en [docs/BETA4_P1_04_EVIDENCE.md](./docs/BETA4_P1_04_EVIDENCE.md).
 
 No se instalaron ni lanzaron builds de Pulsaria en este equipo. No se usaron
 perfiles TikTok, cookies, credenciales, AppData personal, bibliotecas ni modelos
