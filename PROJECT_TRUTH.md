@@ -157,18 +157,23 @@ focal rate limit pasó 4/4. `npm run verify:mvp` pasó 13/13: Rust 316 PASS,
 0 fallidos, 7 ignorados y 2 filtrados; Python 39 PASS y 1 skip por falta de URL
 TikTok live; seguridad Tauri 7/7 y runtime 54/54.
 
-La CI exacta de `6196f63e882d5bbb3e760cda99c9807780f9640c` está en curso:
-canonical 41344508807, runtime/NSIS 41344508817 y dispatch con retención
-41344562943. El artefacto exacto nuevo queda pendiente de estos runs.
+La CI exacta de `6196f63e882d5bbb3e760cda99c9807780f9640c` terminó PASS:
+[canonical, run 41344508807](https://github.com/danielunibe/PulsarIA/actions/runs/41344508807),
+[runtime + smoke NSIS instalado aislado, run 41344508817](https://github.com/danielunibe/PulsarIA/actions/runs/41344508817)
+y [dispatch con retención, run 41344562943](https://github.com/danielunibe/PulsarIA/actions/runs/41344562943).
+El smoke instalado reportó SHA-256
+`EC096B4876BCD0989E6C6DBCE81DE8A5C31C69C1EC5C3AD171A56C21A43DC15B`.
+El dispatch conservó `pulsaria-p1-04-acceptance-41344562943-1`
+(586,707,269 bytes), asociado al SHA exacto `6196f63e`.
 
 P1-04 permanece **PARTIAL / DOING** y QA-05 **DOING / sin aceptación**. El
-smoke instalado sintético de `d71d2750` pasó, pero su instalador queda
-superseded para aceptación final. Falta el nuevo smoke exacto, además de la
-sesión conjunta con Windows limpio, unidad física, navegador externo,
-accesibilidad y live TikTok autorizado. Los cuatro criterios de aceptación real
-de QA-05 siguen incompletos mientras falte el dataset propio/autorizado y el
-ensayo instalado con transcripción inteligible, búsqueda, seek, reinicio y
-negativos. No se usaron medios ni cuentas reales para esta revisión.
+instalador de `d71d2750` queda superseded; el candidato exacto nuevo pasó el
+smoke aislado y está retenido para la sesión conjunta con Windows limpio,
+unidad física, navegador externo, accesibilidad y live TikTok autorizado. Los
+cuatro criterios de aceptación real de QA-05 siguen incompletos mientras falte
+el dataset propio/autorizado y el ensayo instalado con transcripción
+inteligible, búsqueda, seek, reinicio y negativos. No se usaron medios ni
+cuentas reales para esta revisión.
 
 ## Gate P1-03 — consistencia de descubrimiento de perfiles — 2026-10-29
 
