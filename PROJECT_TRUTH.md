@@ -119,10 +119,21 @@ ese evento conserva el estado `indexing/99`; QueueService publica `complete/100`
 solo después de que persistencia, indexación y snapshot terminan correctamente.
 La regresión focal falló antes del arreglo con `complete/100` y pasó después con
 `indexing/99` para los pasos `complete` y `completed`. `cargo fmt --check` y
-`git diff --check` pasan localmente.
+`git diff --check` pasan localmente. La CI canónica de este SHA terminó PASS en
+el run 41338256378; los smokes de instalador de ese SHA se cancelaron cuando el
+cambio de rate limit avanzó la rama.
 
-La CI canónica 41338256378, el smoke de runtime/NSIS 41338256367 y la ejecución
-manual con retención del instalador 41338355543 siguen pendientes de resultado.
+El mismo audit encontró otro fallo: HTTP 429 se clasificaba como `INTERNAL` y
+recibía el backoff normal de 2/4/8 segundos. En `d71d2750653c4e46352eebd338a8fa39d8c2d959`,
+QueueService clasifica `RATE_LIMITED`, persiste ese código de actividad y
+respeta `Retry-After` numérico o fecha HTTP. Si el worker no lo incluye, espera
+60 segundos; el backoff normal y su clasificación se conservan para errores
+que no son de rate limit. Una espera externa queda limitada a 24 horas.
+Regresiones focales: rate limit 3/3 PASS y completitud/indexación 1/1 PASS;
+`cargo fmt --check` y `git diff --check` PASS.
+
+La CI exacta del SHA `d71d2750` sigue en curso: canonical 41339459352,
+runtime/NSIS 41339459363 y dispatch con retención del instalador 41339471997.
 QA-05 permanece **DOING / sin aceptación**: los cuatro criterios de la tarjeta
 siguen incompletos mientras falta el dataset propio/autorizado y el ensayo real
 instalado con transcripción inteligible, búsqueda, seek, reinicio y negativos.
