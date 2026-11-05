@@ -202,17 +202,30 @@ try {
     api = await evaluate(`(async () => {
       const token = await window.__TAURI_INTERNALS__.invoke('get_api_session_token');
       const base = 'http://127.0.0.1:${apiPort}';
-      const authorized = await fetch(base + '/api/v1/jobs', { headers: { Authorization: 'Bearer ' + token } });
+      const authorizedStatuses = [];
+      let authorized = null;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        try {
+          authorized = await fetch(base + '/api/v1/jobs', { headers: { Authorization: 'Bearer ' + token } });
+          authorizedStatuses.push(authorized.status);
+          if (authorized.status < 500) break;
+        } catch (error) {
+          if (!(error instanceof TypeError)) throw error;
+          authorizedStatuses.push('network');
+        }
+        if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, Math.min(250 * (2 ** attempt), 2000)));
+      }
       const unauthorized = await fetch(base + '/api/v1/jobs');
       return {
         origin: location.origin,
         tokenPresent: typeof token === 'string' && token.length > 0,
-        authorizedStatus: authorized.status,
+        authorizedStatus: authorized?.status ?? null,
+        authorizedStatuses,
         unauthorizedStatus: unauthorized.status
       };
     })()`);
     assert.equal(api.tokenPresent, true, 'Installed UI could not obtain a session token through IPC');
-    assert.equal(api.authorizedStatus, 200, 'Installed UI API request failed with its IPC token or CORS');
+    assert.equal(api.authorizedStatus, 200, `Installed UI API request failed with its IPC token or CORS (attempt statuses: ${api.authorizedStatuses.join(', ')})`);
     assert.ok([401, 403].includes(api.unauthorizedStatus), 'Installed API accepted a request without a session token');
 
     const deniedPath = JSON.stringify(unregisteredMediaPath);
