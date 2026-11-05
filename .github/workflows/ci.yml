@@ -53,6 +53,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Lint failed.' }
           npm run typecheck
           if ($LASTEXITCODE -ne 0) { throw 'TypeScript failed.' }
+          npm run verify:frontend-secrets
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend secret boundary failed.' }
           npm run build
           if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
           npm run verify:frontend-a11y

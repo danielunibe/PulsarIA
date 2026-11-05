@@ -178,26 +178,184 @@ pub async fn generate_local_response(
     state.local_llm.generate(&app_handle, request).await
 }
 
+#[tauri::command]
+pub fn get_ai_provider_config(
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    crate::infrastructure::ai_providers::view_for_config(
+        &crate::infrastructure::ai_providers::load_config()?,
+    )
+}
+
+#[tauri::command]
+pub fn save_ai_provider_profile(
+    profile: crate::infrastructure::ai_providers::AiProviderProfileInput,
+    api_key: Option<String>,
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    let mut config = crate::infrastructure::ai_providers::load_config()?;
+    let previous_config = config.clone();
+    let profile_id = profile
+        .profile_id
+        .unwrap_or_else(|| format!("provider-{:032x}", rand::random::<u128>()));
+    let saved_profile = crate::infrastructure::ai_providers::AiProviderProfile {
+        profile_id: profile_id.clone(),
+        display_name: profile.display_name.trim().to_string(),
+        provider_kind: profile.provider_kind,
+        base_url: profile.base_url.trim().trim_end_matches('/').to_string(),
+        model_id: profile.model_id.trim().to_string(),
+    };
+    crate::infrastructure::ai_providers::save_profile(&mut config, saved_profile)?;
+    crate::infrastructure::ai_providers::save_config(&config)?;
+    if let Some(api_key) = api_key {
+        if let Err(error) = crate::infrastructure::ai_providers::save_api_key(&profile_id, &api_key)
+        {
+            let _ = crate::infrastructure::ai_providers::save_config(&previous_config);
+            return Err(error);
+        }
+    }
+    crate::infrastructure::ai_providers::view_for_config(&config)
+}
+
+#[tauri::command]
+pub fn remove_ai_provider_profile(
+    profile_id: String,
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    let mut config = crate::infrastructure::ai_providers::load_config()?;
+    crate::infrastructure::ai_providers::delete_profile(&mut config, &profile_id)?;
+    crate::infrastructure::ai_providers::remove_api_key(&profile_id)?;
+    crate::infrastructure::ai_providers::save_config(&config)?;
+    crate::infrastructure::ai_providers::view_for_config(&config)
+}
+
+#[tauri::command]
+pub fn remove_ai_provider_api_key(
+    profile_id: String,
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    if !config
+        .profiles
+        .iter()
+        .any(|profile| profile.profile_id == profile_id)
+    {
+        return Err("No se encontró el perfil del proveedor.".into());
+    }
+    crate::infrastructure::ai_providers::remove_api_key(&profile_id)?;
+    crate::infrastructure::ai_providers::view_for_config(&config)
+}
+
+#[tauri::command]
+pub fn set_ai_operation_provider(
+    operation: crate::infrastructure::ai_providers::AiOperation,
+    profile_id: String,
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    let mut config = crate::infrastructure::ai_providers::load_config()?;
+    crate::infrastructure::ai_providers::set_assignment(&mut config, operation, profile_id)?;
+    crate::infrastructure::ai_providers::save_config(&config)?;
+    crate::infrastructure::ai_providers::view_for_config(&config)
+}
+
+#[tauri::command]
+pub async fn get_ai_provider_models(profile_id: String) -> Result<Vec<String>, String> {
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    let profile = config
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == profile_id)
+        .ok_or_else(|| "No se encontró el perfil del proveedor.".to_string())?;
+    crate::infrastructure::ai_providers::list_models(profile).await
+}
+
+#[tauri::command]
+pub async fn test_ai_provider(
+    profile_id: String,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    if profile_id == crate::infrastructure::ai_providers::LOCAL_PROFILE_ID {
+        let status = state.local_llm.status().await;
+        return Ok(match status.state {
+            crate::infrastructure::local_llm::LocalLlmState::Ready => {
+                format!("Modelo local listo · {}", status.model_id)
+            }
+            _ => "El modelo local todavía no está preparado.".into(),
+        });
+    }
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    let profile = config
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == profile_id)
+        .ok_or_else(|| "No se encontró el perfil del proveedor.".to_string())?;
+    crate::infrastructure::ai_providers::test_profile(profile, &state.local_llm, &app_handle).await
+}
+
+#[tauri::command]
+pub async fn generate_ai_for_operation(
+    request: crate::infrastructure::ai_providers::AiTextRequest,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::infrastructure::ai_providers::AiTextResponse, String> {
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    if request
+        .expected_profile_id
+        .as_deref()
+        .is_some_and(|expected| expected != config.assignments.get(&request.operation))
+    {
+        return Err(
+            "La asignación de IA cambió. Revisa el proveedor mostrado y vuelve a solicitarlo."
+                .into(),
+        );
+    }
+    crate::infrastructure::ai_providers::generate_for_operation(
+        &config,
+        request.operation,
+        &request.prompt,
+        request.max_output_tokens,
+        request.analysis_depth.as_deref(),
+        &state.local_llm,
+        &app_handle,
+    )
+    .await
+}
+
 /// Optional cloud synthesis. The API key is read by the native adapter only;
 /// the frontend receives text or a bounded actionable error, never the key.
 #[tauri::command]
 pub async fn generate_gemini_response(
     prompt: String,
     max_output_tokens: u32,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    crate::infrastructure::gemini::generate(&prompt, max_output_tokens)
-        .await
-        .map(|response| response.text)
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    crate::infrastructure::ai_providers::generate_for_operation(
+        &config,
+        crate::infrastructure::ai_providers::AiOperation::SearchSynthesis,
+        &prompt,
+        max_output_tokens,
+        None,
+        &state.local_llm,
+        &app_handle,
+    )
+    .await
+    .map(|response| response.text)
 }
 
 #[tauri::command]
-pub fn get_gemini_status() -> bool {
-    crate::infrastructure::gemini::is_configured()
+pub fn get_gemini_status() -> Result<bool, String> {
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    let Some(profile) = config
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == "gemini")
+    else {
+        return Ok(false);
+    };
+    Ok(crate::infrastructure::ai_providers::api_key_for_profile(profile)?.is_some())
 }
 
 #[tauri::command]
 pub fn set_gemini_api_key(api_key: String) -> Result<(), String> {
-    crate::infrastructure::gemini::set_api_key(&api_key)
+    crate::infrastructure::ai_providers::save_api_key("gemini", &api_key)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -5813,8 +5971,10 @@ pub async fn compile_magazine_source(
     state: State<'_, AppState>,
 ) -> Result<crate::application::editorial_compiler::CompilationOutcome, String> {
     let max_output_tokens = crate::application::editorial_compiler::DEFAULT_MAX_OUTPUT_TOKENS;
-    let provider =
-        crate::application::editorial_provider::EditorialProvider::gemini(max_output_tokens);
+    let provider = crate::application::editorial_provider::EditorialProvider::configured(
+        crate::infrastructure::ai_providers::load_config()?,
+        state.local_llm.clone(),
+    );
     let params = crate::application::editorial_compiler::CompileParams {
         job_id,
         volume_id,
@@ -5837,8 +5997,10 @@ pub async fn compile_multi_source_editorial(
     state: State<'_, AppState>,
 ) -> Result<crate::application::editorial_compiler::CompilationOutcome, String> {
     let max_output_tokens = crate::application::editorial_compiler::DEFAULT_MAX_OUTPUT_TOKENS;
-    let provider =
-        crate::application::editorial_provider::EditorialProvider::gemini(max_output_tokens);
+    let provider = crate::application::editorial_provider::EditorialProvider::configured(
+        crate::infrastructure::ai_providers::load_config()?,
+        state.local_llm.clone(),
+    );
     let params = crate::application::editorial_compiler::MultiSourceCompileParams {
         job_ids,
         volume_id,
@@ -5901,8 +6063,10 @@ pub async fn retry_magazine_compilation(
     state: State<'_, AppState>,
 ) -> Result<crate::application::editorial_compiler::CompilationOutcome, String> {
     let max_output_tokens = crate::application::editorial_compiler::DEFAULT_MAX_OUTPUT_TOKENS;
-    let provider =
-        crate::application::editorial_provider::EditorialProvider::gemini(max_output_tokens);
+    let provider = crate::application::editorial_provider::EditorialProvider::configured(
+        crate::infrastructure::ai_providers::load_config()?,
+        state.local_llm.clone(),
+    );
     crate::application::editorial_compiler::retry_magazine_compilation(
         &state.db,
         &provider,
@@ -6056,7 +6220,13 @@ pub async fn extract_job_recipe(
     job_id: i64,
     state: State<'_, AppState>,
 ) -> Result<crate::domain::recipe::StructuredRecipe, String> {
-    let model_meta = state.local_llm.model_metadata();
+    let ai_config = crate::infrastructure::ai_providers::load_config()?;
+    let recipe_operation = crate::infrastructure::ai_providers::AiOperation::RecipeExtraction;
+    let model_meta = crate::infrastructure::ai_providers::model_metadata(
+        &ai_config,
+        &recipe_operation,
+        &state.local_llm,
+    );
 
     // 1. Construir paquete de evidencia
     let package = {
@@ -6121,8 +6291,11 @@ pub async fn extract_job_recipe(
 
     // 4. Ejecutar RecipeTransformer con Local AI
     let start_time = std::time::Instant::now();
-    let provider =
-        crate::application::local_ai_provider::LocalAiProvider::Sidecar(state.local_llm.clone());
+    let provider = crate::application::local_ai_provider::LocalAiProvider::configured(
+        state.local_llm.clone(),
+        ai_config,
+        recipe_operation,
+    );
     let transformer = crate::application::transformers::recipe::RecipeTransformer::new();
     let recipe = match transformer.transform(&package, &provider).await {
         Ok(r) => r,

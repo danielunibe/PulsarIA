@@ -45,7 +45,7 @@ jsonwebtoken = { version = "10.3.0", default-features = false, features = ["rust
 rand = "0.10.0"
 chrono = "0.4"
 async-trait = "0.1"
-windows-sys = { version = "0.61.2", features = ["Win32_System_SystemInformation", "Win32_Storage_FileSystem", "Win32_Globalization", "Win32_System_Power", "Win32_UI_Input_KeyboardAndMouse"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_System_SystemInformation", "Win32_Storage_FileSystem", "Win32_Globalization", "Win32_System_Power", "Win32_UI_Input_KeyboardAndMouse"] }
 libc = "0.2"
 
 [features]

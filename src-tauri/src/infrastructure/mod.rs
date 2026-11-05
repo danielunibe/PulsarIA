@@ -1,4 +1,5 @@
 pub mod acceleration;
+pub mod ai_providers;
 pub mod benchmark_sidecar;
 pub mod gemini;
 pub mod hardware_probe;
@@ -6,6 +7,7 @@ pub mod local_llm;
 pub mod observability;
 pub mod persistence;
 pub mod scheduler;
+pub mod secret_store;
 pub mod semantic_cache;
 pub mod vector_shards;
 pub mod vram_probe;

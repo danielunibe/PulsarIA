@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
 import { SectionCard, SectionTitle, formatStorageBytes } from './types';
 import { useI18n } from '@/lib/i18n';
-import { FaBrain, FaPlay, FaShieldHalved, FaWandMagicSparkles } from '@/components/icon-library';
+import { FaBrain, FaPlay } from '@/components/icon-library';
 import { JobRecord } from '@/hooks/use-jobs';
 import { LocalLlmStatus } from '@/lib/local-llm';
-import { toast } from 'sonner';
+import { AiProviderManager } from './AiProviderManager';
 
 interface AiTabProps {
     localLlmStatus: LocalLlmStatus | null;
@@ -48,38 +47,6 @@ export function AiTab({
     onClose,
 }: AiTabProps) {
     const { t, locale } = useI18n();
-    const [geminiActive, setGeminiActive] = useState<boolean | null>(null);
-    const [apiKeyInput, setApiKeyInput] = useState('');
-    const [isSavingKey, setIsSavingKey] = useState(false);
-
-    useEffect(() => {
-        if (!isTauri) return;
-        let live = true;
-        import('@tauri-apps/api/core').then(({ invoke }) => {
-            invoke<boolean>('get_gemini_status')
-                .then((status) => { if (live) setGeminiActive(status); })
-                .catch(() => { if (live) setGeminiActive(false); });
-        });
-        return () => { live = false; };
-    }, [isTauri]);
-
-    const handleSaveKey = async () => {
-        const trimmedKey = apiKeyInput.trim();
-        if (!isTauri || !trimmedKey) return;
-        setIsSavingKey(true);
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            await invoke('set_gemini_api_key', { apiKey: trimmedKey });
-            const status = await invoke<boolean>('get_gemini_status');
-            setGeminiActive(status);
-            setApiKeyInput('');
-            toast.success(status ? t('aiKeySet') : t('aiKeyUnset'));
-        } catch (error) {
-            toast.error(t('aiKeyError', { error: error instanceof Error ? error.message : String(error) }));
-        } finally {
-            setIsSavingKey(false);
-        }
-    };
     return (
         <div className="flex flex-col gap-4">
             {/* IA Local llama.cpp */}
@@ -135,63 +102,7 @@ export function AiTab({
                 </div>
             </SectionCard>
 
-            {/* Síntesis Nube Gemini */}
-            <SectionCard className="flex flex-col gap-3">
-                <div className="flex items-start justify-between gap-3">
-                    <SectionTitle icon={FaWandMagicSparkles} label={t('aiGemini')} />
-                    <span className={`rounded-full px-2.5 py-0.5 text-[8px] font-black uppercase tracking-wider ${
-                        geminiActive
-                            ? 'bg-emerald-500/15 text-emerald-400'
-                            : 'bg-white/10 text-white/40'
-                    }`}>
-                        {geminiActive ? t('aiActiveMemory') : t('aiNotConfigured')}
-                    </span>
-                </div>
-                <p className="text-[10px] leading-relaxed text-white/50">
-                    {t('aiGeminiDesc')} <code className="font-mono text-white/80 bg-black/40 px-1 py-0.5 rounded">PULSAR_GOOGLE_API_KEY</code>{t('aiGeminiDesc2')}
-                </p>
-                <div className="flex items-center gap-2 rounded-[14px] bg-black/35 p-2 shadow-inner">
-                    <input
-                        type="password"
-                        value={apiKeyInput}
-                        onChange={(e) => setApiKeyInput(e.target.value)}
-                        placeholder={geminiActive ? t('aiKeyPlaceholderOn') : t('aiKeyPlaceholderOff')}
-                        className="flex-1 bg-transparent px-2 text-xs font-mono text-white outline-none placeholder:text-white/25"
-                    />
-                    <button
-                        type="button"
-                        onClick={handleSaveKey}
-                        disabled={isSavingKey || !apiKeyInput.trim()}
-                        className="rounded-xl bg-white/10 hover:bg-white/15 px-3 py-1.5 text-[9px] font-bold text-white transition-all cursor-pointer disabled:opacity-40"
-                    >
-                        {isSavingKey ? t('aiSaving') : t('aiSet')}
-                    </button>
-                    {geminiActive && (
-                        <button
-                            type="button"
-                            onClick={async () => {
-                                if (!isTauri) return;
-                                try {
-                                    setApiKeyInput('');
-                                    const { invoke } = await import('@tauri-apps/api/core');
-                                    await invoke('set_gemini_api_key', { apiKey: '' });
-                                    setGeminiActive(false);
-                                    toast.success(t('aiKeyRemoved'));
-                                } catch (error) {
-                                    toast.error(t('aiKeyError', { error: error instanceof Error ? error.message : String(error) }));
-                                }
-                            }}
-                            className="rounded-xl bg-rose-500/10 hover:bg-rose-500/20 px-2.5 py-1.5 text-[9px] font-bold text-rose-400 transition-all cursor-pointer"
-                        >
-                            {t('aiRemove')}
-                        </button>
-                    )}
-                </div>
-                <div className="flex items-center gap-2 text-[9px] text-white/40">
-                    <FaShieldHalved size={10} className="text-[#25f4ee]" />
-                    <span>{t('aiKeyPrivacy')}</span>
-                </div>
-            </SectionCard>
+            <AiProviderManager isTauri={isTauri} localModelState={localLlmStatus?.state || (locale === 'en-US' ? 'checking' : 'revisando')} />
 
             {/* Clustering Semántico & Grafos */}
             <SectionCard className="flex flex-col gap-4">

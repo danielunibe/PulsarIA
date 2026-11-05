@@ -25,6 +25,11 @@ interface SpotlightSearchProps {
     searchError: string | null;
     aiAnswer: string | null;
     aiError: string | null;
+    assistantProviderName: string;
+    assistantRouteLocal: boolean;
+    assistantRouteStatus: 'loading' | 'ready' | 'error';
+    assistantSynthesisLoading: boolean;
+    onRequestAssistantSynthesis: () => void;
     onResultClick: (result: UnifiedSearchResultGroup) => void;
 }
 
@@ -41,6 +46,11 @@ export function SpotlightSearch({
     searchError,
     aiAnswer,
     aiError,
+    assistantProviderName,
+    assistantRouteLocal,
+    assistantRouteStatus,
+    assistantSynthesisLoading,
+    onRequestAssistantSynthesis,
     onResultClick,
 }: SpotlightSearchProps) {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -168,6 +178,15 @@ export function SpotlightSearch({
                             aria-label="Buscar en tu biblioteca"
                             className="w-full min-w-0 bg-transparent text-base font-medium text-white outline-none placeholder:text-white/35 sm:text-lg"
                         />
+                        <p className="mt-1 text-[8px] leading-relaxed text-white/35">
+                            {assistantRouteStatus === 'loading'
+                                ? 'Verificando la ruta de IA. La búsqueda de biblioteca no enviará contenido a la nube.'
+                                : assistantRouteStatus === 'error'
+                                    ? 'No se pudo verificar la ruta de IA; no se enviará contexto a un proveedor.'
+                                    : assistantRouteLocal
+                                        ? 'La consulta y la síntesis se procesan localmente.'
+                                        : `La búsqueda de biblioteca es local. Solo si eliges Sintetizar, ${assistantProviderName} recibirá hasta cinco fragmentos.`}
+                        </p>
                     </div>
                     {query && (
                         <button
@@ -233,6 +252,17 @@ export function SpotlightSearch({
                             </div>
                             <p className="mt-2 text-xs leading-relaxed text-white/85">{aiAnswer}</p>
                         </div>
+                    )}
+
+                    {searchResults && searchResults.length > 0 && assistantRouteStatus === 'ready' && !assistantRouteLocal && !aiAnswer && (
+                        <section className="mb-3 flex flex-col gap-3 rounded-2xl border border-amber-200/15 bg-amber-200/[0.04] p-3 sm:flex-row sm:items-center sm:justify-between">
+                            <p className="text-[10px] leading-relaxed text-white/60">
+                                Síntesis con <strong className="text-amber-100/80">{assistantProviderName}</strong>: al solicitarla se enviarán tu consulta y hasta cinco fragmentos de estos resultados.
+                            </p>
+                            <button type="button" onClick={onRequestAssistantSynthesis} disabled={assistantSynthesisLoading} className="shrink-0 rounded-xl border border-amber-100/20 bg-amber-100/[0.08] px-3 py-2 text-[9px] font-bold uppercase tracking-wider text-amber-50/80 hover:bg-amber-100/[0.13] disabled:opacity-40">
+                                {assistantSynthesisLoading ? 'Generando…' : `Sintetizar · ${assistantProviderName}`}
+                            </button>
+                        </section>
                     )}
 
                     {searchResults !== null && !isSearching && !searchError && (

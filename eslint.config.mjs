@@ -67,6 +67,8 @@ export default defineConfig([
         // frontend source. Avoid traversing them on every canonical lint run.
         "src-tauri/resources/**",
         "data/**",
+        // The public website has its own Vite toolchain and lint/build scope.
+        "website/**",
     ]),
     {
         ...sharedConfig,

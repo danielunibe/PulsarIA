@@ -12,7 +12,7 @@ import {
     FaTerminal, FaCode, FaCheck, FaRotateLeft, FaStar, FaThumbtack,
     FaCamera, FaFilm
 } from '@/components/icon-library';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useSemanticIO } from '@/hooks/useSemanticIO';
@@ -132,7 +132,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
     const [loadingTranscript, setLoadingTranscript] = useState(Boolean(video.id));
     const [transcriptError, setTranscriptError] = useState<string | null>(null);
     const [transcriptLoadAttempt, setTranscriptLoadAttempt] = useState(0);
-    const [activeTab, setActiveTab] = useState<DetailTab>('transcript');
+    const [activeTab, setActiveTab] = useState<DetailTab>('karaoke');
     const [filterQuery, setFilterQuery] = useState('');
     const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
     const handleTabKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -564,12 +564,19 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
         if (!videoRef.current) return;
         const seekTime = (Number(e.target.value) / 100) * (videoRef.current.duration || rawDuration);
         videoRef.current.currentTime = seekTime;
+        setRawCurrentTime(seekTime);
+        setCurrentTime(formatCleanTime(seekTime));
         setProgress(Number(e.target.value));
     };
 
     const seekToSecond = (sec: number) => {
         if (!videoRef.current) return;
-        videoRef.current.currentTime = sec;
+        const maxDuration = videoRef.current.duration || rawDuration;
+        const nextTime = Math.max(0, maxDuration > 0 ? Math.min(maxDuration, sec) : sec);
+        videoRef.current.currentTime = nextTime;
+        setRawCurrentTime(nextTime);
+        setCurrentTime(formatCleanTime(nextTime));
+        setProgress(maxDuration > 0 ? (nextTime / maxDuration) * 100 : 0);
         if (!isPlaying) {
             videoRef.current.play().then(() => setIsPlaying(true)).catch((error) => {
                 console.warn('Video autoplay was blocked:', error);
@@ -754,7 +761,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                 role="dialog"
                 aria-modal="true"
                 aria-label={t('detailDialogLabel')}
-                className="pulsaria-detail-modal w-full max-w-[1240px] h-[88vh] min-h-0 max-h-[calc(100vh-2rem)] rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-[0_25px_80px_rgba(0,0,0,0.9)] border border-white/10 relative"
+                className="pulsaria-detail-modal w-full max-w-[1360px] h-[88vh] min-h-0 max-h-[calc(100vh-2rem)] rounded-3xl overflow-hidden flex flex-col lg:flex-row shadow-[0_25px_80px_rgba(0,0,0,0.9)] border border-white/10 relative"
                 style={{
                     background: 'linear-gradient(145deg, rgba(16,18,27,0.98) 0%, rgba(8,10,15,0.99) 100%)',
                     boxShadow: '0 30px 90px rgba(0,0,0,0.9)'
@@ -767,15 +774,12 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                     : { type: 'spring', damping: 28, stiffness: 350 }}
             >
                 {/* ── Left Column: Video Cinema Player ── */}
-                <div className="pulsaria-detail-media-pane w-full md:w-[48%] h-[42%] min-h-0 md:h-full flex flex-col bg-black/60 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
+                <div className="pulsaria-detail-media-pane w-full lg:w-[54%] h-[42%] min-h-0 lg:h-full flex flex-col bg-black/20 relative border-r border-white/10 p-5 shrink-0 overflow-hidden">
                     {/* Compact metadata header */}
                     <div className="flex items-center justify-between gap-3 mb-3.5 shrink-0">
                         <div className="flex items-center gap-2">
                             <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-medium tracking-wide backdrop-blur-md ${sourceState === 'local' ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : sourceState === 'online' ? 'border-sky-400/20 bg-sky-400/10 text-sky-300' : 'border-amber-400/20 bg-amber-400/10 text-amber-200'}`}>
                                 {sourceStateLabel}
-                            </span>
-                            <span className="text-[11px] font-mono text-white/40 bg-white/[0.04] px-2 py-0.5 rounded-md border border-white/5">
-                                #{video.id}
                             </span>
                         </div>
                         <div className="flex items-center gap-1.5">
@@ -803,12 +807,12 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                     </div>
 
                     {/* Video Player Shell with Ambient Glow */}
-                    <div className="pulsaria-detail-video-viewport group/viewport flex-1 min-h-0 rounded-2xl overflow-hidden relative bg-black/90 flex items-center justify-center shadow-2xl border border-white/[0.06]">
+                    <div className="pulsaria-detail-video-viewport group/viewport flex-1 min-h-0 rounded-2xl overflow-hidden relative bg-[#11131b]/40 flex items-center justify-center shadow-2xl border border-white/[0.08]">
                         {/* Ambient Backdrop Blur: el propio video tiñe el fondo, cero bandas negras */}
                         {video.thumb && (
                             <div
                                 aria-hidden="true"
-                                className="absolute inset-0 bg-cover bg-center filter blur-3xl scale-125 opacity-65 transition-opacity duration-700 pointer-events-none select-none"
+                                className="absolute inset-0 bg-cover bg-center filter blur-2xl scale-110 opacity-75 transition-opacity duration-700 pointer-events-none select-none"
                                 style={{ backgroundImage: `url(${video.thumb})` }}
                             />
                         )}
@@ -819,7 +823,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                                 ref={videoRef}
                                 src={video.videoSrc}
                                 poster={video.thumb}
-                                className="pulsaria-detail-video relative z-10 block h-full w-full rounded-xl object-contain transition-all"
+                                className="pulsaria-detail-video relative z-10 block h-full w-full object-contain transition-all"
                                 playsInline
                                 loop
                                 autoPlay
@@ -833,17 +837,7 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                                 }}
                                 onPlay={() => setIsPlaying(true)}
                                 onPause={() => setIsPlaying(false)}
-                                onClick={togglePlay}
                             />
-                            {/* Capa hover-reveal: solo aparece con cursor o foco, sale elegante */}
-                            <div
-                                aria-hidden="true"
-                                className="pulsaria-detail-veil pointer-events-none absolute inset-0 z-20 flex items-center justify-center opacity-0 translate-y-1 transition-all duration-300 ease-out group-hover/viewport:opacity-100 group-hover/viewport:translate-y-0 group-focus-within/viewport:opacity-100 group-focus-within/viewport:translate-y-0"
-                            >
-                                <span className="flex h-16 w-16 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white backdrop-blur-md shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
-                                    {isPlaying ? <FaPause size={18} /> : <FaPlay size={18} className="ml-1" />}
-                                </span>
-                            </div>
                             </>
                         ) : onlinePlayable ? (
                             <TikTokOnlinePlayer originalUrl={video.originalUrl!} title={video.title || 'Video de TikTok'} />
@@ -959,22 +953,23 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                         </div>
                     )}
 
-                    {/* Video Info Summary Footer */}
-                    <div className="pulsaria-detail-meta mt-3 pt-3 border-t border-white/[0.08] flex flex-col gap-1 shrink-0">
-                        <h3 className="text-white font-semibold text-sm truncate" title={video.title}>
-                            {video.title || `TikTok Video #${video.id}`}
-                        </h3>
-                        <div className="flex items-center justify-between text-xs text-white/50">
-                            <span className="truncate">Por <strong className="text-white/80 font-medium">@{video.author || "desconocido"}</strong></span>
-                            <span className="shrink-0 text-[10px] bg-white/[0.04] px-2 py-0.5 rounded border border-white/5 font-mono text-white/60">
-                                {video.duration}
-                            </span>
-                        </div>
-                    </div>
                 </div>
 
                 {/* ── Right Column: AAA Inspector, Transcript & Export ── */}
-                <div className="pulsaria-detail-inspector w-full md:w-[52%] h-[58%] min-h-0 md:h-full flex flex-col p-5 bg-[#0b0d14]/95 overflow-hidden relative">
+                <div className="pulsaria-detail-inspector w-full lg:w-[46%] h-[58%] min-h-0 lg:h-full flex flex-col p-5 bg-[#0b0d14]/95 overflow-hidden relative">
+                    <div className="mb-3 flex min-w-0 items-start justify-between gap-3 border-b border-white/[0.07] pb-3">
+                        <div className="min-w-0">
+                            <h2 className="truncate text-sm font-semibold text-white" title={video.title || `TikTok Video #${video.id}`}>
+                                {video.title || `TikTok Video #${video.id}`}
+                            </h2>
+                            <div className="mt-1 flex min-w-0 items-center gap-2 text-[10px] text-white/45">
+                                <span className="truncate">@{video.author || 'desconocido'}</span>
+                                <span aria-hidden="true" className="text-white/20">·</span>
+                                <span className="shrink-0 font-mono">{video.duration}</span>
+                            </div>
+                        </div>
+                        <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[8px] text-white/45">#{video.id}</span>
+                    </div>
                     {/* Header Action Row */}
                     <div className="pulsaria-detail-inspector-header flex min-w-0 items-center justify-between gap-3 pb-3 border-b border-white/[0.08] shrink-0">
                         {/* Tab Switcher - Apple Segmented Control */}
@@ -1255,19 +1250,22 @@ export function ExpandedVideoModal({ video, onClose, onOpenCinema, initialTime, 
                                                 {words.length > 0 ? (
                                                     <p className="pulsaria-karaoke-words text-[15px] leading-[2]">
                                                         {words.map((word, wordIndex) => {
-                                                            const spoken = !transcriptOnly && rawCurrentTime >= word.start;
+                                                            const isCurrentWord = !transcriptOnly && rawCurrentTime >= word.start && rawCurrentTime < word.end;
+                                                            const isCompletedWord = !transcriptOnly && rawCurrentTime >= word.end;
                                                             return (
+                                                                <Fragment key={`${word.start}-${word.end}-${wordIndex}`}>
+                                                                {wordIndex > 0 ? ' ' : null}
                                                                 <button
-                                                                    key={`${word.start}-${word.end}-${wordIndex}`}
                                                                     type="button"
                                                                     disabled={transcriptOnly}
                                                                     onClick={() => seekToSecond(word.start)}
                                                                     title={transcriptOnly ? t('karaokeNoVideo') : t('karaokeSkipWord', { word: word.word, time: formatPreciseTime(word.start) })}
                                                                     aria-label={transcriptOnly ? word.word : t('karaokeSkipWord', { word: word.word, time: formatPreciseTime(word.start) })}
-                                                                    className={`pulsaria-karaoke-word ${spoken ? 'is-spoken' : ''} ${transcriptOnly ? 'cursor-default' : 'cursor-pointer'}`}
+                                                                    className={`pulsaria-karaoke-word ${isCompletedWord ? 'is-spoken' : ''} ${isCurrentWord ? 'is-current' : ''} ${transcriptOnly ? 'cursor-default' : 'cursor-pointer'}`}
                                                                 >
                                                                     {word.word}
                                                                 </button>
+                                                                </Fragment>
                                                             );
                                                         })}
                                                     </p>

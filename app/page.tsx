@@ -26,6 +26,7 @@ import { useSettings } from '@/lib/settings-context';
 import { useI18n } from '@/lib/i18n';
 import { generateChatResponse } from '@/lib/local-llm';
 import { generateGeminiChatResponse } from '@/lib/gemini';
+import { getAiProviderConfig } from '@/lib/ai-providers';
 import { useJobs, type JobRecord, type SubmitLinksResult, isCompletedJob, isFailedJob } from '@/hooks/use-jobs';
 import type { SourceCollectionRecord } from '@/hooks/usePlaylists';
 import { isTauriRuntime, useProcessingSettings } from '@/hooks/use-processing-settings';
@@ -58,6 +59,13 @@ type SearchVideoDetails = VideoData & {
     pinned?: boolean;
     protected?: boolean;
 };
+
+interface AiRouteDisclosure {
+    profileId: string;
+    displayName: string;
+    local: boolean;
+    status: 'loading' | 'ready' | 'error';
+}
 
 const ExpandedVideoModal = dynamic(
     () => import('@/components/ExpandedVideoModal').then((mod) => mod.ExpandedVideoModal),
@@ -213,10 +221,13 @@ export default function Page() {
     const [searchError, setSearchError] = useState<string | null>(null);
     const [aiAnswer, setAiAnswer] = useState<string | null>(null);
     const [aiError, setAiError] = useState<string | null>(null);
+    const [aiSynthesisLoading, setAiSynthesisLoading] = useState(false);
+    const [assistantRoute, setAssistantRoute] = useState<AiRouteDisclosure>({ profileId: '', displayName: '', local: false, status: 'loading' });
     const [lastSearchQuery, setLastSearchQuery] = useState('');
-    const [geminiAnswer, setGeminiAnswer] = useState<string | null>(null);
-    const [geminiError, setGeminiError] = useState<string | null>(null);
-    const [geminiLoading, setGeminiLoading] = useState(false);
+    const [searchSynthesisAnswer, setSearchSynthesisAnswer] = useState<string | null>(null);
+    const [searchSynthesisError, setSearchSynthesisError] = useState<string | null>(null);
+    const [searchSynthesisLoading, setSearchSynthesisLoading] = useState(false);
+    const [searchSynthesisRoute, setSearchSynthesisRoute] = useState<AiRouteDisclosure>({ profileId: '', displayName: '', local: false, status: 'loading' });
 
     const [isSearching, setIsSearching] = useState(false);
     const [spotlightOpen, setSpotlightOpen] = useState(false);
@@ -258,6 +269,49 @@ export default function Page() {
             // Search remains usable when preference storage is unavailable.
         }
     }, [searchMode, searchModeHydrated]);
+
+    useEffect(() => {
+        let mounted = true;
+        const loadRoutes = async () => {
+            if (!nativeShell) {
+                if (mounted) {
+                    setAssistantRoute({ profileId: '', displayName: '', local: false, status: 'error' });
+                    setSearchSynthesisRoute({ profileId: '', displayName: '', local: false, status: 'error' });
+                }
+                return;
+            }
+            try {
+                const config = await getAiProviderConfig();
+                if (!mounted) return;
+                const resolveRoute = (profileId: string): AiRouteDisclosure => {
+                    if (profileId === config.localProfileId) {
+                        return { profileId, displayName: 'Llama.cpp local', local: true, status: 'ready' };
+                    }
+                    const profile = config.profiles.find((item) => item.profileId === profileId);
+                    return { profileId, displayName: profile?.displayName ?? 'Perfil sin conexión', local: false, status: 'ready' };
+                };
+                setAssistantRoute(resolveRoute(config.assignments.assistantChat));
+                setSearchSynthesisRoute(resolveRoute(config.assignments.searchSynthesis));
+            } catch {
+                if (!mounted) return;
+                setAssistantRoute({ profileId: '', displayName: '', local: false, status: 'error' });
+                setSearchSynthesisRoute({ profileId: '', displayName: '', local: false, status: 'error' });
+            }
+        };
+        const onProviderChanged = () => {
+            if (mounted) {
+                setAssistantRoute((current) => ({ ...current, status: 'loading' }));
+                setSearchSynthesisRoute((current) => ({ ...current, status: 'loading' }));
+            }
+            void loadRoutes();
+        };
+        void loadRoutes();
+        window.addEventListener('pulsaria-ai-provider-changed', onProviderChanged);
+        return () => {
+            mounted = false;
+            window.removeEventListener('pulsaria-ai-provider-changed', onProviderChanged);
+        };
+    }, [nativeShell]);
 
         useEffect(() => {
         (async () => {
@@ -326,9 +380,10 @@ export default function Page() {
         setAiAnswer(null);
         setAiError(null);
         setLastSearchQuery('');
-        setGeminiAnswer(null);
-        setGeminiError(null);
-        setGeminiLoading(false);
+        setSearchSynthesisAnswer(null);
+        setSearchSynthesisError(null);
+        setSearchSynthesisLoading(false);
+        setAiSynthesisLoading(false);
     }, []);
 
     const handleSourceCollectionSelect = useCallback((collection: SourceCollectionRecord | null) => {
@@ -348,9 +403,10 @@ export default function Page() {
         setAiAnswer(null);
         setAiError(null);
         setLastSearchQuery('');
-        setGeminiAnswer(null);
-        setGeminiError(null);
-        setGeminiLoading(false);
+        setSearchSynthesisAnswer(null);
+        setSearchSynthesisError(null);
+        setSearchSynthesisLoading(false);
+        setAiSynthesisLoading(false);
     }, []);
 
     const handleProfileSelect = useCallback((profile: import('@/lib/profile-source').ProfileSource | null, channelKind: string = 'all') => {
@@ -359,7 +415,7 @@ export default function Page() {
         setSelectedProfileChannel(channelKind);
     }, [handleSourceCollectionSelect]);
 
-    const isSearchView = isSearching || searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null || geminiAnswer !== null || geminiError !== null;
+    const isSearchView = isSearching || searchResults !== null || searchError !== null || aiAnswer !== null || aiError !== null || searchSynthesisAnswer !== null || searchSynthesisError !== null;
     // Cinema se puede abrir desde la biblioteca, pero no desde una vista de
     // búsqueda. La lista ya incluye fichas online/no disponibles, así que no
     // depende de que la conversión de cada asset local haya terminado.
@@ -493,11 +549,6 @@ export default function Page() {
     }, []);
 
     const applyAiResponse = (answer: string) => {
-        if (answer.startsWith('No fue posible consultar el modelo local:')) {
-            setAiAnswer(null);
-            setAiError(answer);
-            return;
-        }
         setAiError(null);
         setAiAnswer(answer);
     };
@@ -512,8 +563,9 @@ export default function Page() {
             setAiAnswer(null);
             setAiError(null);
             setLastSearchQuery('');
-            setGeminiAnswer(null);
-            setGeminiError(null);
+            setSearchSynthesisAnswer(null);
+            setSearchSynthesisError(null);
+            setAiSynthesisLoading(false);
             setIsSearching(false);
             setSearchStartTime(null);
             return;
@@ -523,9 +575,11 @@ export default function Page() {
         setSearchError(null);
         setAiAnswer(null);
         setAiError(null);
+        setAiSynthesisLoading(false);
         setLastSearchQuery(normalizedQuery);
-        setGeminiAnswer(null);
-        setGeminiError(null);
+        setSearchSynthesisAnswer(null);
+        setSearchSynthesisError(null);
+        setSearchSynthesisLoading(false);
 
         try {
             const request: UnifiedSearchRequest = {
@@ -562,14 +616,16 @@ export default function Page() {
             setSearchModeUsed(normalizedResponse.mode);
 
             const results = normalizedResponse.results;
-            const synthesisContext = results.slice(0, 5).map((result) => (
+            const synthesisContext = filteredResults.slice(0, 5).map((result) => (
                 `Título: ${result.title || `Video #${result.jobId}`}\nContenido del fragmento: ${result.primaryMoment.excerpt}`
             ));
-            generateChatResponse(normalizedQuery, synthesisContext).then((answer) => {
-                if (requestId === searchRequestRef.current) applyAiResponse(answer);
-            }).catch((error) => {
-                if (requestId === searchRequestRef.current) setAiError(String(error));
-            });
+            if (assistantRoute.status === 'ready' && assistantRoute.local) {
+                generateChatResponse(normalizedQuery, synthesisContext, settings.analysisDepth, assistantRoute.profileId).then((answer) => {
+                    if (requestId === searchRequestRef.current) applyAiResponse(answer);
+                }).catch((error) => {
+                    if (requestId === searchRequestRef.current) setAiError(error instanceof Error ? error.message : String(error));
+                });
+            }
 
             if (results.length > 0) {
                 const degraded = !normalizedResponse.capabilities.vector && normalizedResponse.mode !== 'exact';
@@ -601,23 +657,41 @@ export default function Page() {
         }
     };
 
-    const handleGeminiSynthesis = useCallback(async () => {
-        if (!lastSearchQuery || geminiLoading) return;
-        setGeminiLoading(true);
-        setGeminiAnswer(null);
-        setGeminiError(null);
+    const handleAssistantSearchSynthesis = async () => {
+        if (!lastSearchQuery || aiSynthesisLoading || assistantRoute.status !== 'ready' || assistantRoute.local) return;
+        setAiSynthesisLoading(true);
+        setAiAnswer(null);
+        setAiError(null);
         try {
             const context = (searchResults ?? []).slice(0, 5).map((result) => (
                 `Título: ${result.title || `Video #${result.jobId}`}\nContenido del fragmento: ${result.primaryMoment.excerpt}`
             ));
-            const answer = await generateGeminiChatResponse(lastSearchQuery, context);
-            setGeminiAnswer(answer);
+            const answer = await generateChatResponse(lastSearchQuery, context, settings.analysisDepth, assistantRoute.profileId);
+            applyAiResponse(answer);
         } catch (error) {
-            setGeminiError(error instanceof Error ? error.message : String(error));
+            setAiError(error instanceof Error ? error.message : String(error));
         } finally {
-            setGeminiLoading(false);
+            setAiSynthesisLoading(false);
         }
-    }, [geminiLoading, lastSearchQuery, searchResults]);
+    };
+
+    const handleSearchSynthesis = useCallback(async () => {
+        if (!lastSearchQuery || searchSynthesisLoading || searchSynthesisRoute.status !== 'ready') return;
+        setSearchSynthesisLoading(true);
+        setSearchSynthesisAnswer(null);
+        setSearchSynthesisError(null);
+        try {
+            const context = (searchResults ?? []).slice(0, 5).map((result) => (
+                `Título: ${result.title || `Video #${result.jobId}`}\nContenido del fragmento: ${result.primaryMoment.excerpt}`
+            ));
+            const answer = await generateGeminiChatResponse(lastSearchQuery, context, searchSynthesisRoute.profileId);
+            setSearchSynthesisAnswer(answer);
+        } catch (error) {
+            setSearchSynthesisError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setSearchSynthesisLoading(false);
+        }
+    }, [lastSearchQuery, searchResults, searchSynthesisLoading, searchSynthesisRoute.profileId, searchSynthesisRoute.status]);
 
     const handleClearSearch = useCallback(() => {
         searchRequestRef.current += 1;
@@ -629,9 +703,10 @@ export default function Page() {
         setAiAnswer(null);
         setAiError(null);
         setLastSearchQuery('');
-        setGeminiAnswer(null);
-        setGeminiError(null);
-        setGeminiLoading(false);
+        setSearchSynthesisAnswer(null);
+        setSearchSynthesisError(null);
+        setSearchSynthesisLoading(false);
+        setAiSynthesisLoading(false);
         setIsSearching(false);
         setSpotlightQuery('');
         setActiveVideoId(null);
@@ -878,23 +953,39 @@ export default function Page() {
 
                         {searchResults !== null && !searchError && (
                             <section
-                                aria-label="Síntesis opcional con Gemini"
+                                aria-label="Síntesis opcional con el proveedor asignado"
                                 className="flex flex-col gap-3 rounded-[20px] border border-[#4285f4]/25 bg-[#4285f4]/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between"
                             >
                                 <div className="min-w-0">
-                                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#8ab4f8]">Gemini opcional</p>
+                                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#8ab4f8]">
+                                        Síntesis opcional · {searchSynthesisRoute.status === 'ready' ? searchSynthesisRoute.displayName : 'proveedor sin verificar'}
+                                    </p>
                                     <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-white/65">
-                                        Solo se ejecuta cuando lo solicitas. Si lo activas, hasta cinco fragmentos relevantes de esta búsqueda se envían a Google para generar la síntesis y no se guardan localmente como parte de la operación.
+                                        {searchSynthesisRoute.status === 'ready'
+                                            ? `Solo se ejecuta cuando lo solicitas. ${searchSynthesisRoute.local ? 'La consulta y hasta cinco fragmentos se procesan localmente.' : `Al activarla, ${searchSynthesisRoute.displayName} recibe la consulta y hasta cinco fragmentos de esta búsqueda.`} Pulsaria no guarda la solicitud ni la respuesta.`
+                                            : 'Se verificará el perfil asignado antes de habilitar el envío. No se enviará contexto mientras la ruta no esté confirmada.'}
                                     </p>
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={() => void handleGeminiSynthesis()}
-                                    disabled={!nativeShell || geminiLoading || !lastSearchQuery}
-                                    title={nativeShell ? 'Enviar hasta cinco fragmentos relevantes a Gemini' : 'Gemini requiere la aplicación de escritorio'}
+                                    onClick={() => void handleSearchSynthesis()}
+                                    disabled={!nativeShell || searchSynthesisLoading || !lastSearchQuery || searchSynthesisRoute.status !== 'ready'}
+                                    title={searchSynthesisRoute.status === 'ready' ? `Enviar hasta cinco fragmentos a ${searchSynthesisRoute.displayName}` : 'Verifica la conexión en Ajustes → IA'}
                                     className="shrink-0 rounded-xl border border-[#4285f4]/40 bg-[#4285f4]/15 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-[#b9d4ff] transition-colors hover:bg-[#4285f4]/25 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
-                                    {geminiLoading ? 'Generando…' : nativeShell ? 'Sintetizar con Gemini' : 'Solo app de escritorio'}
+                                    {searchSynthesisLoading ? 'Generando…' : nativeShell ? `Sintetizar · ${searchSynthesisRoute.status === 'ready' ? searchSynthesisRoute.displayName : 'verificando'}` : 'Solo app de escritorio'}
+                                </button>
+                            </section>
+                        )}
+
+                        {searchResults !== null && !searchError && assistantRoute.status === 'ready' && !assistantRoute.local && !aiAnswer && (
+                            <section className="flex flex-col gap-3 rounded-[20px] border border-amber-200/15 bg-amber-200/[0.04] p-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="min-w-0">
+                                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-100/80">Asistente de búsqueda · {assistantRoute.displayName}</p>
+                                    <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-white/60">La búsqueda de biblioteca fue local. Para sintetizar con este perfil, al pulsar el botón se enviarán la consulta y hasta cinco fragmentos de resultados.</p>
+                                </div>
+                                <button type="button" onClick={() => void handleAssistantSearchSynthesis()} disabled={aiSynthesisLoading} className="shrink-0 rounded-xl border border-amber-100/20 bg-amber-100/[0.08] px-3 py-2 text-[10px] font-black uppercase tracking-wider text-amber-50/80 transition-colors hover:bg-amber-100/[0.13] disabled:cursor-not-allowed disabled:opacity-40">
+                                    {aiSynthesisLoading ? 'Generando…' : `Sintetizar · ${assistantRoute.displayName}`}
                                 </button>
                             </section>
                         )}
@@ -911,12 +1002,12 @@ export default function Page() {
                                 La síntesis IA no está disponible: {aiError}
                             </div>
                         )}
-                        {geminiError && (
+                        {searchSynthesisError && (
                             <div role="alert" className="p-4 rounded-[20px] border border-[#4285f4]/30 bg-[#4285f4]/10 text-sm text-[#b9d4ff]">
-                                No se pudo completar la síntesis opcional de Gemini: {geminiError}
+                                No se pudo completar la síntesis opcional: {searchSynthesisError}
                             </div>
                         )}
-                        {geminiAnswer && (
+                        {searchSynthesisAnswer && (
                             <div
                                 className="rounded-[20px] border border-[#4285f4]/30 bg-[#101a2b]/85 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.35)]"
                             >
@@ -925,11 +1016,11 @@ export default function Page() {
                                         <FaBrain size={14} />
                                     </div>
                                     <div className="flex flex-col">
-                                        <span className="text-xs font-black uppercase tracking-wider text-white">Síntesis Gemini solicitada</span>
+                                        <span className="text-xs font-black uppercase tracking-wider text-white">Síntesis solicitada · {searchSynthesisRoute.displayName}</span>
                                         <span className="text-[9px] font-mono font-bold text-[#8ab4f8]">Fragmentos enviados bajo acción explícita · no persistidos por Pulsaria</span>
                                     </div>
                                 </div>
-                                <p className="mt-3 pl-1 text-xs font-medium leading-relaxed text-white/90 sm:text-[13px]">{geminiAnswer}</p>
+                                <p className="mt-3 pl-1 text-xs font-medium leading-relaxed text-white/90 sm:text-[13px]">{searchSynthesisAnswer}</p>
                             </div>
                         )}
                         {aiAnswer && (
@@ -952,7 +1043,7 @@ export default function Page() {
                                             Síntesis de Inteligencia Artificial
                                         </span>
                                         <span className="text-[9px] text-[#8a5cff] font-mono font-bold">
-                                            LLM local · los fragmentos no salen del equipo
+                                            {assistantRoute.status === 'ready' && assistantRoute.local ? 'Llama.cpp local · los fragmentos no salen del equipo' : `${assistantRoute.displayName || 'Proveedor asignado'} · ruta de asistente`}
                                         </span>
                                     </div>
                                 </div>
@@ -1269,6 +1360,11 @@ export default function Page() {
                 searchError={searchError}
                 aiAnswer={aiAnswer}
                 aiError={aiError}
+                assistantProviderName={assistantRoute.displayName}
+                assistantRouteLocal={assistantRoute.local}
+                assistantRouteStatus={assistantRoute.status}
+                assistantSynthesisLoading={aiSynthesisLoading}
+                onRequestAssistantSynthesis={() => void handleAssistantSearchSynthesis()}
                 onResultClick={(result) => {
                     setSpotlightOpen(false);
                     handleSearchResultClick(result);
