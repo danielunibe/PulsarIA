@@ -150,10 +150,14 @@ pub struct GeminiEditorialProvider {
 /// Proveedor intercambiable. La variante Gemini delega en el adaptador
 /// nativo existente (clave solo en el proceso Rust, timeout y redacción ya
 /// probados en `infrastructure::gemini`).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum EditorialProvider {
     Mock(MockEditorialProvider),
     Gemini(GeminiEditorialProvider),
+    Configured {
+        config: crate::infrastructure::ai_providers::AiProviderConfig,
+        local_llm: std::sync::Arc<crate::infrastructure::local_llm::LocalLlmManager>,
+    },
 }
 
 impl EditorialProvider {
@@ -165,10 +169,18 @@ impl EditorialProvider {
         Self::Gemini(GeminiEditorialProvider { max_output_tokens })
     }
 
+    pub fn configured(
+        config: crate::infrastructure::ai_providers::AiProviderConfig,
+        local_llm: std::sync::Arc<crate::infrastructure::local_llm::LocalLlmManager>,
+    ) -> Self {
+        Self::Configured { config, local_llm }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Self::Mock(_) => "mock",
             Self::Gemini(_) => "gemini",
+            Self::Configured { .. } => "configured",
         }
     }
 
@@ -185,6 +197,19 @@ impl EditorialProvider {
                 .await
                 .map(|response| response.text)
                 .map_err(|reason| ProviderError::ProviderFailed(reason)),
+            Self::Configured { config, local_llm } => {
+                crate::infrastructure::ai_providers::generate_structured_for_operation(
+                    config,
+                    crate::infrastructure::ai_providers::AiOperation::EditorialCompilation,
+                    &prompt,
+                    max_output_tokens,
+                    None,
+                    local_llm,
+                )
+                .await
+                .map(|response| response.text)
+                .map_err(ProviderError::ProviderFailed)
+            }
         }
     }
 
@@ -201,6 +226,19 @@ impl EditorialProvider {
                 .await
                 .map(|response| response.text)
                 .map_err(|reason| ProviderError::ProviderFailed(reason)),
+            Self::Configured { config, local_llm } => {
+                crate::infrastructure::ai_providers::generate_structured_for_operation(
+                    config,
+                    crate::infrastructure::ai_providers::AiOperation::EditorialCompilation,
+                    &prompt,
+                    max_output_tokens,
+                    None,
+                    local_llm,
+                )
+                .await
+                .map(|response| response.text)
+                .map_err(ProviderError::ProviderFailed)
+            }
         }
     }
 }

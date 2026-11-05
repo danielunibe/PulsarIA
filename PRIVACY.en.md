@@ -45,12 +45,17 @@ The beta may connect to the Internet only to:
 - download the local model when you request a feature that needs it;
 - check or download a GitHub release or update when you request it;
 - access a content URL that you import.
-- perform initial discovery for TikTok profiles you register and check their
-  enabled channels while the source remains active. While Pulsaria is running,
+- query TikTok profiles when you start their first query and check their
+  enabled channels while the source remains active. Adding a profile does not
+  start downloads. After the first query, while Pulsaria is running,
   active sources are checked every 15 minutes by default. New content that
   meets the source rules is added to your local queue for processing. You can
   pause or reactivate each profile in Settings; paused sources are excluded
   from periodic checks.
+- play the online video you open through TikTok's official player. This action
+  connects to TikTok and sends network information such as your IP address and
+  normal browser data. Only the selected player's video is loaded; opening a
+  profile does not download every video for playback.
 - send the fragments you explicitly include in a manual Gemini synthesis
   request to Google, only if you configured a key in the native process.
 

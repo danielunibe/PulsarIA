@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'file-integrity.ps1')
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { $ProjectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path }
 if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { $ArtifactRoot = Join-Path $ProjectRoot 'target-tauri/release/direct-assets' }
 if ($ReleaseVersion -notmatch '^\d+\.\d+\.\d+-(beta|rc)\.\d+$') { throw 'A beta/rc release version is required.' }
@@ -43,13 +44,13 @@ if (@($files | Where-Object { $_.PSIsContainer -or ($requiredNames + 'SHA256SUMS
 }
 foreach ($name in $requiredNames) {
     $filePath = Join-Path $resolvedRoot $name
-    if (-not (Test-Path -LiteralPath $filePath -PathType Leaf) -or (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash -ne $entries[$name]) { throw "Checksum mismatch or missing asset: $name" }
+    if (-not (Test-Path -LiteralPath $filePath -PathType Leaf) -or (Get-PulsariaSha256 -Path $filePath) -ne $entries[$name]) { throw "Checksum mismatch or missing asset: $name" }
 }
 foreach ($file in $materials.files) {
     if ($entries[[string]$file.name] -ne [string]$file.sha256) { throw "Third-party material differs from reviewed source: $($file.name)" }
 }
 foreach ($name in @('LICENSE', 'THIRD_PARTY_NOTICES.md')) {
-    if ((Get-FileHash -LiteralPath (Join-Path $ProjectRoot $name) -Algorithm SHA256).Hash -ne $entries[$name]) { throw "Legal asset differs from approved tagged source: $name" }
+    if ((Get-PulsariaSha256 -Path (Join-Path $ProjectRoot $name)) -ne $entries[$name]) { throw "Legal asset differs from approved tagged source: $name" }
 }
 $provenance = Get-Content -LiteralPath (Join-Path $resolvedRoot 'release-provenance.json') -Raw | ConvertFrom-Json
 if ($provenance.schema_version -ne 1 -or $provenance.tag -ne "v$ReleaseVersion" -or $provenance.version -ne $ReleaseVersion -or $provenance.source_commit -ne $ExpectedCommit -or [string]$provenance.workflow_run_id -ne $ExpectedRunId -or $provenance.automated_installed_smoke -ne 'PASS') {

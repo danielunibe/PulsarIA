@@ -5,8 +5,10 @@ import { createPortal } from 'react-dom';
 import { validateTikTokUrl } from '@/lib/url-validation';
 import type { SubmitLinksResult } from '@/hooks/use-jobs';
 import { TikTokSourcesPanel } from '@/components/TikTokSourcesPanel';
+import type { ProfileSource, ProfileSourceKey } from '@/lib/profile-source';
 import { FaInfo } from '@/components/icon-library';
 import { useI18n } from '@/lib/i18n';
+import { isTauriRuntime } from '@/hooks/use-processing-settings';
 
 interface AddLinksProps {
   onSubmitLinks: (urls: string[]) => Promise<SubmitLinksResult>;
@@ -15,6 +17,8 @@ interface AddLinksProps {
   runtimeReady?: boolean;
   runtimeIssue?: string | null;
   mode?: 'ingest' | 'profiles';
+  onProfileSelect?: (profile: ProfileSource | null, channelKind?: ProfileSourceKey | 'all') => void;
+  selectedProfileId?: number | null;
 }
 
 const STORAGE_KEY = 'pulsaria.consent';
@@ -36,7 +40,7 @@ interface QueueItemState {
 
 const TAB_HELP: Record<'enlace' | 'cuenta' | 'archivo', string> = {
   enlace: 'Aplica para enlaces de TikTok. Pega uno o varios enlaces y Pulsaria los procesará en tu biblioteca.',
-  cuenta: 'Aplica para perfiles de TikTok. Conecta una fuente local para seleccionar el contenido autorizado.',
+  cuenta: 'Agrega un perfil, elige qué fuentes consultar y abre su contenido en la biblioteca.',
   archivo: 'Aplica para archivos TXT o CSV. Usa un enlace por línea o separado por comas.',
 };
 
@@ -69,12 +73,17 @@ export function AddLinks({
   runtimeReady = true,
   runtimeIssue,
   mode = 'ingest',
+  onProfileSelect,
+  selectedProfileId,
 }: AddLinksProps) {
   const profileMode = mode === 'profiles';
   const { t } = useI18n();
   const [mounted, setMounted] = useState(false);
   const [consented, setConsented] = useState<boolean>(false);
   const [gateChecked, setGateChecked] = useState<boolean>(false);
+  const [profileRightsGate, setProfileRightsGate] = useState(false);
+  const [consentError, setConsentError] = useState<string | null>(null);
+  const [savingConsent, setSavingConsent] = useState(false);
   const [activeTab, setActiveTab] = useState<'enlace' | 'cuenta' | 'archivo'>(profileMode ? 'cuenta' : 'enlace');
   const [rows, setRows] = useState<string[]>(['']);
   const [files, setFiles] = useState<StoredFile[]>([]);
@@ -95,18 +104,41 @@ export function AddLinks({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const firstUrlInputRef = useRef<HTMLInputElement>(null);
 
-  // Check stored consent on mount
+  // Native processing consent is authoritative in Rust so IPC and the local
+  // REST gateway cannot be bypassed by editing browser storage.
   useEffect(() => {
     setMounted(true);
-    try {
-      const stored = sessionStorage.getItem(STORAGE_KEY) === '1' || localStorage.getItem(RIGHTS_KEY) !== null;
-      if (stored) {
-        setConsented(true);
-        setGateChecked(true);
+    let active = true;
+    void (async () => {
+      if (isTauriRuntime()) {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const consent = await invoke<{ version: string; acceptedAt: string | null }>('get_content_rights_consent');
+          if (active) {
+            const accepted = consent.version === '1.0' && Boolean(consent.acceptedAt);
+            setConsented(accepted);
+            setGateChecked(accepted);
+          }
+        } catch (cause) {
+          if (active) {
+            setConsentError(cause instanceof Error ? cause.message : String(cause));
+            setConsented(false);
+          }
+        }
+        return;
       }
-    } catch {
-      // ignore
-    }
+
+      try {
+        const stored = sessionStorage.getItem(STORAGE_KEY) === '1' || localStorage.getItem(RIGHTS_KEY) !== null;
+        if (active && stored) {
+          setConsented(true);
+          setGateChecked(true);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -148,19 +180,39 @@ export function AddLinks({
   }, [modalOpen]);
 
   // Handle gate acceptance
-  const handleAcceptConsent = () => {
-    setConsented(true);
-    storeConsent(true);
+  const handleAcceptConsent = async () => {
+    setSavingConsent(true);
+    setConsentError(null);
+    try {
+      if (isTauriRuntime()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('set_content_rights_consent', { accepted: true });
+      }
+      setConsented(true);
+      storeConsent(true);
+    } catch (cause) {
+      setConsentError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSavingConsent(false);
+    }
   };
 
-  // Revoke consent
-  const handleRevokeConsent = () => {
-    setConsented(false);
-    storeConsent(false);
-    setGateChecked(false);
-    setShowQueue(false);
-    setQueueFinished(false);
-    setModalOpen(false);
+  const handleRevokeConsent = async () => {
+    setConsentError(null);
+    try {
+      if (isTauriRuntime()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('set_content_rights_consent', { accepted: false });
+      }
+      setConsented(false);
+      storeConsent(false);
+      setGateChecked(false);
+      setShowQueue(false);
+      setQueueFinished(false);
+      setModalOpen(false);
+    } catch (cause) {
+      setConsentError(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
   // URL inputs operations
@@ -368,7 +420,7 @@ export function AddLinks({
     <div className="pulsaria-ingest">
       <section className="ingest-card" id="card" ref={cardRef}>
         {/* Puerta: consentimiento */}
-        {!consented ? (
+        {!consented && (!profileMode || profileRightsGate) && (
           <section className="view enter" id="gView">
             <div className="brand">
               <span className="mk" />
@@ -418,15 +470,16 @@ export function AddLinks({
             <button
               className="cta"
               id="gateCta"
-              disabled={!gateChecked}
-              onClick={handleAcceptConsent}
+              disabled={!gateChecked || savingConsent}
+              onClick={() => void handleAcceptConsent()}
             >
               <svg viewBox="0 0 24 24">
                 <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
                 <polyline points="9 12 11 14 15 10" />
               </svg>
-              Aceptar y continuar
+              {savingConsent ? 'Guardando…' : 'Aceptar y continuar'}
             </button>
+            {consentError && <p role="alert" className="mt-2 text-xs text-[#fe2c55]">{consentError}</p>}
             <button
               type="button"
               className="plink"
@@ -439,9 +492,11 @@ export function AddLinks({
               Leer la política completa
             </button>
           </section>
-        ) : (
+        )}
+        {(consented || profileMode) && (
           /* Espacio de trabajo */
-          <section className="view enter" id="wView">
+          <section className="view enter" id="wView" hidden={!consented && profileRightsGate}
+            style={!consented && profileRightsGate ? { display: 'none' } : undefined}>
             {!profileMode && (
               <div className="seg seg--binary" id="seg" data-active={activeTab}>
                 <span className="seg-ind" />
@@ -536,7 +591,8 @@ export function AddLinks({
             {/* Panel Perfiles: la clave interna cuenta conserva compatibilidad. */}
             <div className={`${activeTab === 'cuenta' ? 'panel on' : 'panel'} panel-with-info`} id="p-cuenta">
               <ContextInfo text={TAB_HELP.cuenta} className="panel-info" />
-              <TikTokSourcesPanel />
+              <TikTokSourcesPanel onProfileSelect={onProfileSelect} selectedProfileId={selectedProfileId}
+                contentRightsAccepted={consented} onRequestContentRights={() => setProfileRightsGate(true)} />
             </div>
             <div className={`panel ${activeTab === 'archivo' ? 'on' : ''} panel-with-info`} id="p-archivo">
               <ContextInfo text={TAB_HELP.archivo} className="panel-info" />
@@ -666,7 +722,7 @@ export function AddLinks({
               </div>
             )}
             <p className="text-[10px] text-white/30 text-center mt-2.5 px-2 leading-normal">
-              {activeTab === 'cuenta' ? 'Las fuentes conectadas usan tu sesión local de cookies y no inician sesión dentro de Pulsaria · ' : 'Al procesar confirmas tener los derechos correspondientes · '}{' '}
+              {activeTab === 'cuenta' ? 'La consulta usa la sesión del navegador elegida en Ajustes; no inicia sesión dentro de Pulsaria · ' : 'Al procesar confirmas tener los derechos correspondientes · '}{' '}
               <button
                 type="button"
                 onClick={() => {
@@ -763,7 +819,7 @@ export function AddLinks({
                     type="button"
                     className="mbtn danger"
                     id="revokeBtn"
-                    onClick={handleRevokeConsent}
+                    onClick={() => void handleRevokeConsent()}
                   >
                     Revocar consentimiento
                   </button>

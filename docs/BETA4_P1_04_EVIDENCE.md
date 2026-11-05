@@ -1,0 +1,236 @@
+# Pulsaria Beta 4 — evidencia de Gate P1-04
+
+Fecha de corte: 2026-11-01
+Estado: **PARTIAL — permanece en DOING**
+PR: [#3, borrador y abierto](https://github.com/danielunibe/PulsarIA/pull/3)
+
+## Dependencias y alcance
+
+P0-02 quedó cerrado en `6bc9f53fa768fc2cb32aeeb1b4942d4e989a1c7b`; sus
+workflows canonical y runtime bootstrap/manifest terminaron PASS. P1-03 quedó
+cerrado en `0c1fd6225b998486bf5021fd80ecb7f489b8f268`; sus runs exactos son
+[canonical 40854106231](https://github.com/danielunibe/PulsarIA/actions/runs/40854106231)
+y [runtime bootstrap 40854106226](https://github.com/danielunibe/PulsarIA/actions/runs/40854106226),
+ambos PASS. Las seis especificaciones UX-01, AI-02, SYNC-03, QUEUE-04, MEDIA-05
+y SETTINGS-06 siguen como planes en
+[BETA4_KNOWLEDGE_PIPELINE_SPEC.md](./BETA4_KNOWLEDGE_PIPELINE_SPEC.md).
+
+P1-04 reduce las capacidades del WebView, aplica autorización por referencia
+exacta para cada archivo renderizable, restringe la CSP y valida los enlaces y
+orígenes que cruzan la frontera nativa. No rediseña la interfaz ni agrega
+downloader, base de datos, cola o WebView paralelos.
+
+## Hallazgos y controles aplicados
+
+| Superficie | Hallazgo | Control aplicado |
+|---|---|---|
+| Tauri asset protocol | El scope declarativo incluía `$HOME/**` y `$RESOURCE/**`; convertir una ruta con `convertFileSrc` no comprobaba que el archivo estuviera registrado en la biblioteca. | `scope` declarativo vacío. La ruta pasa primero por `authorize_renderable_asset`, que exige una referencia exacta persistida y luego incorpora solo ese archivo existente mediante `allow_file`. |
+| Rutas locales | Una ubicación externa legítima debe funcionar cuando el volumen existe; HOME genérico, archivos ajenos, traversal, UNC, symlinks y reparse points no deben habilitarse. | Allowlist de extensiones de medios/imágenes, ruta absoluta sin `.`/`..`, sin UNC, archivo regular existente, rechazo de componentes symlink/reparse y búsqueda exacta en `media`, `media_artifacts`, outputs video/audio y referencias de evidencia editorial. No se aceptan archivos de texto/exportación. |
+| Shell y enlaces | `shell:allow-open` exponía una ruta de apertura más amplia que los enlaces que la UI necesita. | Se quitó el plugin shell de Tauri/Cargo/npm y la capability. El command nativo `open_external_url` permite HTTPS en hosts oficiales exactos de TikTok o rutas legales enumeradas del repositorio; rechaza credenciales, puertos, lookalikes y documentos GitHub no listados. |
+| CSP | No había políticas distintas para desarrollo y producción. | `csp` y `devCsp` explícitas; sin `*` ni `unsafe-eval`. `frame-src` solo permite `https://www.tiktok.com`; producción no incluye orígenes Next/HMR; desarrollo limita Next/HMR a loopback. Se mantienen como excepciones exactas `picsum.photos`, `images.unsplash.com` e `i.imgur.com`, ya enumerados por `next.config.ts` para imágenes dinámicas de resultado. |
+| Bootstrap Next | El export de producción contiene 2 etiquetas `<script>` inline entre 13 etiquetas de script. La app también genera estilos inline. | Se conserva `'unsafe-inline'` en `script-src`/`style-src` para la salida actual de Next/React; no se habilitó `unsafe-eval`. Sustituirlo por hashes/nonce requiere un contrato de generación verificable que no forme parte de esta corrección. |
+| API local | El API ya se enlazaba a `127.0.0.1`, pero CORS no enumeraba los orígenes nativos de Tauri; el validador de URL de sandbox interpretaba autoridades manualmente. | CORS enumera seis orígenes de desarrollo/Tauri; el bind conserva `127.0.0.1`. Se usa el parser URL para rechazar credenciales, puertos personalizados, sufijos engañosos y espacios exteriores. Continúan el bearer de sesión y el límite de cuerpo de 1 MiB. |
+| Token y reproductor | Los errores de IPC podían dejar detalles de error junto al intento de obtener un token; los mensajes del iframe requieren identidad de contexto además del payload. | El log de token conserva solo un mensaje genérico. El reproductor acepta `postMessage` únicamente del `contentWindow` actual, origen HTTPS oficial y marca/tipo esperado. |
+
+Todos los call sites frontend de `convertFileSrc` usan `lib/authorized-assets.ts`;
+el helper obtiene autorización IPC antes de convertir la ruta. Las rutas de
+salida externa nativas se interceptan y pasan por el allowlist; el fallback web
+usa `noopener,noreferrer`.
+
+## Verificación local
+
+`npm run verify:mvp` terminó **PASS (13/13)** con la CSP final:
+
+- Rust: 312 pasaron, 0 fallaron, 7 ignorados y 2 filtrados en el conjunto
+  principal. Los dos casos de inferencia aislada se omitieron porque
+  `PULSAR_LIVE_MODEL_TEST_DIR` no apuntaba a un fixture temporal aislado.
+- Python: 39 pasaron; el único skip es la certificación live de TikTok sin URL
+  autorizada.
+- Tauri security contracts: 7/7; incluyen CSP, scope, shell, allowlist de
+  enlaces, autorización de archivos, CORS y postMessage.
+- API loopback: PASS; bind `127.0.0.1` únicamente.
+- Runtime: 54/54 archivos verificados. Canonical structure, bundle resources,
+  frontend secrets, release-tool tests y onboarding: PASS.
+- Next.js 16.3.8 export de producción, TypeScript, lint y `cargo fmt --check`:
+  PASS. `git diff --check`: PASS; Git solo avisó que normalizará CRLF en algunos
+  archivos LF cuando los vuelva a escribir.
+- `npm run tauri build -- --bundles nsis` terminó con salida 0 para x64:
+  `target-tauri/release/bundle/nsis/Pulsaria_0.1.0-beta.4_x64-setup.exe`,
+  688,141,033 bytes, SHA-256
+  `FDE2127D8192AE13F9343E172AB7D344E8E0ADCB2AD3758F34B396BCA72CF569`,
+  ProductVersion/FileVersion `0.1.0-beta.4`, Authenticode `NotSigned`. Ese
+  artefacto local fue build-only y no se ejecutó.
+- El commit de workflow `b883ff8b98fbd90e3aeb462eaca30fc79974693c` pasó
+  [canonical CI, run 40952005825](https://github.com/danielunibe/PulsarIA/actions/runs/40952005825)
+  y [runtime bootstrap + smoke instalado, run 40952005843](https://github.com/danielunibe/PulsarIA/actions/runs/40952005843).
+  El segundo generó y probó en `windows-latest` un NSIS efímero Beta 4,
+  SHA-256 `8D1733924A9A7FDCDEE76E754FC9864E53916267215AC2FAE32BAEF4B89B01DF`.
+  `verify:installed` confirmó instalación y desinstalación (códigos 0),
+  manifiesto instalado 54/54, `/health` `ok` para `0.1.0-beta.4` al inicio y
+  después del reinicio, WebView2 con perfil aislado, marcador sintético de datos
+  preservado tras desinstalar, runtime overrides limpios y cleanup correcto.
+  El instalador, `APPDATA`, datos y perfil WebView2 se ubicaron bajo carpetas
+  temporales del runner. No se usó `-RunLive`.
+
+## Verificación anterior del NSIS instalado y WebView
+
+El código `355231fc91ff64fc4ac789a279cb02d76dbd1dda` pasó
+[canonical CI, run 40996169485](https://github.com/danielunibe/PulsarIA/actions/runs/40996169485)
+y [runtime bootstrap + smoke instalado, run
+40996169549](https://github.com/danielunibe/PulsarIA/actions/runs/40996169549).
+El segundo generó en `windows-latest` el NSIS efímero Beta 4 con SHA-256
+`DB94E261E63FDC46853EE3D71DB8A6C51F1FD729A5CCE0A43F0293ACE54421C1`.
+La instalación y desinstalación devolvieron 0; manifest instalado 54/54;
+`/health` `ok` al inicio y tras reiniciar; datos/perfil WebView2 aislados bajo
+TEMP; marker test-owned preservado tras desinstalar; cleanup PASS. El host del
+runner estaba elevado: la instrumentación CDP usó temporalmente `machine-policy`
+y confirmó `policyRestored=true`. No se pasó `-RunLive`.
+
+Resultados observados desde la WebView `http://tauri.localhost` de esa
+instalación:
+
+- CSP: bloqueó script externo (`script-src-elem`), `eval` (`script-src`),
+  conexión externa (`connect-src`) y frame externo (`frame-src`), todos con
+  `disposition=enforce`; el fetch fue rechazado y `window.eval` lanzó
+  `EvalError`.
+- API: obtuvo el bearer por IPC; `GET /api/v1/jobs` devolvió 200 con token y
+  401 sin token.
+- Medio: autorizó la referencia sintética persistida exacta y rechazó una ruta
+  no registrada. El MP4 sintético 64×64 tuvo `readyState=4`, duración 2 s y
+  avanzó a 0.48 s; tras reiniciar, volvió a decodificar con dimensiones 64×64.
+
+El run anterior [40991716168](https://github.com/danielunibe/PulsarIA/actions/runs/40991716168)
+para `84fa65e60ab462a3e446b41d703e4d71dfd96853` no pasó: su probe insertaba un
+script inline temporal que no dejó resultado de `eval` y la aserción lo
+interpretó como permitido. Las comprobaciones de frame, script externo y
+conexión habían pasado; ese intento no llegó a la prueba de token/API/media.
+Se corrigió el harness para que CDP use `allowUnsafeEvalBlockedByCSP: false` y
+pruebe `window.eval` directamente. La prueba positiva y exacta es el run
+40996169549 del SHA `355231fc91ff64fc4ac789a279cb02d76dbd1dda`.
+
+Este smoke demuestra los caminos automatizados con un fixture sintético dentro
+de una instalación efímera. No es aceptación humana de la ventana ni del player
+visual; tampoco ejercita biblioteca real, desconexión física de una unidad,
+TikTok live, búsqueda/transcripción/frames funcionales, apertura de navegador,
+accesibilidad manual ni una instalación Windows limpia destinada a aceptación.
+
+## CI anterior — instalación NSIS y reparación sintética de almacenamiento
+
+El commit `3cf56c0093005f0366680d712d0d2052dab85042` pasó
+[canonical CI, run 41319547431](https://github.com/danielunibe/PulsarIA/actions/runs/41319547431)
+y [runtime bootstrap + smoke instalado, run 41319547533](https://github.com/danielunibe/PulsarIA/actions/runs/41319547533).
+El runner aislado de Windows generó el NSIS Beta 4 con SHA-256
+`DA889B4B6DA07D25E0695EA39B54BF6639D0C208CD8B98D24D171E35D2C6303B`.
+La instalación y desinstalación devolvieron 0, el runtime instalado pasó
+54/54, `/health` respondió `ok` antes y después del reinicio, el medio sintético
+decodificó de nuevo y la limpieza del fixture finalizó sin error.
+
+El smoke movió únicamente su fixture sintético de una carpeta temporal de
+prueba: verificó `local → storage_offline → local`, preservó la referencia y el
+job, reportó 1 ruta de medio inaccesible durante el estado desconectado y 0 al
+reconectar. `interrupted_jobs=0`, `referencePreserved=true`, `cleanup=true` y
+`error=null`. Esto cubre automatizadamente la lógica instalada de recuperación
+con una ruta sintética no disponible; no equivale a retirar/reconectar una
+unidad física ni a aceptación humana. TAURI-03 y P1-04 siguen abiertos hasta
+esa aceptación y el resto de la matriz pendiente.
+
+`npm run verify:frontend-a11y` terminó **PASS** en el HEAD documental
+`5420b636c93adb74ea397e5f18c460e2488fefdf`. El script comprueba contratos
+estáticos (alerta de error, diálogo `aria-modal`, etiqueta accesible de cards,
+estilo de foco visible y excepciones revisadas para `<img>`); no automatiza
+teclado, lector de pantalla, evaluación visual de la ventana instalada ni
+aceptación humana. Por eso TAURI-13 permanece parcial.
+
+## CI exacta más reciente — búsqueda, transcripción y autorización de frames
+
+El commit `8c3b6d9f665374c7ab230793b91b3f79393f8eee` pasó
+[canonical CI, run 41329400762](https://github.com/danielunibe/PulsarIA/actions/runs/41329400762)
+y [runtime bootstrap + smoke NSIS instalado, run
+41329400779](https://github.com/danielunibe/PulsarIA/actions/runs/41329400779).
+El runner Windows aislado generó el NSIS Beta 4 con SHA-256
+`745A7F4179ABF24C17901A51A81E84E3C3779FC850D76E73096EABB6EA1238DC`;
+instalación y desinstalación devolvieron 0, runtime instalado 54/54, `/health`
+respondió `ok` antes y después del reinicio, y `APPDATA`, el perfil WebView2 y
+el fixture quedaron aislados bajo TEMP. La preservación del fixture tras
+desinstalar y la limpieza terminaron PASS. El artefacto temporal es unsigned y
+no es la aceptación del usuario en Windows limpio.
+
+En la WebView `http://tauri.localhost` instalada, el harness verificó CSP en
+modo `enforce` (bloqueo de script externo, `eval`, conexión y frame); obtuvo
+`GET /api/v1/jobs` con 200 usando bearer vía IPC y 401 sin bearer; reprodujo el
+MP4 sintético autorizado y rechazó su copia sin registro. El flujo de ingestión
+de prueba generó 2 segmentos Whisper, 24 frames y 6 artefactos visuales. La UI
+encontró por `search_library` la transcripción y el thumbnail del fixture, pudo
+decodificar el frame exacto autorizado y rechazó el frame copiado no registrado.
+El opener rechazó un URL no aprobado y recibió el URL HTTPS legal exacto. La
+reparación sintética de almacenamiento preservó job/referencia en
+`local → storage_offline → local`, con 1 ruta inaccesible mientras se simuló la
+ausencia y 0 tras restaurarla, sin jobs interrumpidos.
+
+El primer smoke de este harness, run
+[41326559108](https://github.com/danielunibe/PulsarIA/actions/runs/41326559108),
+falló en `GET /api/v1/jobs` porque la fixture de prueba escribió segundos
+fraccionarios en `media.duration`, que ya es `INTEGER` en SQLite y se expone
+como `i32`. El fallo estaba en la preparación del fixture, no en código de
+producto. El seeder ahora persiste `max(1, int(duration))`; el run exacto
+41329400779 pasó sin cambiar esquema, contrato ni comportamiento del producto.
+La ejecución actual no prueba una biblioteca real, interacción visual humana,
+teclado/lector, retirada física de unidad, apertura humana del navegador externo
+ni una sesión live autorizada de TikTok; quedan para la aceptación conjunta.
+
+## Matriz de regresión TAURI-01…13
+
+| Caso | Estado | Evidencia y límite |
+|---|---|---|
+| 01 — Tauri/Next abre | PARCIAL — smoke automatizado | Se instaló y arrancó la app desde NSIS en `windows-latest`; WebView2 aislado y `/health` `ok` antes/después de reiniciar. No hubo revisión humana de ventana, contenido o interacción visual. |
+| 02 — vídeo local autorizado | PASS automatizado sintético | En NSIS temporal, la UI instalada pidió autorización IPC para el archivo sintético persistido; el no registrado fue denegado; MP4 64×64 decodificó y avanzó 0.48 s, también tras reinicio. No cubre interacción visual con una biblioteca real. |
+| 03 — volumen desconectado | PASS automatizado sintético; unidad física pendiente | El NSIS del run 41329400779 conservó referencia/job y observó `local → storage_offline → local` al reubicar un fixture temporal: 1 ruta inaccesible, luego 0; no se retiró/reconectó una unidad real. |
+| 04 — TikTok embed/streaming | PARCIAL | URL/iframe oficial y guardas de mensajes tienen pruebas; no hubo reproducción online live. |
+| 05 — postMessage falso | PASS automatizado | Prueba TypeScript rechaza origen, source y marcador incorrectos. |
+| 06 — archivo no registrado bajo HOME | PASS automatizado | Scope de inicio vacío y prueba SQLite niega path HOME no registrado; queda pendiente probar la denegación desde una WebView instalada. |
+| 07 — UNC, symlink y traversal | PASS automatizado | Tests Rust con rutas sintéticas; Windows creó y rechazó un symlink de prueba. No se accedió a shares reales. |
+| 08 — búsqueda/transcripción/frames locales | PASS automatizado sintético; aceptación visual pendiente | El run 41329400779 produjo 2 segmentos Whisper, 24 frames y 6 artefactos; `search_library` encontró la transcripción y el thumbnail exacto autorizado. El frame copiado sin registro fue rechazado. Falta aceptación visual con biblioteca real. |
+| 09 — CSP bloquea origen ajeno | PASS automatizado en WebView instalada | El run 41329400779 observó `disposition=enforce` para frame (`frame-src`), script externo (`script-src-elem`), `eval` (`script-src`) y conexión (`connect-src`); `eval` lanzó `EvalError`. |
+| 10 — enlaces externos controlados | PASS del dispatch automatizado; confirmación humana pendiente | En el run 41329400779, el opener rechazó un URL no aprobado y recibió el URL HTTPS legal exacto. El harness no inspeccionó visualmente el navegador externo. |
+| 11 — API loopback, token y CORS | PASS automatizado en WebView instalada | Desde `http://tauri.localhost`, el UI obtuvo bearer por IPC; `GET /api/v1/jobs` devolvió 200 con bearer y 401 sin bearer en el run 41329400779. Sigue pendiente interacción humana completa. |
+| 12 — preflight Windows NSIS | PASS automatizado en runner aislado | Para el SHA `8c3b6d9f`, NSIS x64 temporal se instaló/desinstaló en `windows-latest`; hash `745A7F4179ABF24C17901A51A81E84E3C3779FC850D76E73096EABB6EA1238DC`; recursos 54/54, health/restart y cleanup PASS. No certifica firma, revisión visual ni aceptación live. |
+| 13 — idiomas y accesibilidad | PARCIAL | Contrato es-MX/en-US, onboarding y compilación pasan; teclado, lector de pantalla y revisión visual instalada pendientes. |
+
+## Límites, riesgos y rollback
+
+El asset scope dinámico se amplía solo a rutas registradas que pasan los
+validadores y dura lo que dure el proceso Tauri; la revisión del flujo de
+reproducción instalada debe confirmar que el estado `storage_offline` permanece
+intacto. La URL de avatar/portada que entrega TikTok puede usar un CDN externo
+que no se ha observado con datos autorizados; no se añade un dominio genérico
+para cubrirlo. Si el QA autorizado confirma un host legítimo, se debe agregar
+ese origen exacto y una prueba.
+
+La instalación y el arranque solo ocurrieron en el runner efímero aislado de
+GitHub; no se instaló ni lanzó Pulsaria en este equipo. No se leyeron perfiles,
+cookies, credenciales, AppData personal, bibliotecas reales ni modelos locales.
+El commit focal de seguridad `6ff55a0ec7416c1de3656f2a1b69b9d7cdd9ca91` pasó
+canonical y runtime bootstrap/source manifest; el commit de workflow
+`b883ff8b98fbd90e3aeb462eaca30fc79974693c` pasó canonical y el nuevo smoke
+instalado:
+
+- [canonical del código focal, run 40946292035](https://github.com/danielunibe/PulsarIA/actions/runs/40946292035)
+- [runtime bootstrap/source manifest del código focal, run 40946292008](https://github.com/danielunibe/PulsarIA/actions/runs/40946292008)
+- [canonical del workflow de smoke, run 40952005825](https://github.com/danielunibe/PulsarIA/actions/runs/40952005825)
+- [runtime bootstrap y smoke instalado, run 40952005843](https://github.com/danielunibe/PulsarIA/actions/runs/40952005843)
+
+P1-04 permanece en DOING hasta la aceptación humana/funcional instalada y la
+matriz pendiente: TAURI-01 visual/interacción humana, TAURI-03 volumen físico,
+TAURI-04 TikTok live, TAURI-08 aceptación visual con biblioteca real, TAURI-10
+confirmación humana del navegador externo y TAURI-13 accesibilidad manual. La
+build exacta del run 41329400779 se instaló en `windows-latest` efímero; la
+aceptación instalada conjunta sigue pendiente. PR #3 sigue abierto y draft. No
+se hizo merge, tag, release ni publicación.
+
+Rollback focal de seguridad: `git revert 6ff55a0ec7416c1de3656f2a1b69b9d7cdd9ca91`.
+Si se decide retirar la instrumentación del smoke, revertir los commits en orden
+inverso: `355231fc91ff64fc4ac789a279cb02d76dbd1dda`,
+`84fa65e60ab462a3e446b41d703e4d71dfd96853`,
+`319c0c5c9de4355c456c6ed8ac70d5a70d02935c` y
+`b883ff8b98fbd90e3aeb462eaca30fc79974693c`. Son referencias para rollback,
+no una acción ejecutada; sin reset ni force-push.

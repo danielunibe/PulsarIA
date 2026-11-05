@@ -356,18 +356,19 @@ def extract_playlist_entries(url: str, playlist_end: int = 200) -> list[dict]:
         "--quiet",
         "--no-warnings",
         "--flat-playlist",
-        "--playlist-end", str(max(1, min(1000, playlist_end))),
         "--dump-json",
         "--no-download",
-        url
     ]
+    if playlist_end != 0:
+        cmd += ["--playlist-end", str(max(1, min(1000, playlist_end)))]
+    cmd.append(url)
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             check=True,
-            timeout=60,
+            timeout=300 if playlist_end == 0 else 60,
             **hidden_process_kwargs(),
         )
         entries = []
@@ -393,6 +394,7 @@ def extract_playlist_entries(url: str, playlist_end: int = 200) -> list[dict]:
                         "id": str(info.get("id") or "") or None,
                         "upload_date": str(info.get("upload_date") or "") or None,
                         "timestamp": info.get("timestamp"),
+                        "title": info.get("title") or info.get("description"),
                     })
 
         return entries

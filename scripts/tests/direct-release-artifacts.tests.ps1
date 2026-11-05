@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '../file-integrity.ps1')
 $verifier = (Resolve-Path (Join-Path $PSScriptRoot '../verify-direct-release-artifacts.ps1')).Path
 $root = Join-Path $env:TEMP "pulsaria-artifact-unit-$([guid]::NewGuid().ToString('N'))"
 $source = Join-Path $root 'source'
@@ -24,12 +25,12 @@ try {
     '{"version":"0.1.0-beta.3"}' | Set-Content (Join-Path $source 'src-tauri/tauri.conf.json')
     foreach ($name in @("Pulsaria_${version}_x64-setup.exe", 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'third-party-ffmpeg-source.txt')) { "Unit fixture $name" | Set-Content (Join-Path $assets $name) }
     foreach ($name in @('LICENSE', 'THIRD_PARTY_NOTICES.md')) { Copy-Item (Join-Path $assets $name) (Join-Path $source $name) }
-    $materialHash = (Get-FileHash (Join-Path $assets 'third-party-ffmpeg-source.txt')).Hash
+    $materialHash = Get-PulsariaSha256 -Path (Join-Path $assets 'third-party-ffmpeg-source.txt')
     @{ schema_version = 1; review_status = 'reviewed'; files = @(@{ name = 'third-party-ffmpeg-source.txt'; sha256 = $materialHash }) } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $source 'legal/third-party-materials.json')
     @{ spdxVersion = 'SPDX-2.3'; name = "pulsaria-release-$version" } | ConvertTo-Json | Set-Content (Join-Path $assets 'pulsaria-release.spdx.json')
-    $records = @(Get-ChildItem $assets -File | ForEach-Object { @{ name = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash $_.FullName).Hash } })
+    $records = @(Get-ChildItem $assets -File | ForEach-Object { @{ name = $_.Name; bytes = $_.Length; sha256 = Get-PulsariaSha256 -Path $_.FullName } })
     @{ schema_version = 1; tag = "v$version"; version = $version; source_commit = $commit; workflow_run_id = $runId; automated_installed_smoke = 'PASS'; assets = $records } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $assets 'release-provenance.json')
-    @(Get-ChildItem $assets -File | ForEach-Object { "$((Get-FileHash $_.FullName).Hash)  $($_.Name)" }) | Set-Content (Join-Path $assets 'SHA256SUMS.txt')
+    @(Get-ChildItem $assets -File | ForEach-Object { "$(Get-PulsariaSha256 -Path $_.FullName)  $($_.Name)" }) | Set-Content (Join-Path $assets 'SHA256SUMS.txt')
     Verify-Fixture
     Write-Host 'PASS unit fixture: reviewed payload with additional source asset'
     Assert-Rejected { Verify-Fixture -ExpectedSource ('b' * 40) } 'different source commit'

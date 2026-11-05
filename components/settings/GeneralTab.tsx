@@ -4,6 +4,7 @@ import { SectionCard, SectionTitle, THEME_OPTIONS, FORMAT_CATEGORIES } from './t
 import { FaLanguage, FaPalette, FaDownload, FaFolder, FaCheck, FaShieldHalved, FaEye, FaLayerGroup, FaMagnifyingGlass, FaBrain } from '@/components/icon-library';
 import { PagePanel, type PageConfig } from '../PagePanel';
 import type { SearchMode } from '../Header';
+import { openTrustedExternalUrl } from '@/lib/external-links.mjs';
 
 interface GeneralTabProps {
     locale: 'es-MX' | 'en-US';
@@ -513,6 +514,11 @@ export function GeneralTab({
                             href={locale === 'en-US' ? doc.urlEn : doc.url}
                             target="_blank"
                             rel="noreferrer"
+                            onClick={(event) => {
+                                if (!isTauri) return;
+                                event.preventDefault();
+                                void openTrustedExternalUrl(locale === 'en-US' ? doc.urlEn : doc.url);
+                            }}
                             className="rounded-[10px] bg-white/[0.04] hover:bg-white/[0.08] px-3 py-1.5 text-[10px] font-bold text-[#25f4ee] transition-colors shadow-sm"
                         >
                             {doc.label}
