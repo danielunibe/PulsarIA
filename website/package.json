@@ -1,9 +1,28 @@
 {
-  "name": "pulsaria-website",
-  "version": "0.1.0",
+  "name": "pulsaria-public-website",
+  "version": "1.0.0",
   "private": true,
-  "description": "Static public website for Pulsaria GitHub Pages.",
+  "type": "module",
   "scripts": {
-    "build": "node -e \"const fs=require('fs'); for (const file of ['index.html','downloads.html','privacy.html','terms.html']) { if (!fs.existsSync(file)) throw new Error('Missing website file: '+file); } console.log('Pulsaria website: PASS');\""
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && node scripts/verify-build.mjs",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "motion": "12.23.24",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "three": "0.183.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.1.11",
+    "@types/node": "20.19.17",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@types/three": "0.183.1",
+    "@vitejs/plugin-react": "5.0.4",
+    "tailwindcss": "4.1.11",
+    "typescript": "5.9.3",
+    "vite": "7.1.12"
   }
 }

@@ -205,36 +205,29 @@ pub fn validate_sandbox_url(url: &str) -> Result<(), String> {
     if url.trim().is_empty() {
         return Err("La URL está vacía".to_string());
     }
+    if url.trim() != url {
+        return Err("La URL no puede contener espacios al inicio o al final".to_string());
+    }
     if url.len() > MAX_URL_LENGTH {
         return Err(format!(
             "La URL supera el límite de {} caracteres",
             MAX_URL_LENGTH
         ));
     }
-    let Some((scheme, authority_and_path)) = url.split_once("://") else {
-        return Err("La URL está malformada; usa una URL HTTPS de TikTok".to_string());
-    };
-    if !scheme.eq_ignore_ascii_case("https") {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|_| "La URL está malformada; usa una URL HTTPS de TikTok".to_string())?;
+    if parsed.scheme() != "https" {
         return Err("La URL debe usar HTTPS".to_string());
     }
-
-    let authority = authority_and_path
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or("");
     // Userinfo is not needed for TikTok and can cause credentials to be
     // forwarded to the extractor. Reject it before host classification.
-    if authority.contains('@') {
+    if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err("La URL no puede contener credenciales embebidas".to_string());
     }
-    let host = authority
-        .rsplit('@')
-        .next()
-        .unwrap_or("")
-        .split(':')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    if parsed.port().is_some() {
+        return Err("La URL no puede especificar un puerto personalizado".to_string());
+    }
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
 
     if matches!(host.as_str(), "tiktok.com" | "www.tiktok.com") || host.ends_with(".tiktok.com") {
         Ok(())
@@ -321,6 +314,18 @@ mod tests {
         ));
         assert!(!is_valid_sandbox_url(
             "https://user:password@www.tiktok.com/@creator/video/1"
+        ));
+        assert!(!is_valid_sandbox_url(
+            "https://www.tiktok.com:8443/@creator/video/1"
+        ));
+        assert!(!is_valid_sandbox_url(
+            "https://www.tiktok.com.evil.example/@creator/video/1"
+        ));
+        assert!(!is_valid_sandbox_url(
+            " https://www.tiktok.com/@creator/video/1"
+        ));
+        assert!(!is_valid_sandbox_url(
+            "https://www.tiktok.com./@creator/video/1"
         ));
     }
 

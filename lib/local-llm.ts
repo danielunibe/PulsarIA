@@ -1,3 +1,5 @@
+import { generateConfiguredAi } from '@/lib/ai-providers';
+
 export interface VideoSummary {
   title: string;
   summary: string[];
@@ -32,7 +34,7 @@ function isNativeShell() {
     && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 }
 
-async function callLocalLlm(task: 'summary' | 'chat', context: string, maxOutputTokens: number, analysisDepth: 'standard' | 'deep' = 'standard'): Promise<string> {
+async function callLocalLlm(task: 'summary', context: string, maxOutputTokens: number, analysisDepth: 'standard' | 'deep' = 'standard'): Promise<string> {
   if (!isNativeShell()) {
     throw new Error('La IA local requiere abrir Pulsaria como aplicación de escritorio.');
   }
@@ -111,7 +113,12 @@ ${transcript}
   };
 }
 
-export async function generateChatResponse(query: string, context: string[], analysisDepth: 'standard' | 'deep' = 'standard'): Promise<string> {
+export async function generateChatResponse(
+  query: string,
+  context: string[],
+  analysisDepth: 'standard' | 'deep' = 'standard',
+  expectedProfileId?: string,
+): Promise<string> {
   const normalizedQuery = query.trim();
   if (!normalizedQuery) throw new Error('No se puede responder una consulta vacía.');
   const contextBlock = context.length > 0
@@ -124,9 +131,12 @@ ${contextBlock}
 
 Consulta: ${normalizedQuery}`;
 
-  try {
-    return await callLocalLlm('chat', prompt, analysisDepth === 'deep' ? 1536 : 1024, analysisDepth);
-  } catch (error) {
-    return `No fue posible consultar el modelo local: ${error instanceof Error ? error.message : String(error)}`;
-  }
+  const response = await generateConfiguredAi(
+    'assistant_chat',
+    prompt,
+    analysisDepth === 'deep' ? 1_536 : 1_024,
+    analysisDepth,
+    expectedProfileId,
+  );
+  return response.text;
 }

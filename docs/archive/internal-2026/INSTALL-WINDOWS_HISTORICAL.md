@@ -1,0 +1,105 @@
+﻿# Pulsaria — instalación Windows x64
+
+## Estado del artefacto y contrato runtime
+
+La descarga pública actual es `v0.1.0-eval.3`. `0.1.0-beta.4` está en
+preparación y aún no tiene un instalador público; consulta sus [notas](./BETA4_RELEASE_NOTES.md)
+y [aceptación pendiente](./BETA4_ACCEPTANCE.md). No atribuyas a Beta 4 las pruebas
+de instaladores Eval.3 o de builds locales anteriores.
+
+El instalador de evaluación disponible en GitHub Releases es un artefacto generado desde el checkout verificado. No es una release estable: todavía no tiene certificado Authenticode ni updater público. El nombre, tamaño y SHA-256 de cada artefacto deben conservarse en la evidencia de release.
+
+El contrato reproducible de recursos está en [`src-tauri/resources/runtime-manifest.json`](../src-tauri/resources/runtime-manifest.json). Incluye los hashes de Python embebido, módulos críticos, workers Python, ONNX/MiniLM, Whisper tiny, FFmpeg y FFprobe. El manifest excluye timestamps para que pueda regenerarse y compararse de forma determinista.
+
+Estado actual del checkout: **PASS** para el contrato fuente de recursos: `ffmpeg.exe`, `ffprobe.exe` y `FFMPEG-LICENSE.txt` están presentes y sus hashes se registran en el manifest. El gate no acepta como sustituto un ejecutable instalado en `PATH`, no descarga binarios y no copia ejecutables sin evidencia de redistribución/licencia. El instalador debe reconstruirse después de cualquier cambio en estos recursos; un bundle anterior al manifest se marca como bloqueado por el smoke instalado.
+
+El instalador se configuró para el usuario actual, por lo que la instalación estándar no requiere elevar privilegios. WebView2 se incluye mediante el instalador offline de Tauri: la instalación del bundle no necesita una descarga de Internet ni una dependencia global de Node.js, Rust, Python, FFmpeg o FFprobe. Un bundle válido contiene el frontend, el ejecutable Tauri, Python embebible 3.11.9, workers, Faster-Whisper, CTranslate2, yt-dlp, Pillow, los modelos ONNX/MiniLM, FFmpeg, FFprobe y la evidencia de licencia distribuida junto a ellos.
+
+## Instalación
+
+Ejecuta el archivo `.exe` y conserva la carpeta propuesta por el instalador. Después de terminar, abre **Pulsaria** desde el acceso creado. Cuando el bundle haya pasado el smoke instalado, no será necesario instalar Node.js, Rust, Python, FFmpeg ni FFprobe: los recursos se ejecutarán desde la instalación.
+
+Para verificar el archivo antes de ejecutarlo, abre PowerShell en la carpeta donde se descargó y ejecuta:
+
+```powershell
+Get-FileHash .\Pulsaria_0.1.0_x64-setup.exe -Algorithm SHA256
+```
+
+Para el instalador de evaluación `Pulsaria_0.1.0_x64-setup.exe`, el valor esperado es:
+
+```text
+1ABD7589C2E8943AEFC1AC8484B2133312D54C18F58BA306DC869031FB9551EF
+```
+
+El instalador puede mostrar una advertencia de SmartScreen porque el candidato
+actual todavía no tiene firma Authenticode. Descárgalo únicamente desde la
+release oficial de [Pulsaria en GitHub](https://github.com/danielunibe/PulsarIA/releases)
+y verifica siempre el SHA-256.
+
+## Verificación reproducible de recursos
+
+Desde la raíz del repositorio, antes de construir o distribuir un instalador:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-runtime-manifest.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-runtime-manifest.ps1
+```
+
+El generador escribe el manifest aunque exista un bloqueo para que el diagnóstico quede disponible, pero devuelve código distinto de cero. El verificador también devuelve código distinto de cero si falta un recurso requerido, si cambia su tamaño/hash o si `tauri.conf.json` no empaqueta el manifest. En el checkout actual la verificación fuente devuelve `PASS`; si FFprobe desaparece o cambia, debe devolver `BLOCKED`, nunca ocultar el fallo con el ejecutable del sistema.
+
+Después de construir un bundle, el smoke de instalación comprueba el manifest dentro de `resources/`, además de comprobar que FFmpeg y FFprobe estén instalados junto al ejecutable:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-installed-bundle.ps1 -Configuration debug
+```
+
+Ese smoke se detiene antes de iniciar la aplicación si los recursos no se pueden verificar. La prueba release equivalente debe ejecutarse en un host controlado y no debe reutilizar un perfil productivo.
+
+El MSI se conserva como artefacto secundario y requiere un host con privilegios
+de administrador porque su alcance es `perMachine`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-installed-bundle.ps1 -Bundle msi -Configuration debug
+```
+
+Si Windows devuelve `1603`/`Error 1925`, el resultado es un bloqueo del host
+por elevación, no una instalación validada. El smoke debe repetirse en un
+Windows x64 elevado antes de declarar el MSI aprobado.
+
+## Primer uso
+
+En **Add Links**, pega un enlace de video TikTok autorizado o la fuente de una colección que el usuario pueda consultar. Pulsaria registra el job, expande colecciones cuando la fuente pública lo permite, descarga el material mediante yt-dlp, extrae audio, transcribe con Faster-Whisper, analiza keyframes, genera el instructivo audiovisual, crea embeddings locales y actualiza la biblioteca.
+
+En la cabecera se puede elegir explícitamente **Literal** para buscar palabras presentes en transcript, título o autor, o **Semántica** para buscar conceptos mediante embeddings ONNX/HNSW. Los resultados abren la ficha correcta y permiten consultar transcript, timestamps, instructivo, fuente original y exportación UNIB.
+
+La carpeta de Descargas del usuario es el destino inicial de los medios procesados y puede cambiarse desde **Settings**. En instalaciones nuevas, la base SQLite, configuración, transcripts durables y snapshots se guardan en `%APPDATA%\\Pulsar Eventide`; los recursos de instalación viven bajo la instalación y son de solo lectura. Las instalaciones anteriores que ya tengan `%APPDATA%\\Pulsaria` siguen usando esa carpeta para no ocultar la biblioteca existente. Los jobs configurados como online-only pueden conservar el conocimiento y abrir la fuente original sin mantener el archivo local.
+
+## Cookies y fuentes restringidas
+
+El uso de cookies del navegador es opcional y se selecciona por nombre de navegador en Settings. Pulsaria utiliza esa sesión solo para la operación de descarga y no copia cookies a SQLite ni las persiste como contenido de una fuente. Una cuenta sin acceso, un rate limit o una colección privada puede producir un error visible del job; eso depende del servicio remoto, no del instalador local.
+
+## Diagnóstico local
+
+La aplicación inicia su gateway local en `127.0.0.1:8080`. Si la biblioteca no carga, revisa primero que el proceso de Pulsar esté activo y que `%APPDATA%\\Pulsar Eventide` (o la carpeta legacy `%APPDATA%\\Pulsaria`) sea escribible. Si un job falla, la sección **Queue** conserva el mensaje de error y permite distinguir una falta de acceso remoto, una URL inválida o una dependencia del worker.
+
+El análisis visual base funciona con keyframes y estadísticas Pillow. OCR se marca como opcional cuando Tesseract no está presente; el paquete no presenta esa función como detección general de objetos.
+
+## Desarrollo desde el repositorio
+
+Para ejecutar el árbol fuente se requiere Node.js v20+, npm, Rust, Python 3.10+ y FFmpeg. La secuencia es:
+
+```bash
+npm install
+pip install -r python-workers/requirements.txt
+npm run tauri dev
+```
+
+Para regenerar el instalador:
+
+```bash
+npm run tauri build -- --bundles nsis
+```
+
+La aceptación del instalador Beta 4 está en [BETA4_ACCEPTANCE.md](BETA4_ACCEPTANCE.md).
+Los ciclos de auditoría anteriores están archivados y no certifican este
+artefacto.

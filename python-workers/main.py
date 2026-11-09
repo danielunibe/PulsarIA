@@ -307,7 +307,7 @@ def main() -> None:
             print(json.dumps(scan_tiktok_source(
                 args.profile_url,
                 [str(category) for category in categories],
-                max(1, min(1000, args.limit)),
+                0 if args.limit == 0 else max(1, min(1000, args.limit)),
                 args.from_date or None,
             )), flush=True)
         except Exception as error:

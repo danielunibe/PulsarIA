@@ -46,6 +46,7 @@
     ".next",
     "sdk",
     "src-tauri",
+    "website",
     "scripts",
     "python-workers",
     "semantic/__tests__"

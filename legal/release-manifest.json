@@ -2,7 +2,9 @@
   "product_name": "Pulsaria",
   "public_owner": "Daniel Unibe",
   "legal_contact_email": "danielunibe10@gmail.com",
-  "notice_address": "Daniel Unibe / Pulsaria (atención y notificaciones legales vía canal electrónico oficial del proyecto: danielunibe10@gmail.com)",
+  "notice_city": "Guadalajara, Jalisco, México",
+  "public_contact_review_status": "pending",
+  "public_contact_review_version": "0.1.0-beta.4",
   "source_license": "Pulsaria Source-Visible Beta License",
   "binary_eula": "EULA.es.md",
   "supported_languages": ["es-MX", "en-US"],
@@ -15,6 +17,6 @@
   "llm_model_revision": "91cad51170dc346986eccefdc2dd33a9da36ead9",
   "llm_model_sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
   "llm_model_license": "Apache-2.0",
-  "release_version": "0.1.0-beta.3",
-  "legal_approval": "Aprobado por Daniel Unibe para distribución pública de la versión 0.1.0-beta.3"
+  "release_version": "0.1.0-beta.4",
+  "legal_approval": "Daniel Unibe autorizó preparar el candidato prerelease 0.1.0-beta.4. La validación legal del contacto público y la aceptación del artefacto exacto siguen pendientes."
 }

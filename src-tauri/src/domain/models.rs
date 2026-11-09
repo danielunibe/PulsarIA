@@ -354,6 +354,9 @@ pub struct JobMessage {
     pub job_id: i64,
     pub url: String,
     pub attempt: u32,
+    /// Consent revision under which the user admitted this work. A revocation
+    /// invalidates messages that have not reached a worker yet.
+    pub authorization_epoch: u64,
     pub cookies_browser: Option<String>,
     pub formats: String,
     pub download_dir: String,
@@ -362,6 +365,8 @@ pub struct JobMessage {
     pub whisper_model: String,
     pub whisper_device: String,
     pub whisper_compute_type: String,
+    /// Profile videos share the queue but execute one at a time.
+    pub profile_background: bool,
 }
 
 // ========================================================================

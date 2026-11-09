@@ -10,13 +10,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'file-integrity.ps1')
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 if ($ReleaseTag -notmatch '^v\d+\.\d+\.\d+-(beta|rc)\.\d+$' -or $SourceCommit -notmatch '^[a-f0-9]{40}$' -or $RunId -notmatch '^\d+$') {
     throw 'A versioned prerelease tag, full source commit, and Actions run ID are required.'
 }
 if (Test-Path -LiteralPath $ArtifactRoot) { throw 'Use a fresh staging directory; stale release files are not accepted.' }
-& (Join-Path $PSScriptRoot 'verify-legal-release.ps1') -RequireSbom -SbomPath $SbomPath -MaterialsRoot $MaterialsRoot
-if ($LASTEXITCODE -ne 0) { throw 'Cannot stage release assets with an unresolved legal gate.' }
+# Preserve the candidate before its exact bytes receive public approval. The
+# protected publish job separately enforces the full public contact gate.
+& (Join-Path $PSScriptRoot 'verify-legal-release.ps1') -CandidateOnly -RequireSbom -SbomPath $SbomPath -MaterialsRoot $MaterialsRoot
+if ($LASTEXITCODE -ne 0) { throw 'Cannot stage candidate assets with an unresolved materials gate.' }
 New-Item -ItemType Directory -Path $ArtifactRoot | Out-Null
 $version = $ReleaseTag.Substring(1)
 $inputs = @(
@@ -31,7 +34,7 @@ foreach ($source in $inputs) {
     Copy-Item -LiteralPath $source.Path -Destination (Join-Path $ArtifactRoot $source.Name) -ErrorAction Stop
 }
 $assetRecords = @(Get-ChildItem -LiteralPath $ArtifactRoot -File | Sort-Object Name | ForEach-Object {
-    [ordered]@{ name = $_.Name; bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+    [ordered]@{ name = $_.Name; bytes = $_.Length; sha256 = Get-PulsariaSha256 -Path $_.FullName }
 })
 [ordered]@{
     schema_version = 1
@@ -44,7 +47,7 @@ $assetRecords = @(Get-ChildItem -LiteralPath $ArtifactRoot -File | Sort-Object N
     assets = $assetRecords
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $ArtifactRoot 'release-provenance.json') -Encoding utf8
 $checksums = @(Get-ChildItem -LiteralPath $ArtifactRoot -File | Sort-Object Name | ForEach-Object {
-    "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash )  $($_.Name)"
+    "$(Get-PulsariaSha256 -Path $_.FullName)  $($_.Name)"
 })
 $checksums | Set-Content -LiteralPath (Join-Path $ArtifactRoot 'SHA256SUMS.txt') -Encoding utf8
 & (Join-Path $PSScriptRoot 'verify-direct-release-artifacts.ps1') -ArtifactRoot $ArtifactRoot -ReleaseVersion $version -ExpectedCommit $SourceCommit -ExpectedRunId $RunId

@@ -44,7 +44,7 @@ export const metadata: Metadata = {
         icon: '/pulsaria-icon.png',
     },
     other: {
-        'pulsaria-frontend': 'beta3-canonical',
+        'pulsaria-frontend': 'beta4-candidate',
         'pulsaria-version': process.env.PULSARIA_VERSION ?? 'unknown',
         'pulsaria-runtime-profile': process.env.PULSARIA_RUNTIME_PROFILE ?? 'browser',
     },

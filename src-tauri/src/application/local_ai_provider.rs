@@ -362,6 +362,11 @@ impl MockLocalAiProvider {
 #[derive(Clone)]
 pub enum LocalAiProvider {
     Sidecar(Arc<crate::infrastructure::local_llm::LocalLlmManager>),
+    Configured {
+        manager: Arc<crate::infrastructure::local_llm::LocalLlmManager>,
+        config: crate::infrastructure::ai_providers::AiProviderConfig,
+        operation: crate::infrastructure::ai_providers::AiOperation,
+    },
     Mock(MockLocalAiProvider),
     Routed(Arc<crate::application::routed_execution::RoutedModelExecutor>),
 }
@@ -373,6 +378,18 @@ impl LocalAiProvider {
 
     pub fn sidecar(manager: Arc<crate::infrastructure::local_llm::LocalLlmManager>) -> Self {
         Self::Sidecar(manager)
+    }
+
+    pub fn configured(
+        manager: Arc<crate::infrastructure::local_llm::LocalLlmManager>,
+        config: crate::infrastructure::ai_providers::AiProviderConfig,
+        operation: crate::infrastructure::ai_providers::AiOperation,
+    ) -> Self {
+        Self::Configured {
+            manager,
+            config,
+            operation,
+        }
     }
 
     pub fn routed(
@@ -390,6 +407,11 @@ impl LocalAiProvider {
                 model_revision: "91cad51170dc346986eccefdc2dd33a9da36ead9".to_string(),
                 prompt_version: "1.0".to_string(),
             },
+            Self::Configured {
+                manager,
+                config,
+                operation,
+            } => crate::infrastructure::ai_providers::model_metadata(config, operation, manager),
             Self::Routed(_) => ModelMetadata {
                 model_id: "routed-adaptive-selector".to_string(),
                 model_provider: "capability-router".to_string(),
@@ -481,6 +503,36 @@ impl LocalAiProvider {
                 .map_err(|_| LocalAiError::InferenceTimeout)?;
 
                 let response = execution.map_err(LocalAiError::ExecutionFailed)?;
+                let normalized = normalize_transport_json(&response.text, &prompt.schema_name)?;
+                serde_json::from_value::<T>(normalized).map_err(|e| {
+                    LocalAiError::SchemaValidationFailed(format!(
+                        "JSON does not conform to requested schema '{}': {e}",
+                        prompt.schema_name
+                    ))
+                })
+            }
+            Self::Configured {
+                manager,
+                config,
+                operation,
+            } => {
+                let full_context = format!(
+                    "INSTRUCCIÓN DEL SISTEMA:\n{}\n\nFORMATO OBLIGATORIO:\nGenera exclusivamente JSON válido ajustado al esquema '{}'. No incluyas explicaciones antes ni después del bloque JSON.\n\nEVIDENCIA Y CONTEXTO:\n{}",
+                    prompt.system_instruction,
+                    prompt.schema_name,
+                    prompt.user_context
+                );
+                let response =
+                    crate::infrastructure::ai_providers::generate_structured_for_operation(
+                        config,
+                        operation.clone(),
+                        &full_context,
+                        prompt.max_tokens,
+                        prompt.response_format.clone(),
+                        manager,
+                    )
+                    .await
+                    .map_err(LocalAiError::ExecutionFailed)?;
                 let normalized = normalize_transport_json(&response.text, &prompt.schema_name)?;
                 serde_json::from_value::<T>(normalized).map_err(|e| {
                     LocalAiError::SchemaValidationFailed(format!(

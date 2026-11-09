@@ -28,7 +28,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex as StdMutex};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::Mutex;
@@ -142,6 +142,13 @@ pub fn get_api_session_token(state: State<'_, AppState>) -> String {
 }
 
 #[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let trusted_url = crate::external_links::validate_external_url(&url).map_err(str::to_string)?;
+    tauri_plugin_opener::open_url(trusted_url.as_str(), None::<&str>)
+        .map_err(|_| "No se pudo abrir el enlace externo autorizado.".to_string())
+}
+
+#[tauri::command]
 pub async fn get_local_llm_status(
     state: State<'_, AppState>,
 ) -> Result<crate::infrastructure::local_llm::LocalLlmStatus, String> {
@@ -171,26 +178,184 @@ pub async fn generate_local_response(
     state.local_llm.generate(&app_handle, request).await
 }
 
+#[tauri::command]
+pub fn get_ai_provider_config(
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    crate::infrastructure::ai_providers::view_for_config(
+        &crate::infrastructure::ai_providers::load_config()?,
+    )
+}
+
+#[tauri::command]
+pub fn save_ai_provider_profile(
+    profile: crate::infrastructure::ai_providers::AiProviderProfileInput,
+    api_key: Option<String>,
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    let mut config = crate::infrastructure::ai_providers::load_config()?;
+    let previous_config = config.clone();
+    let profile_id = profile
+        .profile_id
+        .unwrap_or_else(|| format!("provider-{:032x}", rand::random::<u128>()));
+    let saved_profile = crate::infrastructure::ai_providers::AiProviderProfile {
+        profile_id: profile_id.clone(),
+        display_name: profile.display_name.trim().to_string(),
+        provider_kind: profile.provider_kind,
+        base_url: profile.base_url.trim().trim_end_matches('/').to_string(),
+        model_id: profile.model_id.trim().to_string(),
+    };
+    crate::infrastructure::ai_providers::save_profile(&mut config, saved_profile)?;
+    crate::infrastructure::ai_providers::save_config(&config)?;
+    if let Some(api_key) = api_key {
+        if let Err(error) = crate::infrastructure::ai_providers::save_api_key(&profile_id, &api_key)
+        {
+            let _ = crate::infrastructure::ai_providers::save_config(&previous_config);
+            return Err(error);
+        }
+    }
+    crate::infrastructure::ai_providers::view_for_config(&config)
+}
+
+#[tauri::command]
+pub fn remove_ai_provider_profile(
+    profile_id: String,
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    let mut config = crate::infrastructure::ai_providers::load_config()?;
+    crate::infrastructure::ai_providers::delete_profile(&mut config, &profile_id)?;
+    crate::infrastructure::ai_providers::remove_api_key(&profile_id)?;
+    crate::infrastructure::ai_providers::save_config(&config)?;
+    crate::infrastructure::ai_providers::view_for_config(&config)
+}
+
+#[tauri::command]
+pub fn remove_ai_provider_api_key(
+    profile_id: String,
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    if !config
+        .profiles
+        .iter()
+        .any(|profile| profile.profile_id == profile_id)
+    {
+        return Err("No se encontró el perfil del proveedor.".into());
+    }
+    crate::infrastructure::ai_providers::remove_api_key(&profile_id)?;
+    crate::infrastructure::ai_providers::view_for_config(&config)
+}
+
+#[tauri::command]
+pub fn set_ai_operation_provider(
+    operation: crate::infrastructure::ai_providers::AiOperation,
+    profile_id: String,
+) -> Result<crate::infrastructure::ai_providers::AiProviderConfigView, String> {
+    let mut config = crate::infrastructure::ai_providers::load_config()?;
+    crate::infrastructure::ai_providers::set_assignment(&mut config, operation, profile_id)?;
+    crate::infrastructure::ai_providers::save_config(&config)?;
+    crate::infrastructure::ai_providers::view_for_config(&config)
+}
+
+#[tauri::command]
+pub async fn get_ai_provider_models(profile_id: String) -> Result<Vec<String>, String> {
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    let profile = config
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == profile_id)
+        .ok_or_else(|| "No se encontró el perfil del proveedor.".to_string())?;
+    crate::infrastructure::ai_providers::list_models(profile).await
+}
+
+#[tauri::command]
+pub async fn test_ai_provider(
+    profile_id: String,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    if profile_id == crate::infrastructure::ai_providers::LOCAL_PROFILE_ID {
+        let status = state.local_llm.status().await;
+        return Ok(match status.state {
+            crate::infrastructure::local_llm::LocalLlmState::Ready => {
+                format!("Modelo local listo · {}", status.model_id)
+            }
+            _ => "El modelo local todavía no está preparado.".into(),
+        });
+    }
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    let profile = config
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == profile_id)
+        .ok_or_else(|| "No se encontró el perfil del proveedor.".to_string())?;
+    crate::infrastructure::ai_providers::test_profile(profile, &state.local_llm, &app_handle).await
+}
+
+#[tauri::command]
+pub async fn generate_ai_for_operation(
+    request: crate::infrastructure::ai_providers::AiTextRequest,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::infrastructure::ai_providers::AiTextResponse, String> {
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    if request
+        .expected_profile_id
+        .as_deref()
+        .is_some_and(|expected| expected != config.assignments.get(&request.operation))
+    {
+        return Err(
+            "La asignación de IA cambió. Revisa el proveedor mostrado y vuelve a solicitarlo."
+                .into(),
+        );
+    }
+    crate::infrastructure::ai_providers::generate_for_operation(
+        &config,
+        request.operation,
+        &request.prompt,
+        request.max_output_tokens,
+        request.analysis_depth.as_deref(),
+        &state.local_llm,
+        &app_handle,
+    )
+    .await
+}
+
 /// Optional cloud synthesis. The API key is read by the native adapter only;
 /// the frontend receives text or a bounded actionable error, never the key.
 #[tauri::command]
 pub async fn generate_gemini_response(
     prompt: String,
     max_output_tokens: u32,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
-    crate::infrastructure::gemini::generate(&prompt, max_output_tokens)
-        .await
-        .map(|response| response.text)
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    crate::infrastructure::ai_providers::generate_for_operation(
+        &config,
+        crate::infrastructure::ai_providers::AiOperation::SearchSynthesis,
+        &prompt,
+        max_output_tokens,
+        None,
+        &state.local_llm,
+        &app_handle,
+    )
+    .await
+    .map(|response| response.text)
 }
 
 #[tauri::command]
-pub fn get_gemini_status() -> bool {
-    crate::infrastructure::gemini::is_configured()
+pub fn get_gemini_status() -> Result<bool, String> {
+    let config = crate::infrastructure::ai_providers::load_config()?;
+    let Some(profile) = config
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == "gemini")
+    else {
+        return Ok(false);
+    };
+    Ok(crate::infrastructure::ai_providers::api_key_for_profile(profile)?.is_some())
 }
 
 #[tauri::command]
 pub fn set_gemini_api_key(api_key: String) -> Result<(), String> {
-    crate::infrastructure::gemini::set_api_key(&api_key)
+    crate::infrastructure::ai_providers::save_api_key("gemini", &api_key)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -525,10 +690,21 @@ pub struct LegalConsentInput {
     pub locale: String,
 }
 
+/// User acknowledgement of the content-rights gate used by the ingestion UI.
+/// It is stored by the native process so REST and IPC entry points share the
+/// same consent state instead of trusting browser storage.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentRightsConsent {
+    pub version: String,
+    pub accepted_at: Option<String>,
+}
+
 const CURRENT_EULA_VERSION: &str = "0.1";
 const CURRENT_TERMS_VERSION: &str = "0.1";
 const CURRENT_PRIVACY_VERSION: &str = "0.1";
 const CURRENT_CONTENT_POLICY_VERSION: &str = "0.1";
+const CURRENT_CONTENT_RIGHTS_VERSION: &str = "1.0";
 
 const APP_SETTINGS_SCHEMA_VERSION: u32 = 1;
 
@@ -2299,6 +2475,40 @@ pub async fn get_generated_outputs(
     db::get_generated_outputs(&connection, job_id).map_err(|error| error.to_string())
 }
 
+/// Grants the asset protocol access to one exact, persisted media/evidence file.
+/// The database membership check prevents the webview from widening the scope
+/// to arbitrary paths such as other files under `$HOME`.
+#[tauri::command]
+pub fn authorize_renderable_asset(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    if path.len() > 32_768 {
+        return Err("Asset reference is invalid or unavailable".into());
+    }
+    {
+        let connection = state
+            .db
+            .lock()
+            .map_err(|_| "Asset reference is invalid or unavailable".to_string())?;
+        let is_recorded = db::is_renderable_asset_path(&connection, &path)
+            .map_err(|_| "Asset reference is invalid or unavailable".to_string())?;
+        if !is_recorded {
+            return Err("Asset reference is invalid or unavailable".into());
+        }
+    }
+
+    let path = crate::application::asset_scope::validate_renderable_asset_path(
+        std::path::Path::new(&path),
+    )
+    .map_err(|_| "Asset reference is invalid or unavailable".to_string())?;
+    app.asset_protocol_scope()
+        .allow_file(&path)
+        .map_err(|_| "Asset reference is invalid or unavailable".to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub async fn save_video_frame(
     job_id: i64,
@@ -3370,6 +3580,7 @@ pub async fn add_job(
     state: State<'_, AppState>,
     _app_handle: tauri::AppHandle,
 ) -> Result<i64, String> {
+    state.queue.ensure_processing_authorized()?;
     {
         let configured = state.worker_config.read().await.processing.clone();
         let effective = effective_processing_settings(configured.clone())?;
@@ -3611,6 +3822,9 @@ pub struct ConnectTikTokSourceInput {
 pub struct RegisterProfileSourceInput {
     pub profile_url: String,
     pub selected_sources: ProfileSourceSelection,
+    #[serde(default)]
+    pub auto_enqueue: bool,
+    pub history_limit: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3637,6 +3851,7 @@ pub async fn connect_tiktok_source(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<ConnectTikTokSourceResult, String> {
+    state.queue.ensure_processing_authorized()?;
     let browser = state.worker_config.read().await.cookies_browser.clone();
     connect_tiktok_source_service(
         state.db.clone(),
@@ -3655,46 +3870,23 @@ pub async fn connect_tiktok_source(
 pub async fn register_profile_source(
     input: RegisterProfileSourceInput,
     state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
 ) -> Result<RegisterProfileSourceResult, String> {
-    let result = {
-        let connection = state
-            .db
-            .lock()
-            .map_err(|_| "Database mutex poisoned".to_string())?;
-        crate::application::collection_service::register_profile_source(
-            &connection,
-            &input.profile_url,
-            &input.selected_sources,
-        )?
-    };
-
-    // Ensure channels exist in database
-    {
-        if let Ok(connection) = state.db.lock() {
-            let _ = db::ensure_profile_channels(
-                &connection,
-                result.source.id,
-                &result.source.watch_config_json,
-            );
-        }
+    if input.auto_enqueue {
+        state.queue.ensure_processing_authorized()?;
     }
-
-    // Trigger initial discovery in background
-    let discovery_service =
-        crate::application::profile_discovery_service::ProfileDiscoveryService::new(
-            state.db.clone(),
-            state.queue.clone(),
-            app_handle,
-        );
-    let source_id = result.source.id;
-    tokio::spawn(async move {
-        if let Err(err) = discovery_service.discover_profile(source_id, false).await {
-            tracing::warn!("Initial profile discovery error for source {source_id}: {err}");
-        }
-    });
-
-    Ok(result)
+    let browser = state.worker_config.read().await.cookies_browser.clone();
+    let connection = state
+        .db
+        .lock()
+        .map_err(|_| "Database mutex poisoned".to_string())?;
+    crate::application::collection_service::register_profile_source_with_options(
+        &connection,
+        &input.profile_url,
+        &input.selected_sources,
+        input.auto_enqueue,
+        input.history_limit.unwrap_or(0),
+        (!browser.is_empty()).then_some(browser.as_str()),
+    )
 }
 
 #[tauri::command]
@@ -3703,6 +3895,9 @@ pub async fn update_profile_source_settings(
     input: UpdateProfileSourceSettingsInput,
     state: State<'_, AppState>,
 ) -> Result<db::CollectionSourceRecord, String> {
+    if input.auto_enqueue == Some(true) {
+        state.queue.ensure_processing_authorized()?;
+    }
     let connection = state
         .db
         .lock()
@@ -3713,7 +3908,8 @@ pub async fn update_profile_source_settings(
         &input.selected_sources,
         input.auto_enqueue,
     )?;
-    let _ = db::ensure_profile_channels(&connection, source_id, &source.watch_config_json);
+    db::ensure_profile_channels(&connection, source_id, &source.watch_config_json)
+        .map_err(|error| error.to_string())?;
     Ok(source)
 }
 
@@ -3723,6 +3919,9 @@ pub async fn set_profile_auto_enqueue(
     auto_enqueue: bool,
     state: State<'_, AppState>,
 ) -> Result<db::CollectionSourceRecord, String> {
+    if auto_enqueue {
+        state.queue.ensure_processing_authorized()?;
+    }
     let connection = state
         .db
         .lock()
@@ -3847,6 +4046,7 @@ pub async fn sync_collection_source_now(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<crate::application::collection_service::SourceSyncSummary, String> {
+    state.queue.ensure_processing_authorized()?;
     let source_type = {
         let connection = state
             .db
@@ -3866,31 +4066,7 @@ pub async fn sync_collection_source_now(
                 app_handle,
             );
         let report = discovery_service.discover_profile(source_id, true).await?;
-        let mut summary = crate::application::collection_service::SourceSyncSummary {
-            source_id,
-            found_count: report.total_discovered,
-            queued_count: report.total_queued,
-            duplicate_count: report.total_duplicates,
-            ignored_count: 0,
-            error_count: 0,
-            unavailable_categories: Vec::new(),
-            partial: false,
-            message: "Sincronización de perfil completada".into(),
-            categories: std::collections::HashMap::new(),
-        };
-        for ch in report.channels {
-            summary.categories.insert(
-                ch.channel_kind.clone(),
-                crate::application::collection_service::SourceCategorySummary {
-                    available: ch.status != "unsupported" && ch.status != "requires_auth",
-                    enabled: true,
-                    discovered: ch.discovered_count,
-                    queued: ch.queued_count,
-                    state: ch.status,
-                },
-            );
-        }
-        return Ok(summary);
+        return Ok(report.to_sync_summary());
     }
 
     sync_collection_source_by_id(state.db.clone(), state.queue.clone(), source_id, app_handle).await
@@ -4066,8 +4242,7 @@ fn legal_consent_is_current(consent: &LegalConsent) -> bool {
         && consent.content_policy_version == CURRENT_CONTENT_POLICY_VERSION
 }
 
-#[tauri::command]
-pub async fn get_legal_consent() -> Result<LegalConsent, String> {
+fn load_current_legal_consent() -> LegalConsent {
     let path = settings_data_dir().join("legal-consent.json");
     let mut consent = fs::read_to_string(path)
         .ok()
@@ -4076,11 +4251,90 @@ pub async fn get_legal_consent() -> Result<LegalConsent, String> {
     if !legal_consent_is_current(&consent) {
         consent.accepted_at = None;
     }
+    consent
+}
+
+fn default_content_rights_consent() -> ContentRightsConsent {
+    ContentRightsConsent {
+        version: CURRENT_CONTENT_RIGHTS_VERSION.into(),
+        accepted_at: None,
+    }
+}
+
+fn content_rights_consent_is_current(consent: &ContentRightsConsent) -> bool {
+    consent.version == CURRENT_CONTENT_RIGHTS_VERSION && consent.accepted_at.is_some()
+}
+
+fn load_current_content_rights_consent() -> ContentRightsConsent {
+    let path = settings_data_dir().join("content-rights-consent.json");
+    let consent = fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<ContentRightsConsent>(&contents).ok())
+        .unwrap_or_else(default_content_rights_consent);
+    if content_rights_consent_is_current(&consent) {
+        consent
+    } else {
+        default_content_rights_consent()
+    }
+}
+
+pub(crate) fn has_current_processing_consent() -> bool {
+    processing_consent_is_current(
+        &load_current_legal_consent(),
+        &load_current_content_rights_consent(),
+    )
+}
+
+fn processing_consent_is_current(legal: &LegalConsent, rights: &ContentRightsConsent) -> bool {
+    legal_consent_is_current(legal) && content_rights_consent_is_current(rights)
+}
+
+#[tauri::command]
+pub async fn get_legal_consent(state: State<'_, AppState>) -> Result<LegalConsent, String> {
+    let consent = load_current_legal_consent();
+    state
+        .queue
+        .set_processing_authorized(has_current_processing_consent());
     Ok(consent)
 }
 
 #[tauri::command]
-pub async fn save_legal_consent(input: LegalConsentInput) -> Result<LegalConsent, String> {
+pub async fn get_content_rights_consent(
+    state: State<'_, AppState>,
+) -> Result<ContentRightsConsent, String> {
+    let consent = load_current_content_rights_consent();
+    state
+        .queue
+        .set_processing_authorized(has_current_processing_consent());
+    Ok(consent)
+}
+
+#[tauri::command]
+pub async fn set_content_rights_consent(
+    accepted: bool,
+    state: State<'_, AppState>,
+) -> Result<ContentRightsConsent, String> {
+    let consent = ContentRightsConsent {
+        version: CURRENT_CONTENT_RIGHTS_VERSION.into(),
+        accepted_at: accepted.then(|| chrono::Utc::now().to_rfc3339()),
+    };
+    fs::create_dir_all(settings_data_dir()).map_err(|error| error.to_string())?;
+    let serialized = serde_json::to_vec_pretty(&consent).map_err(|error| error.to_string())?;
+    atomic_write(
+        &settings_data_dir().join("content-rights-consent.json"),
+        &serialized,
+    )?;
+    state
+        .queue
+        .set_processing_authorized(has_current_processing_consent());
+    Ok(consent)
+}
+
+#[tauri::command]
+pub async fn save_legal_consent(
+    input: LegalConsentInput,
+    state: State<'_, AppState>,
+) -> Result<LegalConsent, String> {
     if input.eula_version != CURRENT_EULA_VERSION
         || input.terms_version != CURRENT_TERMS_VERSION
         || input.privacy_version != CURRENT_PRIVACY_VERSION
@@ -4103,6 +4357,9 @@ pub async fn save_legal_consent(input: LegalConsentInput) -> Result<LegalConsent
     fs::create_dir_all(settings_data_dir()).map_err(|error| error.to_string())?;
     let serialized = serde_json::to_vec_pretty(&consent).map_err(|error| error.to_string())?;
     atomic_write(&settings_data_dir().join("legal-consent.json"), &serialized)?;
+    state
+        .queue
+        .set_processing_authorized(has_current_processing_consent());
     Ok(consent)
 }
 
@@ -4263,7 +4520,8 @@ pub async fn repair_library(state: State<'_, AppState>) -> Result<db::LibraryRep
             .db
             .lock()
             .map_err(|_| "Database mutex poisoned".to_string())?;
-        let mut report = db::repair_library(&connection).map_err(|error| error.to_string())?;
+        let mut report =
+            db::repair_library(&connection, &root).map_err(|error| error.to_string())?;
         report.storage =
             Some(db::reconcile_storage(&connection, &root).map_err(|error| error.to_string())?);
         report
@@ -4285,6 +4543,7 @@ pub async fn retry_job(
     state: State<'_, AppState>,
     _app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    state.queue.ensure_processing_authorized()?;
     // A failed attempt may still be inside QueueService's exponential
     // backoff. Treat a second click as idempotent instead of resetting the
     // same job while its original retry task is alive.
@@ -4292,7 +4551,7 @@ pub async fn retry_job(
         return Ok(());
     }
 
-    let url = {
+    let (url, resume_attempt) = {
         let db = state
             .db
             .lock()
@@ -4301,21 +4560,44 @@ pub async fn retry_job(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "Trabajo no encontrado".to_string())?;
         let status = job.status.to_lowercase();
-        if !matches!(
-            status.as_str(),
-            "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
-        ) {
+        let explicitly_resumed = matches!(status.as_str(), "queued" | "paused");
+        if !explicitly_resumed
+            && !matches!(
+                status.as_str(),
+                "error" | "error_dlq" | "failed" | "failure" | "cancelled" | "canceled"
+            )
+        {
             return Err("El trabajo todav├¡a no est├í disponible para reintento".to_string());
+        }
+        if explicitly_resumed
+            && !crate::application::queue_service::retry_budget_allows_resume(job.retry_count)
+        {
+            return Err(
+                "El presupuesto de reintentos está agotado; revisa el trabajo antes de reanudarlo."
+                    .to_string(),
+            );
         }
         // Remove only this job's processing directory and stale media paths.
         // A retry starts from a clean pipeline instead of reusing partial files.
         db::cleanup_media_files(&db, job_id, &processing_root())
             .map_err(|error| error.to_string())?;
-        db::reset_job_for_retry(&db, job_id).map_err(|error| error.to_string())?;
-        job.url
+        if explicitly_resumed {
+            db::update_job_status(&db, job_id, "retrying", 0).map_err(|error| error.to_string())?;
+            (job.url, Some(job.retry_count))
+        } else {
+            db::reset_job_for_retry(&db, job_id).map_err(|error| error.to_string())?;
+            (job.url, None)
+        }
     };
 
-    state.queue.dispatch(job_id, url).await?;
+    if let Some(attempt) = resume_attempt {
+        state
+            .queue
+            .dispatch_with_attempt(job_id, url, attempt)
+            .await?;
+    } else {
+        state.queue.dispatch(job_id, url).await?;
+    }
     Ok(())
 }
 
@@ -5689,8 +5971,10 @@ pub async fn compile_magazine_source(
     state: State<'_, AppState>,
 ) -> Result<crate::application::editorial_compiler::CompilationOutcome, String> {
     let max_output_tokens = crate::application::editorial_compiler::DEFAULT_MAX_OUTPUT_TOKENS;
-    let provider =
-        crate::application::editorial_provider::EditorialProvider::gemini(max_output_tokens);
+    let provider = crate::application::editorial_provider::EditorialProvider::configured(
+        crate::infrastructure::ai_providers::load_config()?,
+        state.local_llm.clone(),
+    );
     let params = crate::application::editorial_compiler::CompileParams {
         job_id,
         volume_id,
@@ -5713,8 +5997,10 @@ pub async fn compile_multi_source_editorial(
     state: State<'_, AppState>,
 ) -> Result<crate::application::editorial_compiler::CompilationOutcome, String> {
     let max_output_tokens = crate::application::editorial_compiler::DEFAULT_MAX_OUTPUT_TOKENS;
-    let provider =
-        crate::application::editorial_provider::EditorialProvider::gemini(max_output_tokens);
+    let provider = crate::application::editorial_provider::EditorialProvider::configured(
+        crate::infrastructure::ai_providers::load_config()?,
+        state.local_llm.clone(),
+    );
     let params = crate::application::editorial_compiler::MultiSourceCompileParams {
         job_ids,
         volume_id,
@@ -5777,8 +6063,10 @@ pub async fn retry_magazine_compilation(
     state: State<'_, AppState>,
 ) -> Result<crate::application::editorial_compiler::CompilationOutcome, String> {
     let max_output_tokens = crate::application::editorial_compiler::DEFAULT_MAX_OUTPUT_TOKENS;
-    let provider =
-        crate::application::editorial_provider::EditorialProvider::gemini(max_output_tokens);
+    let provider = crate::application::editorial_provider::EditorialProvider::configured(
+        crate::infrastructure::ai_providers::load_config()?,
+        state.local_llm.clone(),
+    );
     crate::application::editorial_compiler::retry_magazine_compilation(
         &state.db,
         &provider,
@@ -5932,7 +6220,13 @@ pub async fn extract_job_recipe(
     job_id: i64,
     state: State<'_, AppState>,
 ) -> Result<crate::domain::recipe::StructuredRecipe, String> {
-    let model_meta = state.local_llm.model_metadata();
+    let ai_config = crate::infrastructure::ai_providers::load_config()?;
+    let recipe_operation = crate::infrastructure::ai_providers::AiOperation::RecipeExtraction;
+    let model_meta = crate::infrastructure::ai_providers::model_metadata(
+        &ai_config,
+        &recipe_operation,
+        &state.local_llm,
+    );
 
     // 1. Construir paquete de evidencia
     let package = {
@@ -5997,8 +6291,11 @@ pub async fn extract_job_recipe(
 
     // 4. Ejecutar RecipeTransformer con Local AI
     let start_time = std::time::Instant::now();
-    let provider =
-        crate::application::local_ai_provider::LocalAiProvider::Sidecar(state.local_llm.clone());
+    let provider = crate::application::local_ai_provider::LocalAiProvider::configured(
+        state.local_llm.clone(),
+        ai_config,
+        recipe_operation,
+    );
     let transformer = crate::application::transformers::recipe::RecipeTransformer::new();
     let recipe = match transformer.transform(&package, &provider).await {
         Ok(r) => r,
@@ -6324,8 +6621,9 @@ pub async fn get_model_capability_profiles(
 mod unib_tests {
     use super::{
         apply_checkpoint_transition, atomic_write, classify_local_model_error,
-        default_legal_consent, legal_consent_is_current, parse_unib_segments, parse_unib_time,
-        unib_header_value, LocalModelErrorCode,
+        content_rights_consent_is_current, default_content_rights_consent, default_legal_consent,
+        legal_consent_is_current, parse_unib_segments, parse_unib_time,
+        processing_consent_is_current, unib_header_value, LocalModelErrorCode,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -6463,5 +6761,23 @@ mod unib_tests {
         assert!(legal_consent_is_current(&consent));
         consent.privacy_version = "0.2".into();
         assert!(!legal_consent_is_current(&consent));
+    }
+
+    #[test]
+    fn processing_requires_both_current_legal_and_content_rights_consent() {
+        let mut legal = default_legal_consent();
+        let mut rights = default_content_rights_consent();
+        assert!(!processing_consent_is_current(&legal, &rights));
+
+        legal.accepted_at = Some("2026-10-29T00:00:00Z".into());
+        assert!(legal_consent_is_current(&legal));
+        assert!(!processing_consent_is_current(&legal, &rights));
+
+        rights.accepted_at = Some("2026-10-29T00:00:00Z".into());
+        assert!(content_rights_consent_is_current(&rights));
+        assert!(processing_consent_is_current(&legal, &rights));
+
+        rights.version = "0.9".into();
+        assert!(!processing_consent_is_current(&legal, &rights));
     }
 }

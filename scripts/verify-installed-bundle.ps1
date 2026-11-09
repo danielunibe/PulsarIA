@@ -4,6 +4,8 @@ param(
     [string]$Bundle = 'nsis',
     [ValidateSet('debug', 'release')]
     [string]$Configuration = 'debug',
+    [string]$InstallerPath,
+    [ValidatePattern('^$|^[A-Fa-f0-9]{64}$')][string]$ExpectedSha256,
     [switch]$RunLive,
     [string]$ApiToken,
     [string]$TikTokUrl = 'https://www.tiktok.com/@scout2015/video/6718335390845095173',
@@ -18,15 +20,9 @@ $tauriConfigPath = Join-Path $projectRoot 'src-tauri/tauri.conf.json'
 $tauriConfig = Get-Content -LiteralPath $tauriConfigPath -Raw | ConvertFrom-Json
 $expectedVersion = [string]$tauriConfig.version
 $bundleRoot = Join-Path $projectRoot "target-tauri/$Configuration/bundle"
-$bundlePath = if ($Bundle -eq 'nsis') {
-    (Get-ChildItem -LiteralPath (Join-Path $bundleRoot 'nsis') -Filter 'pulsaria_*_x64-setup.exe' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).FullName
-} else {
-    (Get-ChildItem -LiteralPath (Join-Path $bundleRoot 'msi') -Filter 'pulsaria_*_x64_en-US.msi' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).FullName
-}
-
-if ([string]::IsNullOrWhiteSpace($bundlePath) -or -not (Test-Path -LiteralPath $bundlePath -PathType Leaf)) {
-    throw "Bundle not found under $bundleRoot for $Bundle"
-}
+. (Join-Path $PSScriptRoot 'resolve-installed-bundle.ps1')
+$bundlePath = Resolve-InstalledBundlePath -BundleRoot $bundleRoot -ReleaseVersion $expectedVersion -Bundle $Bundle -InstallerPath $InstallerPath -ExpectedSha256 $ExpectedSha256
+Assert-InstallerHostIsIsolated -ProductName ([string]$tauriConfig.productName)
 
 function Get-JobList {
     param([object]$Body)
@@ -105,6 +101,9 @@ $webViewDataDir = Join-Path $appDataRoot 'WebView2UserData'
 $dataDir = Join-Path $appDataRoot 'Pulsar Eventide'
 $preservationMarker = Join-Path $dataDir 'settings\mvp-uninstall-preservation.txt'
 $downloadsDir = Join-Path $env:TEMP "pulsaria-current-bundle-downloads-$tag"
+$externalMediaRoot = Join-Path $env:TEMP "pulsaria-current-bundle-external-media-$tag"
+$disconnectedMediaRoot = Join-Path $env:TEMP "pulsaria-current-bundle-disconnected-media-$tag"
+$externalMediaPath = Join-Path $externalMediaRoot 'synthetic-video.mp4'
 $msiLog = Join-Path $installDir 'msiexec.log'
 $baseUrl = "http://127.0.0.1:$ApiPort"
 
@@ -126,6 +125,30 @@ function Assert-TestWebViewIsolation {
         Start-Sleep -Seconds 1
     }
     throw 'WebView2 did not use the test-owned WEBVIEW2_USER_DATA_FOLDER; refusing to continue with a non-isolated installed smoke.'
+}
+
+function Open-TestWebViewPolicyKey {
+    param([Parameter(Mandatory = $true)][string]$PolicyPath)
+
+    $registryPrefix = 'HKLM:\'
+    if (-not $PolicyPath.StartsWith($registryPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to open a WebView2 test policy outside HKLM: $PolicyPath"
+    }
+
+    $subKeyPath = $PolicyPath.Substring($registryPrefix.Length)
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64
+    )
+    try {
+        $policyKey = $baseKey.OpenSubKey($subKeyPath, $true)
+    } finally {
+        $baseKey.Close()
+    }
+    if ($null -eq $policyKey) {
+        throw "Could not open the writable x64 WebView2 test policy key: $PolicyPath"
+    }
+    return $policyKey
 }
 
 function Stop-TestInstalledApp {
@@ -154,13 +177,152 @@ function Stop-TestInstalledApp {
 
 $envNames = @(
     'PULSAR_DATA_DIR', 'PULSAR_DOWNLOAD_DIR', 'PULSAR_API_PORT', 'PULSAR_API_HOST', 'APPDATA', 'WEBVIEW2_USER_DATA_FOLDER',
+    'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS',
     'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
     'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
     'ONNX_MODEL_DIR', 'TESSERACT_PATH', 'PATH'
 )
 $oldEnvironment = @{}
+$nodePath = (Get-Command node -ErrorAction Stop).Source
 foreach ($name in $envNames) {
     $oldEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+
+$webViewPolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments'
+$webViewUserDataPolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2\UserDataFolder'
+$webViewPolicyValueName = 'Pulsaria.exe'
+$webViewPolicyOriginalValueExisted = $false
+$webViewPolicyOriginalValue = $null
+$webViewPolicyOriginalKind = $null
+$webViewUserDataPolicyOriginalValueExisted = $false
+$webViewUserDataPolicyOriginalValue = $null
+$webViewUserDataPolicyOriginalKind = $null
+$webViewPolicyCreatedPaths = [System.Collections.Generic.List[string]]::new()
+$webViewPolicyConfigured = $false
+$webViewPolicyRestored = $true
+$webViewDebugOverrideMode = 'environment'
+$windowsPrincipal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+$webViewHostIsElevated = $windowsPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+function Set-TestWebViewDebugPolicy {
+    param([Parameter(Mandatory = $true)][string]$Arguments)
+
+    if (-not $script:webViewHostIsElevated) { return }
+
+    foreach ($policyPath in @(
+        'HKLM:\SOFTWARE\Policies',
+        'HKLM:\SOFTWARE\Policies\Microsoft',
+        'HKLM:\SOFTWARE\Policies\Microsoft\Edge',
+        'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2',
+        $script:webViewPolicyPath,
+        $script:webViewUserDataPolicyPath
+    )) {
+        if (-not (Test-Path -LiteralPath $policyPath)) {
+            New-Item -Path $policyPath -Force -ErrorAction Stop | Out-Null
+            [void]$script:webViewPolicyCreatedPaths.Add($policyPath)
+        }
+    }
+
+    $policyKey = $null
+    $userDataPolicyKey = $null
+    try {
+        $policyKey = Open-TestWebViewPolicyKey -PolicyPath $script:webViewPolicyPath
+        $script:webViewPolicyOriginalValueExisted = $policyKey.GetValueNames() -contains $script:webViewPolicyValueName
+        if ($script:webViewPolicyOriginalValueExisted) {
+            $script:webViewPolicyOriginalValue = $policyKey.GetValue(
+                $script:webViewPolicyValueName,
+                $null,
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+            )
+            $script:webViewPolicyOriginalKind = $policyKey.GetValueKind($script:webViewPolicyValueName)
+        }
+        $userDataPolicyKey = Open-TestWebViewPolicyKey -PolicyPath $script:webViewUserDataPolicyPath
+        $script:webViewUserDataPolicyOriginalValueExisted = $userDataPolicyKey.GetValueNames() -contains $script:webViewPolicyValueName
+        if ($script:webViewUserDataPolicyOriginalValueExisted) {
+            $script:webViewUserDataPolicyOriginalValue = $userDataPolicyKey.GetValue(
+                $script:webViewPolicyValueName,
+                $null,
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+            )
+            $script:webViewUserDataPolicyOriginalKind = $userDataPolicyKey.GetValueKind($script:webViewPolicyValueName)
+        }
+        $script:webViewPolicyConfigured = $true
+        $script:webViewPolicyRestored = $false
+        $policyKey.SetValue($script:webViewPolicyValueName, $Arguments, [Microsoft.Win32.RegistryValueKind]::String)
+        $userDataPolicyKey.SetValue(
+            $script:webViewPolicyValueName,
+            $script:webViewDataDir,
+            [Microsoft.Win32.RegistryValueKind]::String
+        )
+        $script:webViewDebugOverrideMode = 'machine-policy'
+    } finally {
+        if ($null -ne $policyKey) { $policyKey.Close() }
+        if ($null -ne $userDataPolicyKey) { $userDataPolicyKey.Close() }
+    }
+}
+
+function Restore-TestWebViewDebugPolicy {
+    $restoreErrors = [System.Collections.Generic.List[string]]::new()
+    foreach ($policyState in @(
+        @{
+            Path = $script:webViewPolicyPath
+            OriginalValueExisted = $script:webViewPolicyOriginalValueExisted
+            OriginalValue = $script:webViewPolicyOriginalValue
+            OriginalKind = $script:webViewPolicyOriginalKind
+        },
+        @{
+            Path = $script:webViewUserDataPolicyPath
+            OriginalValueExisted = $script:webViewUserDataPolicyOriginalValueExisted
+            OriginalValue = $script:webViewUserDataPolicyOriginalValue
+            OriginalKind = $script:webViewUserDataPolicyOriginalKind
+        }
+    )) {
+        if (-not $script:webViewPolicyConfigured -or -not (Test-Path -LiteralPath $policyState.Path)) { continue }
+        $policyKey = $null
+        try {
+            $policyKey = Open-TestWebViewPolicyKey -PolicyPath $policyState.Path
+            if ($policyState.OriginalValueExisted) {
+                $policyKey.SetValue(
+                    $script:webViewPolicyValueName,
+                    $policyState.OriginalValue,
+                    $policyState.OriginalKind
+                )
+            } else {
+                $policyKey.DeleteValue($script:webViewPolicyValueName, $false)
+            }
+        } catch {
+            [void]$restoreErrors.Add("$($policyState.Path): $($_.Exception.Message)")
+        } finally {
+            if ($null -ne $policyKey) { $policyKey.Close() }
+        }
+    }
+
+    for ($index = $script:webViewPolicyCreatedPaths.Count - 1; $index -ge 0; $index--) {
+        $createdPath = $script:webViewPolicyCreatedPaths[$index]
+        if (-not (Test-Path -LiteralPath $createdPath)) { continue }
+        $policyKey = $null
+        try {
+            $policyKey = Get-Item -LiteralPath $createdPath -ErrorAction Stop
+            $isEmpty = $policyKey.ValueCount -eq 0 -and $policyKey.SubKeyCount -eq 0
+        } catch {
+            [void]$restoreErrors.Add("${createdPath}: $($_.Exception.Message)")
+            break
+        } finally {
+            if ($null -ne $policyKey) { $policyKey.Close() }
+        }
+        if (-not $isEmpty) { break }
+        try {
+            Remove-Item -LiteralPath $createdPath -Force -ErrorAction Stop
+        } catch {
+            [void]$restoreErrors.Add("${createdPath}: $($_.Exception.Message)")
+            break
+        }
+    }
+    if ($restoreErrors.Count -gt 0) {
+        $script:webViewPolicyRestored = $false
+        throw ($restoreErrors -join '; ')
+    }
+    $script:webViewPolicyRestored = $true
 }
 
 $appProcess = $null
@@ -192,6 +354,20 @@ $result = [ordered]@{
         usesAppDataFallback = $false
     }
     webView2UserDataFolderIsolated = $false
+    webViewContract = $null
+    webViewRestartContract = $null
+    storageRepairContract = [ordered]@{
+        referenceRelocated = $false
+        localState = $null
+        disconnectedState = $null
+        reconnectedState = $null
+        referencePreserved = $false
+    }
+    webViewDebugging = [ordered]@{
+        hostElevated = $webViewHostIsElevated
+        overrideMode = $null
+        policyRestored = $true
+    }
     userDataPreservedAfterUninstall = $false
     runtimeIsolation = [ordered]@{
         pathCleared = $false
@@ -204,7 +380,7 @@ $result = [ordered]@{
 
 try {
     if ($RunLive) {
-        throw 'RunLive is not a validated acceptance path: the legacy script does not send or refresh process-scoped IPC credentials. Use the installed native UI and docs/BETA3_ACCEPTANCE.md. Offline installation smoke remains available without RunLive.'
+        throw 'RunLive is not a validated acceptance path: the legacy script does not send or refresh process-scoped IPC credentials. Use the installed native UI and docs/BETA4_ACCEPTANCE.md. Offline installation smoke remains available without RunLive.'
     }
     New-Item -ItemType Directory -Path $installDir, $appDataRoot, $downloadsDir, $webViewDataDir -Force | Out-Null
     if ($Bundle -eq 'msi') {
@@ -241,8 +417,11 @@ try {
         throw "Installed $productSlug.exe was not found"
     }
     $result.appPath = $appPath
+    $webViewPolicyValueName = [System.IO.Path]::GetFileName($appPath)
+    $script:webViewPolicyValueName = $webViewPolicyValueName
 
     $installedResourceRoot = Join-Path $installDir 'resources'
+    $pythonPath = Join-Path $installedResourceRoot 'python/python.exe'
     $runtimeManifestPath = Join-Path $installedResourceRoot 'runtime-manifest.json'
     $result.resourceChecks.runtimeManifest = Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf
     $result.resourceChecks.python = Test-Path -LiteralPath (Join-Path $installedResourceRoot 'python/python.exe')
@@ -310,6 +489,17 @@ try {
     [Environment]::SetEnvironmentVariable('PULSAR_API_PORT', "$ApiPort", 'Process')
     [Environment]::SetEnvironmentVariable('PULSAR_API_HOST', '127.0.0.1', 'Process')
     [Environment]::SetEnvironmentVariable('WEBVIEW2_USER_DATA_FOLDER', $webViewDataDir, 'Process')
+    $debugPortListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $debugPortListener.Start()
+    $webViewDebugPort = [int]$debugPortListener.LocalEndpoint.Port
+    $debugPortListener.Stop()
+    [Environment]::SetEnvironmentVariable(
+        'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS',
+        "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$webViewDebugPort",
+        'Process'
+    )
+    Set-TestWebViewDebugPolicy -Arguments "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$webViewDebugPort"
+    $result.webViewDebugging.overrideMode = $webViewDebugOverrideMode
     foreach ($name in @(
         'PULSAR_RUNTIME_ROOT', 'PYTHON_EXE', 'PULSAR_PYTHON_PATH', 'FFMPEG_PATH',
         'FFPROBE_PATH', 'YT_DLP_PATH', 'WHISPER_MODEL_PATH', 'PULSAR_WHISPER_MODEL_DIR',
@@ -345,6 +535,168 @@ try {
     if ([string]$health.version -ne $expectedVersion) {
         throw "Installed health version $($health.version) does not match expected $expectedVersion"
     }
+
+    # Exercise the installed WebView against a synthetic video and a synthetic
+    # SQLite reference. The debug port is loopback-only and exists only in this
+    # isolated runner process; it is never configured in the application.
+    $syntheticMediaPath = Join-Path $downloadsDir "pulsaria-installed-smoke-$tag.mp4"
+    $unregisteredMediaPath = Join-Path $downloadsDir "pulsaria-unregistered-smoke-$tag.mp4"
+    $syntheticSpeechPath = Join-Path $downloadsDir "pulsaria-installed-speech-$tag.wav"
+    $processedContentPath = Join-Path $downloadsDir "pulsaria-installed-content-$tag.json"
+    $syntheticArtifactsDir = Join-Path $downloadsDir ".pulsaria/artifacts"
+    $syntheticTranscriptDir = Join-Path $downloadsDir ".pulsaria/transcripts"
+    $ffmpegPath = Join-Path $installedResourceRoot 'bin/ffmpeg.exe'
+    Add-Type -AssemblyName System.Speech
+    $speechSynthesizer = [System.Speech.Synthesis.SpeechSynthesizer]::new()
+    try {
+        if ($speechSynthesizer.GetInstalledVoices().Count -lt 1) {
+            throw 'The isolated Windows runner has no speech synthesis voice for the synthetic media fixture'
+        }
+        $speechSynthesizer.SetOutputToWaveFile($syntheticSpeechPath)
+        $speechSynthesizer.Speak('Pulsaria synthetic acceptance test. Blue sky over the quiet valley.')
+        $speechSynthesizer.SetOutputToNull()
+    } finally {
+        $speechSynthesizer.Dispose()
+    }
+    if (-not (Test-Path -LiteralPath $syntheticSpeechPath -PathType Leaf) -or (Get-Item -LiteralPath $syntheticSpeechPath).Length -lt 1000) {
+        throw 'Windows speech synthesis did not produce the test-owned audio fixture'
+    }
+    $ffmpegOutput = @(& $ffmpegPath -hide_banner -loglevel error -f lavfi -i 'color=c=red:s=64x64:r=5' -i $syntheticSpeechPath -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 64k -movflags +faststart -y $syntheticMediaPath 2>&1)
+    $ffmpegExitCode = $LASTEXITCODE
+    if ($ffmpegExitCode -ne 0 -or -not (Test-Path -LiteralPath $syntheticMediaPath -PathType Leaf)) {
+        throw "Could not generate the test-owned synthetic MP4 with packaged FFmpeg (exit $ffmpegExitCode): $($ffmpegOutput -join ' ')"
+    }
+    Copy-Item -LiteralPath $syntheticMediaPath -Destination $unregisteredMediaPath
+
+    $seedScript = Join-Path $PSScriptRoot 'tests/seed-installed-media.py'
+    $seedOutput = @(& $pythonPath $seedScript --mode seed --database (Join-Path $dataDir 'library.db') --media-path $syntheticMediaPath 2>&1)
+    $seedExitCode = $LASTEXITCODE
+    if ($seedExitCode -ne 0) {
+        throw "Could not seed the synthetic installed media reference (exit $seedExitCode): $($seedOutput -join ' ')"
+    }
+    $seedResult = ($seedOutput -join "`n") | ConvertFrom-Json
+    if (-not $seedResult.recordedPathMatches -or -not $seedResult.videoExists) {
+        throw 'The isolated installed library did not preserve the synthetic video reference'
+    }
+
+    # Run the packaged FFmpeg, Whisper and visual-analysis modules against the
+    # generated audio/video. These outputs and all model writes are confined to
+    # this test-owned TEMP profile and downloads directory.
+    $processFixtureScript = Join-Path $PSScriptRoot 'tests/process-installed-fixture.py'
+    $whisperModelDir = Join-Path $installedResourceRoot 'assets/models/models--Systran--faster-whisper-tiny/snapshots/d90ca5fe260221311c53c58e660288d3deb8d356'
+    [Environment]::SetEnvironmentVariable('PULSAR_RUNTIME_ROOT', $installedResourceRoot, 'Process')
+    [Environment]::SetEnvironmentVariable('PULSAR_DATA_DIR', $dataDir, 'Process')
+    [Environment]::SetEnvironmentVariable('PULSAR_WHISPER_MODEL_DIR', $whisperModelDir, 'Process')
+    [Environment]::SetEnvironmentVariable('PULSAR_DOWNLOAD_DIR', $downloadsDir, 'Process')
+    try {
+        $processingOutput = @(& $pythonPath $processFixtureScript `
+            --resource-root $installedResourceRoot `
+            --video-path $syntheticMediaPath `
+            --transcript-dir $syntheticTranscriptDir `
+            --artifacts-dir $syntheticArtifactsDir `
+            --job-id ([string]$seedResult.jobId) `
+            --output $processedContentPath 2>&1)
+        $processingExitCode = $LASTEXITCODE
+        if ($processingExitCode -ne 0) {
+            throw "Installed synthetic transcription/frame processing failed (exit $processingExitCode): $($processingOutput -join ' ')"
+        }
+        $result.installedContentProcessing = ($processingOutput -join "`n") | ConvertFrom-Json
+    } finally {
+        foreach ($name in @('PULSAR_RUNTIME_ROOT', 'PULSAR_DATA_DIR', 'PULSAR_WHISPER_MODEL_DIR', 'PULSAR_DOWNLOAD_DIR')) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        }
+    }
+
+    $processedContent = Get-Content -LiteralPath $processedContentPath -Raw | ConvertFrom-Json
+    $keyframeArtifact = @($processedContent.visualAnalysis.artifacts | Where-Object { $_.kind -eq 'keyframe' } | Select-Object -First 1)
+    if ($keyframeArtifact.Count -ne 1 -or -not (Test-Path -LiteralPath $keyframeArtifact[0].path -PathType Leaf)) {
+        throw 'The installed visual-analysis worker did not return a persisted synthetic keyframe'
+    }
+    $syntheticFramePath = [string]$keyframeArtifact[0].path
+    $unregisteredFramePath = Join-Path $downloadsDir "pulsaria-unregistered-frame-$tag.jpg"
+    Copy-Item -LiteralPath $syntheticFramePath -Destination $unregisteredFramePath
+    $indexOutput = @(& $pythonPath $seedScript --mode index-content `
+        --database (Join-Path $dataDir 'library.db') `
+        --job-id ([string]$seedResult.jobId) `
+        --content-json $processedContentPath 2>&1)
+    $indexExitCode = $LASTEXITCODE
+    if ($indexExitCode -ne 0) {
+        throw "Could not persist installed synthetic transcript/keyframes for the UI smoke (exit $indexExitCode): $($indexOutput -join ' ')"
+    }
+    $installedContentIndex = ($indexOutput -join "`n") | ConvertFrom-Json
+    if (-not $installedContentIndex.transcriptPersisted -or $installedContentIndex.keyframeCount -lt 1) {
+        throw 'The isolated installed library did not index the real worker transcript and keyframe'
+    }
+
+    function Invoke-InstalledWebViewSmoke {
+        param(
+            [ValidateSet('initial', 'restart', 'repair')][string]$Phase,
+            [int]$ExpectedInaccessible = -1
+        )
+
+        $smokeScript = Join-Path $PSScriptRoot 'tests/installed-webview-smoke.mjs'
+        if ($Phase -eq 'repair' -and $ExpectedInaccessible -lt 0) {
+            throw 'Repair smoke requires an expected inaccessible media path count'
+        }
+        if ($Phase -ne 'repair' -and $ExpectedInaccessible -ge 0) {
+            throw 'ExpectedInaccessible is only valid for the repair smoke phase'
+        }
+        $smokeArguments = @(
+            $smokeScript,
+            '--phase', $Phase,
+            '--debug-port', "$webViewDebugPort",
+            '--api-port', "$ApiPort",
+            '--media-path', $syntheticMediaPath,
+            '--unregistered-media-path', $unregisteredMediaPath,
+            '--frame-path', $syntheticFramePath,
+            '--unregistered-frame-path', $unregisteredFramePath,
+            '--search-query', [string]$installedContentIndex.searchQuery
+        )
+        if ($Phase -eq 'initial' -and $env:GITHUB_ACTIONS -eq 'true') {
+            $smokeArguments += @('--exercise-external-opener', 'true')
+        }
+        if ($Phase -eq 'repair') {
+            $smokeArguments += @('--expect-inaccessible', "$ExpectedInaccessible")
+        }
+        $smokeOutput = @(& $nodePath @smokeArguments 2>&1)
+        $smokeExitCode = $LASTEXITCODE
+        if ($smokeExitCode -ne 0) {
+            throw "Installed WebView $Phase smoke failed (exit $smokeExitCode): $($smokeOutput -join ' ')"
+        }
+        return (($smokeOutput -join "`n") | ConvertFrom-Json)
+    }
+
+    function Invoke-SyntheticMediaDatabaseCheck {
+        param(
+            [ValidateSet('set-path', 'verify-state')][string]$Mode,
+            [string]$MediaPath,
+            [int64]$JobId,
+            [ValidateSet('local', 'storage_offline')][string]$ExpectedState
+        )
+
+        $seedScript = Join-Path $PSScriptRoot 'tests/seed-installed-media.py'
+        $arguments = @(
+            $seedScript,
+            '--mode', $Mode,
+            '--database', (Join-Path $dataDir 'library.db'),
+            '--media-path', $MediaPath,
+            '--job-id', "$JobId"
+        )
+        if ($Mode -eq 'verify-state') {
+            if ([string]::IsNullOrWhiteSpace($ExpectedState)) {
+                throw 'State verification requires an expected media state'
+            }
+            $arguments += @('--expected-state', $ExpectedState)
+        }
+        $output = @(& $pythonPath @arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            throw "Synthetic installed media $Mode check failed (exit $exitCode): $($output -join ' ')"
+        }
+        return (($output -join "`n") | ConvertFrom-Json)
+    }
+
+    $result.webViewContract = Invoke-InstalledWebViewSmoke -Phase initial
     if ($RunLive) {
         # Protected API routes require the process-scoped JWT delivered to the
         # native frontend through IPC. The offline smoke intentionally does
@@ -455,6 +807,13 @@ try {
     if ([string]$healthAfterRestart.version -ne $expectedVersion) {
         throw "Restart health version $($healthAfterRestart.version) does not match expected $expectedVersion"
     }
+    $result.webViewRestartContract = Invoke-InstalledWebViewSmoke -Phase restart
+    $persistedMediaOutput = @(& $pythonPath $seedScript --mode verify --database (Join-Path $dataDir 'library.db') --media-path $syntheticMediaPath --job-id ([string]$seedResult.jobId) 2>&1)
+    $persistedMediaExitCode = $LASTEXITCODE
+    if ($persistedMediaExitCode -ne 0) {
+        throw "Synthetic media reference did not persist after installed-app restart (exit $persistedMediaExitCode): $($persistedMediaOutput -join ' ')"
+    }
+    $result.syntheticMediaPersistence = ($persistedMediaOutput -join "`n") | ConvertFrom-Json
     if ($RunLive) {
         $restartJobs = Get-JobList (Invoke-RestMethod -Method Get -Uri "$baseUrl/api/v1/jobs" -TimeoutSec 10)
         $restartJob = Find-Job $restartJobs ([int64]$result.ingest.job_id)
@@ -473,6 +832,72 @@ try {
         }
     }
 
+    # Exercise the existing repair_library command with a synthetic reference
+    # outside the configured download root. Moving only this test-owned folder
+    # simulates an unavailable external location without touching user media.
+    New-Item -ItemType Directory -Path $externalMediaRoot -Force | Out-Null
+    Copy-Item -LiteralPath $syntheticMediaPath -Destination $externalMediaPath
+    $relocatedMedia = Invoke-SyntheticMediaDatabaseCheck `
+        -Mode set-path `
+        -MediaPath $externalMediaPath `
+        -JobId ([int64]$seedResult.jobId)
+    if (-not $relocatedMedia.recordedPathMatches -or -not $relocatedMedia.videoExists -or $relocatedMedia.sourceState -ne 'local') {
+        throw 'The isolated installed library did not accept the test-owned external media reference'
+    }
+    $result.storageRepairContract.referenceRelocated = $true
+
+    $localRepair = Invoke-InstalledWebViewSmoke -Phase repair -ExpectedInaccessible 0
+    $localState = Invoke-SyntheticMediaDatabaseCheck `
+        -Mode verify-state `
+        -MediaPath $externalMediaPath `
+        -JobId ([int64]$seedResult.jobId) `
+        -ExpectedState local
+    $result.storageRepairContract.localState = $localState.sourceState
+    if (-not $localState.pathMatches -or -not $localState.videoExists -or $localState.jobStatus -ne 'completed') {
+        throw "repair_library changed the local synthetic media reference or completed job: $($localState | ConvertTo-Json -Compress)"
+    }
+
+    Move-Item -LiteralPath $externalMediaRoot -Destination $disconnectedMediaRoot
+    try {
+        if (Test-Path -LiteralPath $externalMediaPath) {
+            throw 'The simulated external media location remained accessible after isolation'
+        }
+        $offlineRepair = Invoke-InstalledWebViewSmoke -Phase repair -ExpectedInaccessible 1
+        $offlineState = Invoke-SyntheticMediaDatabaseCheck `
+            -Mode verify-state `
+            -MediaPath $externalMediaPath `
+            -JobId ([int64]$seedResult.jobId) `
+            -ExpectedState storage_offline
+        $result.storageRepairContract.disconnectedState = $offlineState.sourceState
+        $result.storageRepairContract.referencePreserved = [bool]$offlineState.pathMatches
+        if (-not $offlineState.pathMatches -or $offlineState.videoExists -or $offlineState.jobStatus -ne 'completed') {
+            throw "repair_library changed the offline synthetic media reference or completed job: $($offlineState | ConvertTo-Json -Compress)"
+        }
+        $result.storageRepairContract.disconnectedReport = $offlineRepair.repair
+    } finally {
+        if (Test-Path -LiteralPath $externalMediaRoot) {
+            throw 'Refusing to overwrite the existing test-owned external media directory during recovery'
+        }
+        if (Test-Path -LiteralPath $disconnectedMediaRoot) {
+            Move-Item -LiteralPath $disconnectedMediaRoot -Destination $externalMediaRoot
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $externalMediaPath -PathType Leaf)) {
+        throw 'The synthetic external media fixture was not restored after the offline repair check'
+    }
+    $reconnectedRepair = Invoke-InstalledWebViewSmoke -Phase repair -ExpectedInaccessible 0
+    $reconnectedState = Invoke-SyntheticMediaDatabaseCheck `
+        -Mode verify-state `
+        -MediaPath $externalMediaPath `
+        -JobId ([int64]$seedResult.jobId) `
+        -ExpectedState local
+    $result.storageRepairContract.reconnectedState = $reconnectedState.sourceState
+    if (-not $reconnectedState.pathMatches -or -not $reconnectedState.videoExists -or $reconnectedState.jobStatus -ne 'completed') {
+        throw "repair_library did not restore the connected synthetic media state: $($reconnectedState | ConvertTo-Json -Compress)"
+    }
+    $result.storageRepairContract.reconnectedReport = $reconnectedRepair.repair
+
     # The uninstaller must remove the application without deleting user data.
     # This marker lives only in the test-owned APPDATA root and is removed by
     # the cleanup block after the preservation assertion.
@@ -482,6 +907,16 @@ try {
     $result.error = $_.Exception.Message
 } finally {
     Stop-TestInstalledApp
+    try {
+        Restore-TestWebViewDebugPolicy
+    } catch {
+        $result.webViewDebugging.policyRestored = $false
+        $script:webViewPolicyRestored = $false
+        if ([string]::IsNullOrWhiteSpace([string]$result.error)) {
+            $result.error = "Could not restore the temporary WebView2 debug policy: $($_.Exception.Message)"
+        }
+    }
+    $result.webViewDebugging.policyRestored = $webViewPolicyRestored
     foreach ($name in $envNames) {
         if ($null -eq $oldEnvironment[$name]) {
             [Environment]::SetEnvironmentVariable($name, $null, 'Process')
@@ -513,7 +948,7 @@ try {
         $uninstallerPath = (Get-ChildItem -LiteralPath $installDir -Filter '*uninstall*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
         if ($uninstallerPath -and (Test-Path -LiteralPath $uninstallerPath -PathType Leaf)) {
         try {
-            $uninstallResult = Start-Process -FilePath $uninstallerPath -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru
+            $uninstallResult = Start-Process -FilePath $uninstallerPath -ArgumentList @('/S', "_?=$installDir") -WindowStyle Hidden -Wait -PassThru
             $result.uninstallExit = $uninstallResult.ExitCode
             $result.userDataPreservedAfterUninstall =
                 $uninstallResult.ExitCode -eq 0 -and
@@ -528,7 +963,7 @@ try {
     }
 
     $clean = $true
-    foreach ($path in @($installDir, $appDataRoot, $downloadsDir)) {
+    foreach ($path in @($installDir, $appDataRoot, $downloadsDir, $externalMediaRoot, $disconnectedMediaRoot)) {
         Assert-OwnedTempPath $path $tag
         if (Test-Path -LiteralPath $path) {
             try {
@@ -552,7 +987,8 @@ $uninstallFailed = $null -eq $result.uninstallExit -or "$($result.uninstallExit)
 $verificationFailed = (-not [string]::IsNullOrWhiteSpace([string]$result.error)) -or
     $installFailed -or
     $uninstallFailed -or -not [bool]$result.userDataPreservedAfterUninstall -or
-    -not [bool]$result.cleanup
+    -not [bool]$result.cleanup -or
+    -not [bool]$result.webViewDebugging.policyRestored
 if ($verificationFailed) {
     exit 1
 }

@@ -17,7 +17,6 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-toggle-maximize",
     "core:window:allow-unmaximize",
-    "shell:allow-open",
     "updater:allow-check",
     "updater:allow-download-and-install"
   ]

@@ -125,7 +125,7 @@ cd python-workers && python -m pytest
 
 - **Archivos de referencia**: Ver `PROJECT_TRUTH.md`; las especificaciones en
   `docs/archive/` son históricas.
-- **Backlog de tareas**: Ver `docs/PULSAR_TASK_BACKLOG.md`
+- **Backlog histórico**: `docs/archive/internal-2026/PULSAR_TASK_BACKLOG.md`
 - **Reportes de sesión**: Crear `docs/SESSION_REPORT_YYYYMMDD.md` después de sesiones significativas
 
 ## Zonas sensibles (requieren cuidado)
